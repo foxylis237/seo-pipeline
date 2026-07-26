@@ -1,0 +1,23 @@
+# Environment
+.env
+
+# Input
+input/*.xlsx
+
+# macOS
+.DS_Store
+
+# Logs
+logs/
+*.log
+
+# Output
+output/
+
+# IDE
+.vscode/
+.idea/
+
+# Build
+bin/
+dist/
