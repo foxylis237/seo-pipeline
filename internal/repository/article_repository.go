@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -133,40 +134,33 @@ func (r *ArticleRepository) Create(
 	return created, nil
 }
 
-// ClaimNextPending атомарно резервирует одну ожидающую статью для обработки.
-func (r *ArticleRepository) ClaimNextPending(
+// GetFirst возвращает только первую статью и её URL конкурента.
+func (r *ArticleRepository) GetFirst(
 	ctx context.Context,
 ) (article.Article, bool, error) {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return article.Article{}, false, fmt.Errorf("начать транзакцию получения статьи: %w", err)
-	}
-	defer func() {
-		_ = tx.Rollback(ctx)
-	}()
-
 	const selectQuery = `
 		SELECT
-			id,
-			external_id,
-			title,
-			status,
-			current_step,
-			error_message,
-			created_at,
-			updated_at
-		FROM articles
-		WHERE status = 'pending'
-		ORDER BY id
-		FOR UPDATE SKIP LOCKED
+			a.id,
+			a.external_id,
+			a.title,
+			COALESCE(i.reference_url, ''),
+			a.status,
+			a.current_step,
+			a.error_message,
+			a.created_at,
+			a.updated_at
+		FROM articles AS a
+		LEFT JOIN article_inputs AS i ON i.article_id = a.id
+		ORDER BY a.id
 		LIMIT 1
 	`
 
 	var claimed article.Article
-	err = tx.QueryRow(ctx, selectQuery).Scan(
+	err := r.pool.QueryRow(ctx, selectQuery).Scan(
 		&claimed.ID,
 		&claimed.ExternalID,
 		&claimed.Title,
+		&claimed.ReferenceURL,
 		&claimed.Status,
 		&claimed.CurrentStep,
 		&claimed.ErrorMessage,
@@ -175,32 +169,67 @@ func (r *ArticleRepository) ClaimNextPending(
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			if err := tx.Commit(ctx); err != nil {
-				return article.Article{}, false, fmt.Errorf("завершить пустую транзакцию получения статьи: %w", err)
-			}
 			return article.Article{}, false, nil
 		}
-		return article.Article{}, false, fmt.Errorf("выбрать ожидающую статью: %w", err)
-	}
-
-	const updateQuery = `
-		UPDATE articles
-		SET
-			status = 'processing',
-			updated_at = NOW()
-		WHERE id = $1
-		RETURNING status, updated_at
-	`
-	if err := tx.QueryRow(ctx, updateQuery, claimed.ID).Scan(
-		&claimed.Status,
-		&claimed.UpdatedAt,
-	); err != nil {
-		return article.Article{}, false, fmt.Errorf("перевести статью в обработку: %w", err)
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return article.Article{}, false, fmt.Errorf("зафиксировать получение статьи: %w", err)
+		return article.Article{}, false, fmt.Errorf("получить первую статью: %w", err)
 	}
 
 	return claimed, true, nil
+}
+
+// SaveCleanedKeywords сохраняет очищенные запросы исследования статьи.
+func (r *ArticleRepository) SaveCleanedKeywords(
+	ctx context.Context,
+	articleID int64,
+	keywords []string,
+) error {
+	encoded, err := json.Marshal(keywords)
+	if err != nil {
+		return fmt.Errorf("закодировать очищенные запросы: %w", err)
+	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("начать транзакцию сохранения исследования: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	const researchQuery = `
+		INSERT INTO article_research (article_id, cleaned_keywords, collected_at)
+		VALUES ($1, $2, NOW())
+		ON CONFLICT (article_id) DO UPDATE
+		SET
+			cleaned_keywords = EXCLUDED.cleaned_keywords,
+			collected_at = NOW()
+	`
+	if _, err := tx.Exec(ctx, researchQuery, articleID, string(encoded)); err != nil {
+		return fmt.Errorf("сохранить очищенные запросы: %w", err)
+	}
+
+	const clearErrorQuery = `
+		UPDATE articles
+		SET error_message = NULL, updated_at = NOW()
+		WHERE id = $1
+	`
+	if _, err := tx.Exec(ctx, clearErrorQuery, articleID); err != nil {
+		return fmt.Errorf("очистить ошибку статьи: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("завершить сохранение исследования: %w", err)
+	}
+	return nil
+}
+
+// SaveError сохраняет последнюю ошибку обработки статьи без смены этапа.
+func (r *ArticleRepository) SaveError(ctx context.Context, articleID int64, processingErr error) error {
+	const query = `
+		UPDATE articles
+		SET error_message = $2, updated_at = NOW()
+		WHERE id = $1
+	`
+	if _, err := r.pool.Exec(ctx, query, articleID, processingErr.Error()); err != nil {
+		return fmt.Errorf("сохранить ошибку статьи: %w", err)
+	}
+	return nil
 }

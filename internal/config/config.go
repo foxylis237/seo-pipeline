@@ -12,6 +12,8 @@ import (
 type Config struct {
 	DatabaseURL   string
 	InputFilePath string
+	LogLevel      string
+	LogFormat     string
 
 	KeysSOEmail    string
 	KeysSOPassword string
@@ -28,6 +30,8 @@ func Load() Config {
 	cfg := Config{
 		DatabaseURL:   os.Getenv("DATABASE_URL"),
 		InputFilePath: os.Getenv("INPUT_FILE_PATH"),
+		LogLevel:      os.Getenv("LOG_LEVEL"),
+		LogFormat:     os.Getenv("LOG_FORMAT"),
 
 		KeysSOEmail:    os.Getenv("KEYS_SO_EMAIL"),
 		KeysSOPassword: os.Getenv("KEYS_SO_PASSWORD"),
@@ -35,6 +39,12 @@ func Load() Config {
 
 	if cfg.InputFilePath == "" {
 		cfg.InputFilePath = "input/input.xlsx"
+	}
+	if cfg.LogLevel == "" {
+		cfg.LogLevel = "info"
+	}
+	if cfg.LogFormat == "" {
+		cfg.LogFormat = "text"
 	}
 
 	return cfg
@@ -52,10 +62,15 @@ func (c Config) ValidateImport() error {
 }
 
 // ValidateRun проверяет настройки текущего этапа run.
-// Keys.so пока не проверяется: интеграция ещё не подключена к команде.
 func (c Config) ValidateRun() error {
 	if c.DatabaseURL == "" {
 		return fmt.Errorf("DATABASE_URL is required")
+	}
+	if c.KeysSOEmail == "" {
+		return fmt.Errorf("KEYS_SO_EMAIL is required")
+	}
+	if c.KeysSOPassword == "" {
+		return fmt.Errorf("KEYS_SO_PASSWORD is required")
 	}
 	return nil
 }

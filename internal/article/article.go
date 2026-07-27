@@ -8,6 +8,7 @@ type Article struct {
 	ID           int64
 	ExternalID   string
 	Title        string
+	ReferenceURL string
 	Status       string
 	CurrentStep  *string
 	ErrorMessage *string

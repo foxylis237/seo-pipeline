@@ -1,5 +1,7 @@
 # Environment
 .env
+data/keysso-storage-state.json
+data/keysso-browser-profile/
 
 # Input
 input/*.xlsx
