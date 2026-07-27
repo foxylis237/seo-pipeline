@@ -6,6 +6,7 @@ import "time"
 // Article представляет статью, сохранённую в PostgreSQL.
 type Article struct {
 	ID           int64
+	ExternalID   string
 	Title        string
 	Status       string
 	CurrentStep  *string

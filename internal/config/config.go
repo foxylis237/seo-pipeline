@@ -10,7 +10,8 @@ import (
 
 // Config содержит настройки приложения.
 type Config struct {
-	DatabaseURL string
+	DatabaseURL   string
+	InputFilePath string
 
 	KeysSOEmail    string
 	KeysSOPassword string
@@ -19,30 +20,42 @@ type Config struct {
 // Load загружает настройки из .env и переменных окружения.
 //
 // Переменные окружения имеют приоритет над значениями из файла .env.
-func Load() (Config, error) {
+func Load() Config {
 	// Загружаем .env для локальной разработки.
 	// Если файла нет, продолжаем работу с системными переменными окружения.
 	_ = godotenv.Load()
 
 	cfg := Config{
-		DatabaseURL: os.Getenv("DATABASE_URL"),
+		DatabaseURL:   os.Getenv("DATABASE_URL"),
+		InputFilePath: os.Getenv("INPUT_FILE_PATH"),
 
 		KeysSOEmail:    os.Getenv("KEYS_SO_EMAIL"),
 		KeysSOPassword: os.Getenv("KEYS_SO_PASSWORD"),
 	}
 
-	// Без строки подключения приложение не сможет работать с PostgreSQL.
-	if cfg.DatabaseURL == "" {
-		return Config{}, fmt.Errorf("DATABASE_URL is required")
+	if cfg.InputFilePath == "" {
+		cfg.InputFilePath = "input/input.xlsx"
 	}
 
-	if cfg.KeysSOEmail == "" {
-		return Config{}, fmt.Errorf("KEYS_SO_EMAIL is required")
-	}
+	return cfg
+}
 
-	if cfg.KeysSOPassword == "" {
-		return Config{}, fmt.Errorf("KEYS_SO_PASSWORD is required")
+// ValidateImport проверяет настройки, необходимые команде import.
+func (c Config) ValidateImport() error {
+	if c.DatabaseURL == "" {
+		return fmt.Errorf("DATABASE_URL is required")
 	}
+	if c.InputFilePath == "" {
+		return fmt.Errorf("INPUT_FILE_PATH is required")
+	}
+	return nil
+}
 
-	return cfg, nil
+// ValidateRun проверяет настройки текущего этапа run.
+// Keys.so пока не проверяется: интеграция ещё не подключена к команде.
+func (c Config) ValidateRun() error {
+	if c.DatabaseURL == "" {
+		return fmt.Errorf("DATABASE_URL is required")
+	}
+	return nil
 }

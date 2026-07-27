@@ -10,7 +10,9 @@ import (
 )
 
 const (
-	loginURL = "https://keys.so/login"
+	loginURL                         = "https://keys.so/login"
+	operationTimeoutMilliseconds     = 30_000
+	longOperationTimeoutMilliseconds = 60_000
 )
 
 // Config содержит настройки интеграции с Keys.so.
@@ -50,10 +52,16 @@ func (s *Service) CollectCleanKeywords(
 	if strings.TrimSpace(referenceURL) == "" {
 		return "", fmt.Errorf("reference URL is empty")
 	}
+	if err := checkContext(ctx, "before starting browser"); err != nil {
+		return "", err
+	}
 
 	if err := s.start(); err != nil {
 		return "", err
 	}
+	defer func() {
+		_ = s.Close()
+	}()
 
 	if err := s.login(ctx); err != nil {
 		return "", err
@@ -74,6 +82,10 @@ func (s *Service) CollectCleanKeywords(
 
 // start запускает Playwright и Chromium.
 func (s *Service) start() error {
+	if err := s.Close(); err != nil {
+		return fmt.Errorf("close previous Keys.so session: %w", err)
+	}
+
 	pw, err := playwright.Run()
 	if err != nil {
 		return fmt.Errorf("start Playwright: %w", err)
@@ -95,7 +107,8 @@ func (s *Service) start() error {
 		return fmt.Errorf("create browser page: %w", err)
 	}
 
-	page.SetDefaultTimeout(30_000)
+	page.SetDefaultTimeout(operationTimeoutMilliseconds)
+	page.SetDefaultNavigationTimeout(operationTimeoutMilliseconds)
 
 	s.pw = pw
 	s.browser = browser
@@ -106,7 +119,7 @@ func (s *Service) start() error {
 
 // login авторизуется в Keys.so.
 func (s *Service) login(ctx context.Context) error {
-	if err := ctx.Err(); err != nil {
+	if err := checkContext(ctx, "before authorization"); err != nil {
 		return err
 	}
 
@@ -118,9 +131,13 @@ func (s *Service) login(ctx context.Context) error {
 	); err != nil {
 		return fmt.Errorf("open Keys.so login page: %w", err)
 	}
+	if err := checkContext(ctx, "after opening Keys.so login page"); err != nil {
+		return err
+	}
 
 	/*
-		Селекторы ниже нужно заменить на реальные селекторы Keys.so.
+		ВНИМАНИЕ: селекторы ниже не подтверждены на реальном Keys.so.
+		Их нужно проверить вручную в авторизованной сессии перед подключением интеграции.
 
 		Пример:
 		emailInput := s.page.Locator(`input[type="email"]`)
@@ -153,6 +170,9 @@ func (s *Service) login(ctx context.Context) error {
 	); err != nil {
 		return fmt.Errorf("wait for Keys.so authorization: %w", err)
 	}
+	if err := checkContext(ctx, "after Keys.so authorization"); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -162,7 +182,7 @@ func (s *Service) collectCompetitorTable(
 	ctx context.Context,
 	referenceURL string,
 ) (string, error) {
-	if err := ctx.Err(); err != nil {
+	if err := checkContext(ctx, "before competitor search"); err != nil {
 		return "", err
 	}
 
@@ -176,14 +196,20 @@ func (s *Service) collectCompetitorTable(
 	if err := searchButton.Click(); err != nil {
 		return "", fmt.Errorf("start competitor search: %w", err)
 	}
+	if err := checkContext(ctx, "after starting competitor search"); err != nil {
+		return "", err
+	}
 
 	table := s.page.Locator(`[data-testid="competitor-keywords-table"]`)
 
 	if err := table.WaitFor(playwright.LocatorWaitForOptions{
 		State:   playwright.WaitForSelectorStateVisible,
-		Timeout: playwright.Float(60_000),
+		Timeout: playwright.Float(longOperationTimeoutMilliseconds),
 	}); err != nil {
 		return "", fmt.Errorf("wait for competitor table: %w", err)
+	}
+	if err := checkContext(ctx, "after waiting for competitor table"); err != nil {
+		return "", err
 	}
 
 	tableText, err := table.InnerText()
@@ -204,7 +230,7 @@ func (s *Service) cleanDuplicates(
 	ctx context.Context,
 	rawTable string,
 ) (string, error) {
-	if err := ctx.Err(); err != nil {
+	if err := checkContext(ctx, "before duplicate cleanup"); err != nil {
 		return "", err
 	}
 
@@ -229,6 +255,9 @@ func (s *Service) cleanDuplicates(
 	if err := cleanupLink.Click(); err != nil {
 		return "", fmt.Errorf("open implicit duplicates cleanup: %w", err)
 	}
+	if err := checkContext(ctx, "after opening duplicate cleanup"); err != nil {
+		return "", err
+	}
 
 	input := s.page.Locator(`[data-testid="duplicates-input"]`)
 	runButton := s.page.Locator(`[data-testid="duplicates-submit"]`)
@@ -240,14 +269,20 @@ func (s *Service) cleanDuplicates(
 	if err := runButton.Click(); err != nil {
 		return "", fmt.Errorf("start duplicate cleanup: %w", err)
 	}
+	if err := checkContext(ctx, "after starting duplicate cleanup"); err != nil {
+		return "", err
+	}
 
 	result := s.page.Locator(`[data-testid="duplicates-first-result"]`)
 
 	if err := result.WaitFor(playwright.LocatorWaitForOptions{
 		State:   playwright.WaitForSelectorStateVisible,
-		Timeout: playwright.Float(60_000),
+		Timeout: playwright.Float(longOperationTimeoutMilliseconds),
 	}); err != nil {
 		return "", fmt.Errorf("wait for duplicate cleanup result: %w", err)
+	}
+	if err := checkContext(ctx, "after waiting for duplicate cleanup result"); err != nil {
+		return "", err
 	}
 
 	resultText, err := result.InnerText()
@@ -271,15 +306,25 @@ func (s *Service) Close() error {
 		if err := s.browser.Close(); err != nil {
 			closeErr = fmt.Errorf("close browser: %w", err)
 		}
+		s.browser = nil
+		s.page = nil
 	}
 
 	if s.pw != nil {
 		if err := s.pw.Stop(); err != nil && closeErr == nil {
 			closeErr = fmt.Errorf("stop Playwright: %w", err)
 		}
+		s.pw = nil
 	}
 
 	return closeErr
+}
+
+func checkContext(ctx context.Context, stage string) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("Keys.so %s: %w", stage, err)
+	}
+	return nil
 }
 
 // Wait оставляет окно открытым на время отладки.

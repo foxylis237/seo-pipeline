@@ -14,13 +14,25 @@ func runPipeline(
 	cfg config.Config,
 	logger *slog.Logger,
 ) error {
-	// Пока параметры понадобятся на следующем этапе,
-	// когда подключим получение статьи из БД и Keys.so.
-	_ = ctx
-	_ = articleRepository
+	// Keys.so будет подключён после ручной проверки реальных селекторов.
 	_ = cfg
 
 	logger.Info("запуск обработки статей из PostgreSQL")
+	claimed, found, err := articleRepository.ClaimNextPending(ctx)
+	if err != nil {
+		return err
+	}
+	if !found {
+		logger.Info("нет статей, ожидающих обработки")
+		return nil
+	}
+
+	logger.Info(
+		"статья получена для обработки",
+		"article_id", claimed.ID,
+		"external_id", claimed.ExternalID,
+		"title", claimed.Title,
+	)
 
 	return nil
 }

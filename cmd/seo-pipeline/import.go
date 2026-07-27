@@ -9,11 +9,10 @@ import (
 	"github.com/foxylis237/seo-pipeline/internal/repository"
 )
 
-const inputFilePath = "input/input.xlsx"
-
 func runImport(
 	ctx context.Context,
 	articleRepository *repository.ArticleRepository,
+	inputFilePath string,
 	logger *slog.Logger,
 ) error {
 	articles, err := importer.ReadArticles(inputFilePath)
