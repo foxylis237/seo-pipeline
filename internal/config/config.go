@@ -14,8 +14,11 @@ import (
 type Config struct {
 	DatabaseURL   string
 	InputFilePath string
+	OutputDir     string
 	LogLevel      string
 	LogFormat     string
+	GeminiAPIKey  string
+	GeminiModel   string
 
 	KeysSOEmail      string
 	KeysSOPassword   string
@@ -48,8 +51,11 @@ func Load() (Config, error) {
 	cfg := Config{
 		DatabaseURL:   os.Getenv("DATABASE_URL"),
 		InputFilePath: os.Getenv("INPUT_FILE_PATH"),
+		OutputDir:     os.Getenv("OUTPUT_DIR"),
 		LogLevel:      os.Getenv("LOG_LEVEL"),
 		LogFormat:     os.Getenv("LOG_FORMAT"),
+		GeminiAPIKey:  os.Getenv("GEMINI_API_KEY"),
+		GeminiModel:   os.Getenv("GEMINI_MODEL"),
 
 		KeysSOEmail:      os.Getenv("KEYS_SO_EMAIL"),
 		KeysSOPassword:   os.Getenv("KEYS_SO_PASSWORD"),
@@ -60,6 +66,9 @@ func Load() (Config, error) {
 
 	if cfg.InputFilePath == "" {
 		cfg.InputFilePath = "input/input.xlsx"
+	}
+	if cfg.OutputDir == "" {
+		cfg.OutputDir = "output"
 	}
 	if cfg.LogLevel == "" {
 		cfg.LogLevel = "info"
@@ -130,6 +139,20 @@ func (c Config) ValidateReset() error {
 	return nil
 }
 
+// ValidateGenerate checks settings required only by local LLM stages.
+func (c Config) ValidateGenerate() error {
+	if c.DatabaseURL == "" {
+		return fmt.Errorf("DATABASE_URL is required")
+	}
+	if c.GeminiAPIKey == "" {
+		return fmt.Errorf("GEMINI_API_KEY is required")
+	}
+	if c.GeminiModel == "" {
+		return fmt.Errorf("GEMINI_MODEL is required")
+	}
+	return nil
+}
+
 // ValidateRun проверяет настройки текущего этапа run.
 func (c Config) ValidateRun() error {
 	if c.DatabaseURL == "" {
@@ -146,6 +169,12 @@ func (c Config) ValidateRun() error {
 	}
 	if c.ArsenkinPassword == "" {
 		return fmt.Errorf("ARSENKIN_PASSWORD is required")
+	}
+	if c.GeminiAPIKey == "" {
+		return fmt.Errorf("GEMINI_API_KEY is required")
+	}
+	if c.GeminiModel == "" {
+		return fmt.Errorf("GEMINI_MODEL is required")
 	}
 	return nil
 }

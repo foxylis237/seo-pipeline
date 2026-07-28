@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -59,7 +60,7 @@ func TestArticleRepositoryIdempotency(t *testing.T) {
 	assertCount(t, pool, "article_research", fmt.Sprintf("article_id = %d", first.ID), 1)
 	assertCleanedKeywords(t, pool, first.ID, []string{"новый запрос"})
 
-	arsenkinArticle, err := repository.Create(ctx, article.Input{ExcelID: 12, Title: "Arsenkin"})
+	arsenkinArticle, err := repository.Create(ctx, article.Input{ExcelID: 12, Title: "Arsenkin", ImageSlug: "arsenkin"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,6 +76,13 @@ func TestArticleRepositoryIdempotency(t *testing.T) {
 	}
 	assertCount(t, pool, "article_research", fmt.Sprintf("article_id = %d", arsenkinArticle.ID), 1)
 	assertArsenkinResult(t, pool, arsenkinArticle.ID, secondWordstat, []string{"новое слово"}, "H1 Второй")
+	generationInput, err := repository.GetGenerationInput(ctx, "12")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if generationInput.Article.ID != arsenkinArticle.ID || generationInput.Article.Slug != "arsenkin" || generationInput.CompetitorStructure != "H1 Второй" {
+		t.Fatalf("generation input = %+v", generationInput)
+	}
 
 	if _, err := pool.Exec(ctx, `
 		CREATE FUNCTION reject_article_update() RETURNS trigger LANGUAGE plpgsql AS $$
@@ -110,6 +118,9 @@ func TestArticleRepositoryIdempotency(t *testing.T) {
 	if len(articles) != 2 || articles[0].ID != first.ID || articles[1].ID != arsenkinArticle.ID {
 		t.Fatalf("GetAll() вернул статьи не в порядке ID: %+v", articles)
 	}
+	if articles[0].ExternalID != "11" || articles[0].Slug != "new-slug" {
+		t.Fatalf("GetAll() не вернул Excel ID и slug: %+v", articles[0])
+	}
 	if err := repository.MarkArticlePromptBuilt(ctx, arsenkinArticle.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -119,6 +130,65 @@ func TestArticleRepositoryIdempotency(t *testing.T) {
 	}
 	if currentStep != "article_generation" {
 		t.Fatalf("current_step = %q, want article_generation", currentStep)
+	}
+	const articlePath = "12-arsenkin/generated/article.txt"
+	const structurePath = "12-arsenkin/generated/structure.txt"
+	if err := repository.SaveStructurePath(ctx, arsenkinArticle.ID, structurePath); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.SaveGenerationPaths(ctx, arsenkinArticle.ID, structurePath, articlePath); err != nil {
+		t.Fatal(err)
+	}
+	var savedStructurePath, savedArticlePath string
+	if err := pool.QueryRow(ctx, `SELECT structure_path, article_path FROM article_outputs WHERE article_id = $1`, arsenkinArticle.ID).Scan(&savedStructurePath, &savedArticlePath); err != nil {
+		t.Fatal(err)
+	}
+	if savedStructurePath != structurePath || savedArticlePath != articlePath {
+		t.Fatalf("saved paths = %q, %q", savedStructurePath, savedArticlePath)
+	}
+	if err := pool.QueryRow(ctx, `SELECT current_step FROM articles WHERE id = $1`, arsenkinArticle.ID).Scan(&currentStep); err != nil {
+		t.Fatal(err)
+	}
+	if currentStep != "metadata_generation" {
+		t.Fatalf("current_step = %q, want metadata_generation", currentStep)
+	}
+	if err := repository.SaveStructurePath(ctx, arsenkinArticle.ID, structurePath); err != nil {
+		t.Fatal(err)
+	}
+	var clearedArticlePath *string
+	if err := pool.QueryRow(ctx, `SELECT article_path FROM article_outputs WHERE article_id = $1`, arsenkinArticle.ID).Scan(&clearedArticlePath); err != nil {
+		t.Fatal(err)
+	}
+	if clearedArticlePath != nil {
+		t.Fatalf("stale article_path was not cleared: %q", *clearedArticlePath)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO article_metadata (article_id, metadata_text) VALUES ($1, 'old')`, arsenkinArticle.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.ResetArticleForRun(ctx, arsenkinArticle.ID); err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range []string{"article_research", "article_metadata", "article_outputs"} {
+		assertCount(t, pool, table, fmt.Sprintf("article_id = %d", arsenkinArticle.ID), 0)
+	}
+	var status string
+	var errorMessage *string
+	if err := pool.QueryRow(ctx, `SELECT status, current_step, error_message FROM articles WHERE id = $1`, arsenkinArticle.ID).Scan(&status, &currentStep, &errorMessage); err != nil {
+		t.Fatal(err)
+	}
+	if status != "processing" || currentStep != "arsenkin_collection" || errorMessage != nil {
+		t.Fatalf("reset state = status %q, step %q, error %v", status, currentStep, errorMessage)
+	}
+	assertCount(t, pool, "article_inputs", fmt.Sprintf("article_id = %d", arsenkinArticle.ID), 1)
+	missingResearch, err := repository.Create(ctx, article.Input{ExcelID: 13, Title: "Без исследования", ImageSlug: "missing"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.GetGenerationInput(ctx, missingResearch.ExternalID); err == nil || !strings.Contains(err.Error(), "отсутствует competitor_structure") {
+		t.Fatalf("missing research error = %v", err)
+	}
+	if _, err := repository.GetGenerationInput(ctx, "404"); err == nil || !strings.Contains(err.Error(), "не найдена") {
+		t.Fatalf("missing article error = %v", err)
 	}
 }
 

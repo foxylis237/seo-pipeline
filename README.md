@@ -2,7 +2,7 @@
 
 Локальный CLI-сервис на Go для импорта SEO-задач из Excel, сбора данных
 конкурентов в Keys.so и Arsenkin, сохранения результатов в PostgreSQL и
-сборки промпта для генерации статьи.
+сборки промпта и локального сохранения результата генератора статьи.
 
 ## Что уже реализовано
 
@@ -12,12 +12,15 @@
 - получение частотностей Wordstat, LSI и структур конкурентов в Arsenkin;
 - транзакционное сохранение research-данных по `article_id`;
 - сборка отдельного промпта для каждой статьи;
+- provider-neutral интерфейс `Generator`, Gemini через официальный Go SDK и
+  локальный `FakeGenerator` для тестов;
+- безопасная запись prompts и ответов в `output/<excel-id>-<slug>/`;
 - проверка схемы PostgreSQL до запуска внешних интеграций;
 - текстовое и JSON-логирование без вывода секретов;
 - очистка данных со сбросом PostgreSQL sequence.
 
-Этапы генерации текста, metadata, HTML и итоговых файлов пока не
-реализованы. Таблицы и этапы для них зарезервированы в схеме.
+Metadata, HTML и итоговые файлы пока не реализованы. Тесты используют только
+`FakeGenerator` и не выполняют реальные LLM-запросы.
 
 ## Архитектура
 
@@ -37,7 +40,19 @@ Keys.so ──► cleaned_keywords ──► article_research
 Arsenkin ──► Wordstat + LSI + structures
                                   │
                                   ▼
-                         article prompt (stdout)
+                         article prompt
+                                  │
+                                  ▼
+                 Gemini structure chat (closed after response)
+                                  │
+                                  ▼
+                         generatedStructure
+                                  │
+                                  ▼
+                  Gemini article chat (separate session)
+                                  │
+                                  ▼
+                    output/<excel-id>-<slug>/
 ```
 
 Все данные одной статьи связываются одним `articles.id`. Дочерние таблицы имеют
@@ -51,7 +66,9 @@ cmd/seo-pipeline/          CLI: import, run, reset
 internal/article/         доменные Go-модели
 internal/config/          загрузка .env и валидация конфига
 internal/importer/        чтение и валидация Excel
+internal/generation/      интерфейс Generator и FakeGenerator
 internal/integrations/    Playwright-интеграции Keys.so и Arsenkin
+internal/output/          безопасная запись файлов статьи
 internal/prompts/         встроенные текстовые шаблоны
 internal/repository/      SQL-запросы и проверка схемы
 internal/storage/         подключение к PostgreSQL
@@ -112,6 +129,7 @@ output/                   будущие выходные файлы (не в Gi
 ```dotenv
 DATABASE_URL=postgres://seo:seo@localhost:5432/seo?sslmode=disable
 INPUT_FILE_PATH=input/input.xlsx
+OUTPUT_DIR=output
 
 KEYS_SO_EMAIL=
 KEYS_SO_PASSWORD=
@@ -119,6 +137,9 @@ KEYS_SO_PASSWORD=
 ARSENKIN_EMAIL=
 ARSENKIN_PASSWORD=
 ARSENKIN_HEADLESS=true
+
+GEMINI_API_KEY=
+GEMINI_MODEL=
 
 LOG_LEVEL=info
 LOG_FORMAT=text
@@ -141,6 +162,12 @@ LOG_FORMAT=text
 ENV_FILE=../.env go run ./cmd/seo-pipeline run
 ```
 
+Для запуска только одной статьи можно передать её Excel ID:
+
+```bash
+ENV_FILE=../.env go run ./cmd/seo-pipeline run 37
+```
+
 ### Переменные окружения
 
 | Переменная | Команда | Обязательна | По умолчанию | Назначение |
@@ -148,11 +175,14 @@ ENV_FILE=../.env go run ./cmd/seo-pipeline run
 | `ENV_FILE` | все | нет | автопоиск | путь к `.env`; задаётся до запуска CLI |
 | `DATABASE_URL` | все | да | — | PostgreSQL connection string |
 | `INPUT_FILE_PATH` | `import` | нет | `input/input.xlsx` | путь к Excel |
+| `OUTPUT_DIR` | `run`, `generate` | нет | `output` | корень локальных результатов |
 | `KEYS_SO_EMAIL` | `run` | да | — | login Keys.so |
 | `KEYS_SO_PASSWORD` | `run` | да | — | пароль Keys.so |
 | `ARSENKIN_EMAIL` | `run` | да | — | login Arsenkin |
 | `ARSENKIN_PASSWORD` | `run` | да | — | пароль Arsenkin |
 | `ARSENKIN_HEADLESS` | `run` | нет | `true` | запуск Chromium без UI |
+| `GEMINI_API_KEY` | `run`, `generate` | да | — | ключ Gemini API; не логируется |
+| `GEMINI_MODEL` | `run`, `generate` | да | — | модель Gemini; default в коде отсутствует |
 | `LOG_LEVEL` | все | нет | `info` | `debug`, `info`, `warn` или `error` |
 | `LOG_FORMAT` | все | нет | `text` | `text` или `json` |
 
@@ -162,6 +192,42 @@ ENV_FILE=../.env go run ./cmd/seo-pipeline run
 ## Команды
 
 Все команды выполняются из корня репозитория.
+
+### Доступные CLI-команды
+
+1. Импорт Excel:
+
+   ```bash
+   go run ./cmd/seo-pipeline import
+   ```
+
+2. Полный pipeline для одной статьи:
+
+   ```bash
+   go run ./cmd/seo-pipeline run 37
+   ```
+
+   `37` — `external_id` статьи из Excel. Команда запускает полный процесс:
+   Keys.so / Арсенкин / сбор данных, затем все реализованные этапы генерации.
+
+3. Только LLM-генерация:
+
+   ```bash
+   go run ./cmd/seo-pipeline generate 37
+   ```
+
+   Команда запускает только генерационную часть на уже сохранённых в PostgreSQL
+   данных и не запускает Keys.so, Арсенкин или Playwright. Сейчас выполняются
+   генерация структуры, генерация статьи и программная проверка статьи. Этапы
+   исправления через Gemini и генерации HTML в проекте пока не реализованы;
+   после их появления они будут добавлены в эту же последовательность.
+
+Пример с явным путём к конфигурации:
+
+```bash
+ENV_FILE="/Users/lolitaulisova/Documents/ceo/.env" \
+go run ./cmd/seo-pipeline generate 37
+```
 
 ### Импорт Excel
 
@@ -189,6 +255,11 @@ ENV_FILE=../.env go run ./cmd/seo-pipeline import
 ENV_FILE=../.env go run ./cmd/seo-pipeline run
 ```
 
+```
+cd "/Users/lolitaulisova/Documents/сео/seo-pipeline"
+ENV_FILE="/Users/lolitaulisova/Documents/сео/.env" go run ./cmd/seo-pipeline run 37
+```
+
 `run` читает статьи по `articles.id` и последовательно для каждой:
 
 1. проверяет `reference_url`;
@@ -197,7 +268,32 @@ ENV_FILE=../.env go run ./cmd/seo-pipeline run
 4. получает частотности Wordstat в Arsenkin;
 5. передаёт Top-50 запросов в Copywriters;
 6. сохраняет `wordstat_keywords`, `lsi_words` и `competitor_structure`;
-7. собирает промпт и выводит его в stdout.
+7. создаёт отдельный Gemini chat структуры;
+8. собирает `structure_prompt`, отправляет его, сохраняет итоговую структуру и
+   закрывает этот chat;
+9. подставляет итоговую структуру в `article_prompt`, создаёт новый Gemini chat
+   статьи и отправляет prompt в новую сессию;
+10. сохраняет полные prompts в `prompts/`, а ответы Gemini — в
+    `generated/structure.txt` и `generated/article.txt`;
+11. записывает в PostgreSQL только относительные `structure_path` и
+    `article_path`;
+12. читает сохранённый `generated/article.txt`, выполняет локальную Go-валидацию
+    и выводит единый отчёт. Редакционные ошибки и предупреждения не останавливают
+    pipeline.
+
+На каждый Gemini-запрос действует timeout 5 минут и не более одного retry для
+HTTP 429 и 5xx.
+
+Сам writer не перезаписывает неожиданно существующий файл молча. При обычном
+запуске pipeline сначала удаляет весь прежний каталог статьи, а затем записывает
+новый комплект файлов.
+
+Перед началом обработки каждой статьи pipeline работает в режиме полной
+перезаписи: удаляет прежние `article_research`, `article_metadata` и
+`article_outputs`, сбрасывает состояние статьи и целиком удаляет каталог
+`output/<excel-id>-<image_slug>/`. Импортированная строка задания и
+`article_inputs` остаются источником для нового запуска. История, версии и
+резервные копии не создаются.
 
 При ошибке она записывается в `articles.error_message`, а команда завершается с
 ненулевым exit code. Текущая реализация останавливает весь запуск на первой
@@ -229,7 +325,7 @@ articles
 | `article_inputs` | исходные поля Excel | `import` |
 | `article_research` | Keys.so, Wordstat, LSI, структуры, timestamps | `run` |
 | `article_metadata` | metadata-текст и время чтения | зарезервировано |
-| `article_outputs` | пути к structure/article/metadata/HTML/final и word count | зарезервировано |
+| `article_outputs` | пути к structure/article/metadata/HTML/final и word count | `run`, `generate` |
 
 `article_research` содержит:
 
@@ -385,7 +481,10 @@ lock-файл или profile, пока процесс ещё работает.
 - pipeline обрабатывает статьи последовательно;
 - первая ошибка останавливает весь `run`;
 - `articles.status` пока не ведёт полный lifecycle `processing/completed/failed`;
-- `article_metadata` и `article_outputs` пока не заполняются;
-- промпт выводится в stdout, но не сохраняется в файл;
+- metadata и HTML пока не генерируются;
+- текущую программную валидацию статьи нужно дополнительно проверить и уточнить
+  перед использованием как окончательный редакционный контроль;
+- необходимо реализовать формирование prompt по найденным ошибкам и отдельный
+  этап исправления статьи через Gemini;
 - селекторы внешних сайтов могут потребовать адаптации после изменения UI Keys.so или
   Arsenkin.

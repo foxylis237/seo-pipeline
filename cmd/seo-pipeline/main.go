@@ -9,7 +9,9 @@ import (
 	"strings"
 
 	"github.com/foxylis237/seo-pipeline/internal/config"
+	"github.com/foxylis237/seo-pipeline/internal/generation"
 	"github.com/foxylis237/seo-pipeline/internal/integrations/arsenkin"
+	articleoutput "github.com/foxylis237/seo-pipeline/internal/output"
 	"github.com/foxylis237/seo-pipeline/internal/repository"
 	"github.com/foxylis237/seo-pipeline/internal/storage"
 )
@@ -19,7 +21,7 @@ func main() {
 
 	command, err := parseCommand(os.Args)
 	if err != nil {
-		logger.Error(err.Error(), "available_commands", "import, run, reset")
+		logger.Error(err.Error(), "available_commands", "import, run, generate, reset")
 		os.Exit(1)
 	}
 
@@ -60,8 +62,26 @@ func main() {
 	case "import":
 		err = runImport(ctx, articleRepository, cfg.InputFilePath, logger)
 
-	case "run":
-		err = runPipeline(ctx, articleRepository, cfg, logger)
+	case "run", "generate":
+		generator, generatorErr := generation.NewGeminiGenerator(ctx, cfg.GeminiAPIKey, cfg.GeminiModel)
+		if generatorErr != nil {
+			err = generatorErr
+			break
+		}
+		writer := articleoutput.NewWriter(cfg.OutputDir)
+		generationPipeline := generation.NewPipeline(articleRepository, generator, writer, cfg.GeminiModel, logger)
+		if command == "generate" {
+			err = runGenerate(ctx, generationPipeline, strings.TrimSpace(os.Args[2]))
+		} else {
+			targetExternalID := ""
+			if len(os.Args) == 3 {
+				targetExternalID = strings.TrimSpace(os.Args[2])
+			}
+			err = runPipeline(ctx, articleRepository, cfg, logger, generationPipeline, writer, targetExternalID)
+		}
+		if closeErr := generator.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("закрыть Gemini client: %w", closeErr))
+		}
 
 	case "reset":
 		err = runReset(ctx, articleRepository, logger)
@@ -136,7 +156,20 @@ func parseCommand(args []string) (string, error) {
 	}
 
 	switch args[1] {
-	case "import", "run", "reset":
+	case "import", "reset":
+		if len(args) != 2 {
+			return "", fmt.Errorf("лишние аргументы команды %q", args[1])
+		}
+		return args[1], nil
+	case "run":
+		if len(args) > 3 || len(args) == 3 && strings.TrimSpace(args[2]) == "" {
+			return "", fmt.Errorf("неверные аргументы команды run")
+		}
+		return args[1], nil
+	case "generate":
+		if len(args) != 3 || strings.TrimSpace(args[2]) == "" {
+			return "", fmt.Errorf("использование: generate <external_id>")
+		}
 		return args[1], nil
 	default:
 		return "", fmt.Errorf("неизвестная команда %q", args[1])
@@ -149,6 +182,8 @@ func validateConfig(command string, cfg config.Config) error {
 		return cfg.ValidateImport()
 	case "reset":
 		return cfg.ValidateReset()
+	case "generate":
+		return cfg.ValidateGenerate()
 	default:
 		return cfg.ValidateRun()
 	}

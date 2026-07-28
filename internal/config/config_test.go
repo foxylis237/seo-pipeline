@@ -140,6 +140,32 @@ func TestLoadParsesArsenkinHeadless(t *testing.T) {
 	}
 }
 
+func TestValidateRunRequiresGeminiConfiguration(t *testing.T) {
+	cfg := Config{
+		DatabaseURL: "postgres://database",
+		KeysSOEmail: "email", KeysSOPassword: "password",
+		ArsenkinEmail: "email", ArsenkinPassword: "password",
+	}
+	if err := cfg.ValidateRun(); err == nil || err.Error() != "GEMINI_API_KEY is required" {
+		t.Fatalf("ValidateRun() error = %v", err)
+	}
+	cfg.GeminiAPIKey = "secret"
+	if err := cfg.ValidateRun(); err == nil || err.Error() != "GEMINI_MODEL is required" {
+		t.Fatalf("ValidateRun() error = %v", err)
+	}
+	cfg.GeminiModel = "configured-model"
+	if err := cfg.ValidateRun(); err != nil {
+		t.Fatalf("ValidateRun() error = %v", err)
+	}
+}
+
+func TestValidateGenerateDoesNotRequireCollectorCredentials(t *testing.T) {
+	cfg := Config{DatabaseURL: "postgres://database", GeminiAPIKey: "secret", GeminiModel: "model"}
+	if err := cfg.ValidateGenerate(); err != nil {
+		t.Fatalf("ValidateGenerate() error = %v", err)
+	}
+}
+
 func unsetEnv(t *testing.T, name string) {
 	t.Helper()
 	value, found := os.LookupEnv(name)

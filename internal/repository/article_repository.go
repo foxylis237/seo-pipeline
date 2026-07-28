@@ -3,15 +3,61 @@ package repository
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/foxylis237/seo-pipeline/internal/article"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // ArticleRepository работает со статьями в PostgreSQL.
 type ArticleRepository struct {
 	pool *pgxpool.Pool
+}
+
+// GetGenerationInput loads persisted data required by implemented LLM stages.
+func (r *ArticleRepository) GetGenerationInput(ctx context.Context, externalID string) (article.GenerationInput, error) {
+	const query = `
+		SELECT a.id, a.external_id, a.title, COALESCE(i.image_slug, ''),
+			a.status, a.current_step, a.error_message, a.created_at, a.updated_at,
+			r.competitor_structure,
+			COALESCE(r.wordstat_keywords, '[]'::jsonb),
+			COALESCE(r.lsi_words, '[]'::jsonb)
+		FROM articles AS a
+		LEFT JOIN article_inputs AS i ON i.article_id = a.id
+		LEFT JOIN article_research AS r ON r.article_id = a.id
+		WHERE a.external_id = $1
+	`
+	var input article.GenerationInput
+	var competitorStructure *string
+	var wordstatJSON, lsiJSON []byte
+	err := r.pool.QueryRow(ctx, query, externalID).Scan(
+		&input.Article.ID, &input.Article.ExternalID, &input.Article.Title, &input.Article.Slug,
+		&input.Article.Status, &input.Article.CurrentStep, &input.Article.ErrorMessage,
+		&input.Article.CreatedAt, &input.Article.UpdatedAt, &competitorStructure, &wordstatJSON, &lsiJSON,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return article.GenerationInput{}, fmt.Errorf("статья с external_id %q не найдена", externalID)
+	}
+	if err != nil {
+		return article.GenerationInput{}, fmt.Errorf("загрузить данные генерации для external_id %q: %w", externalID, err)
+	}
+	if competitorStructure == nil || strings.TrimSpace(*competitorStructure) == "" {
+		return article.GenerationInput{}, fmt.Errorf("для статьи external_id %q отсутствует competitor_structure в article_research", externalID)
+	}
+	if strings.TrimSpace(input.Article.Slug) == "" {
+		return article.GenerationInput{}, fmt.Errorf("для статьи external_id %q отсутствует image_slug", externalID)
+	}
+	if err := json.Unmarshal(wordstatJSON, &input.WordstatKeywords); err != nil {
+		return article.GenerationInput{}, fmt.Errorf("прочитать wordstat_keywords для external_id %q: %w", externalID, err)
+	}
+	if err := json.Unmarshal(lsiJSON, &input.LSIWords); err != nil {
+		return article.GenerationInput{}, fmt.Errorf("прочитать lsi_words для external_id %q: %w", externalID, err)
+	}
+	input.CompetitorStructure = *competitorStructure
+	return input, nil
 }
 
 // NewArticleRepository создаёт репозиторий статей.
@@ -167,6 +213,7 @@ func (r *ArticleRepository) GetAll(
 			a.id,
 			a.external_id,
 			a.title,
+			COALESCE(i.image_slug, ''),
 			COALESCE(i.reference_url, ''),
 			a.status,
 			a.current_step,
@@ -190,6 +237,7 @@ func (r *ArticleRepository) GetAll(
 			&selected.ID,
 			&selected.ExternalID,
 			&selected.Title,
+			&selected.Slug,
 			&selected.ReferenceURL,
 			&selected.Status,
 			&selected.CurrentStep,
@@ -205,6 +253,116 @@ func (r *ArticleRepository) GetAll(
 		return nil, fmt.Errorf("получить статьи: %w", err)
 	}
 	return articles, nil
+}
+
+// ResetArticleForRun removes all derived data and resets processing state.
+// The article row and its imported input remain the current source of the run.
+func (r *ArticleRepository) ResetArticleForRun(ctx context.Context, articleID int64) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin resetting article for run: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	for _, table := range []string{"article_outputs", "article_metadata", "article_research"} {
+		if _, err := tx.Exec(ctx, "DELETE FROM "+table+" WHERE article_id = $1", articleID); err != nil {
+			return fmt.Errorf("clear %s for article %d: %w", table, articleID, err)
+		}
+	}
+	const articleQuery = `
+		UPDATE articles
+		SET status = 'processing', current_step = 'arsenkin_collection',
+			error_message = NULL, updated_at = NOW()
+		WHERE id = $1
+	`
+	result, err := tx.Exec(ctx, articleQuery, articleID)
+	if err != nil {
+		return fmt.Errorf("reset article processing state: %w", err)
+	}
+	if result.RowsAffected() != 1 {
+		return fmt.Errorf("article %d not found while resetting run", articleID)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("finish resetting article for run: %w", err)
+	}
+	return nil
+}
+
+// SaveStructurePath stores the generated structure path and advances to article generation.
+func (r *ArticleRepository) SaveStructurePath(ctx context.Context, articleID int64, structurePath string) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("начать сохранение пути структуры: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	const outputQuery = `
+		INSERT INTO article_outputs (article_id, structure_path, updated_at)
+		VALUES ($1, $2, NOW())
+		ON CONFLICT (article_id) DO UPDATE
+		SET structure_path = EXCLUDED.structure_path,
+			article_path = NULL,
+			metadata_path = NULL,
+			html_path = NULL,
+			final_path = NULL,
+			word_count = NULL,
+			updated_at = NOW()
+	`
+	if _, err := tx.Exec(ctx, outputQuery, articleID, structurePath); err != nil {
+		return fmt.Errorf("сохранить путь структуры: %w", err)
+	}
+	const articleQuery = `
+		UPDATE articles
+		SET current_step = 'article_generation', error_message = NULL, updated_at = NOW()
+		WHERE id = $1
+	`
+	result, err := tx.Exec(ctx, articleQuery, articleID)
+	if err != nil {
+		return fmt.Errorf("обновить этап после генерации структуры: %w", err)
+	}
+	if result.RowsAffected() != 1 {
+		return fmt.Errorf("статья %d не найдена при сохранении структуры", articleID)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("завершить сохранение пути структуры: %w", err)
+	}
+	return nil
+}
+
+// SaveGenerationPaths stores only relative paths of generated responses.
+func (r *ArticleRepository) SaveGenerationPaths(ctx context.Context, articleID int64, structurePath, articlePath string) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin saving article path: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	const outputQuery = `
+		INSERT INTO article_outputs (article_id, structure_path, article_path, updated_at)
+		VALUES ($1, $2, $3, NOW())
+		ON CONFLICT (article_id) DO UPDATE
+		SET structure_path = EXCLUDED.structure_path,
+			article_path = EXCLUDED.article_path, updated_at = NOW()
+	`
+	if _, err := tx.Exec(ctx, outputQuery, articleID, structurePath, articlePath); err != nil {
+		return fmt.Errorf("save generation paths: %w", err)
+	}
+	const articleQuery = `
+		UPDATE articles
+		SET current_step = 'metadata_generation', error_message = NULL, updated_at = NOW()
+		WHERE id = $1
+	`
+	result, err := tx.Exec(ctx, articleQuery, articleID)
+	if err != nil {
+		return fmt.Errorf("update article stage after generation: %w", err)
+	}
+	if result.RowsAffected() != 1 {
+		return fmt.Errorf("article %d not found while saving article path", articleID)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("finish saving article path: %w", err)
+	}
+	return nil
 }
 
 // MarkArticlePromptBuilt переводит статью к генерации после успешной сборки промпта.

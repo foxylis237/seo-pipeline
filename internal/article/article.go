@@ -8,6 +8,7 @@ type Article struct {
 	ID           int64
 	ExternalID   string
 	Title        string
+	Slug         string
 	ReferenceURL string
 	Status       string
 	CurrentStep  *string
@@ -34,4 +35,12 @@ type Input struct {
 type KeywordFrequency struct {
 	Query     string `json:"query"`
 	Frequency int    `json:"frequency"`
+}
+
+// GenerationInput contains persisted research required by implemented generation stages.
+type GenerationInput struct {
+	Article             Article
+	CompetitorStructure string
+	WordstatKeywords    []KeywordFrequency
+	LSIWords            []string
 }

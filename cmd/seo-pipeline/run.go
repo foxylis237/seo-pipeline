@@ -12,9 +12,10 @@ import (
 
 	"github.com/foxylis237/seo-pipeline/internal/article"
 	"github.com/foxylis237/seo-pipeline/internal/config"
+	"github.com/foxylis237/seo-pipeline/internal/generation"
 	"github.com/foxylis237/seo-pipeline/internal/integrations/arsenkin"
 	"github.com/foxylis237/seo-pipeline/internal/integrations/keysso"
-	"github.com/foxylis237/seo-pipeline/internal/prompts"
+	articleoutput "github.com/foxylis237/seo-pipeline/internal/output"
 	"github.com/foxylis237/seo-pipeline/internal/repository"
 )
 
@@ -36,6 +37,9 @@ func runPipeline(
 	articleRepository *repository.ArticleRepository,
 	cfg config.Config,
 	logger *slog.Logger,
+	generationPipeline *generation.Pipeline,
+	writer *articleoutput.Writer,
+	targetExternalID string,
 ) error {
 	selectedArticles, err := articleRepository.GetAll(ctx)
 	if err != nil {
@@ -44,10 +48,18 @@ func runPipeline(
 	if len(selectedArticles) == 0 {
 		return fmt.Errorf("статьи не найдены")
 	}
+	processed := 0
 	for _, selected := range selectedArticles {
-		if err := runArticlePipeline(ctx, articleRepository, cfg, logger, selected); err != nil {
+		if targetExternalID != "" && selected.ExternalID != targetExternalID {
+			continue
+		}
+		if err := runArticlePipeline(ctx, articleRepository, cfg, logger, generationPipeline, writer, selected); err != nil {
 			return err
 		}
+		processed++
+	}
+	if targetExternalID != "" && processed == 0 {
+		return fmt.Errorf("статья с external_id %q не найдена", targetExternalID)
 	}
 	return nil
 }
@@ -57,8 +69,27 @@ func runArticlePipeline(
 	articleRepository *repository.ArticleRepository,
 	cfg config.Config,
 	logger *slog.Logger,
+	generationPipeline *generation.Pipeline,
+	writer *articleoutput.Writer,
 	selected article.Article,
 ) error {
+	articleStarted := time.Now()
+	articleLogger := logger.With(
+		"article_id", selected.ID,
+		"external_id", selected.ExternalID,
+		"title", selected.Title,
+		"model", cfg.GeminiModel,
+	)
+	articleLogger.Info("обработка статьи начата", "stage", "article_start")
+	if err := articleRepository.ResetArticleForRun(ctx, selected.ID); err != nil {
+		articleLogger.Error("ошибка сброса данных статьи", "stage", "reset", "error", err)
+		return err
+	}
+	if err := writer.ResetArticle(selected.ExternalID, selected.Slug); err != nil {
+		articleLogger.Error("ошибка сброса файлов статьи", "stage", "reset", "error", err)
+		return savePipelineError(ctx, articleRepository, selected.ID, fmt.Errorf("reset output for article %d: %w", selected.ID, err))
+	}
+
 	stageStarted := time.Now()
 	stageLogger := logger.With("article_id", selected.ID, "integration", "keysso")
 	stageLogger.Info("обработка статьи начата", keyssoLogFields("article_start", stageStarted, "", 0, 0)...)
@@ -146,37 +177,18 @@ func runArticlePipeline(
 	arsenkinLogger.Info("этап завершён", "stage", "complete", "duration_ms", time.Since(arsenkinStarted).Milliseconds(), "current_url", "https://arsenkin.ru/tools/copyrighters/", "wordstat_count", len(arsenkinResult.WordstatKeywords), "lsi_count", len(arsenkinResult.LSIWords), "competitor_structure_length", len(arsenkinResult.CompetitorStructure))
 	printArsenkinResult(os.Stdout, selected, arsenkinResult)
 
-	prompt, err := prompts.BuildArticlePrompt(prompts.ArticlePromptData{
-		Title:     selected.Title,
-		Keywords:  formatPromptKeywords(arsenkinResult.WordstatKeywords),
-		LSIWords:  strings.Join(arsenkinResult.LSIWords, "\n"),
-		Structure: arsenkinResult.CompetitorStructure,
+	_, err = generationPipeline.Run(ctx, article.GenerationInput{
+		Article:             selected,
+		CompetitorStructure: arsenkinResult.CompetitorStructure,
+		WordstatKeywords:    arsenkinResult.WordstatKeywords,
+		LSIWords:            arsenkinResult.LSIWords,
 	})
 	if err != nil {
-		return savePipelineError(ctx, articleRepository, selected.ID, fmt.Errorf("build prompt for article %d: %w", selected.ID, err))
-	}
-	if err := articleRepository.MarkArticlePromptBuilt(ctx, selected.ID); err != nil {
 		return savePipelineError(ctx, articleRepository, selected.ID, err)
 	}
-	logger.Info("article prompt built", "article_id", selected.ID, "title", selected.Title)
-	printArticlePrompt(os.Stdout, selected.ID, prompt)
+	articleLogger.Info("обработка статьи завершена", "stage", "complete", "duration_ms", time.Since(articleStarted).Milliseconds())
 
 	return nil
-}
-
-func formatPromptKeywords(keywords []article.KeywordFrequency) string {
-	var result strings.Builder
-	for index, keyword := range keywords {
-		if index > 0 {
-			result.WriteByte('\n')
-		}
-		fmt.Fprintf(&result, "%s\t%d", keyword.Query, keyword.Frequency)
-	}
-	return result.String()
-}
-
-func printArticlePrompt(writer io.Writer, articleID int64, prompt string) {
-	fmt.Fprintf(writer, "\n========== ARTICLE PROMPT BEGIN: article_id=%d ==========\n\n%s\n\n========== ARTICLE PROMPT END: article_id=%d ==========\n", articleID, prompt, articleID)
 }
 
 func newKeyssoRunError(articleID int64, stage string, startedAt time.Time, currentURL string, collectedCount, cleanedCount int, err error) *keyssoRunError {

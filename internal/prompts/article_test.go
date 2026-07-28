@@ -7,17 +7,17 @@ import (
 
 func TestBuildArticlePromptSubstitutesValuesWithoutChangingOrder(t *testing.T) {
 	data := ArticlePromptData{
-		Title:     "Как стать логопедом",
-		Keywords:  "первый запрос\t200\nвторой запрос\t100",
-		LSIWords:  "образование\nпрофессия\nпрактика",
-		Structure: "H1 - Заголовок\nH2 - Первый раздел\nH3 - Подраздел\nH2 - Второй раздел",
+		Title:              "Как стать логопедом",
+		Keywords:           "первый запрос\t200\nвторой запрос\t100",
+		LSIWords:           "образование\nпрофессия\nпрактика",
+		GeneratedStructure: "H1 - Заголовок\nH2 - Первый раздел\nH3 - Подраздел\nH2 - Второй раздел",
 	}
 
 	got, err := BuildArticlePrompt(data)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, value := range []string{data.Title, data.Keywords, data.LSIWords, data.Structure} {
+	for _, value := range []string{data.Title, data.Keywords, data.LSIWords, data.GeneratedStructure} {
 		if !strings.Contains(got, value) {
 			t.Fatalf("готовый промпт не содержит %q", value)
 		}
@@ -25,7 +25,7 @@ func TestBuildArticlePromptSubstitutesValuesWithoutChangingOrder(t *testing.T) {
 	if strings.Index(got, "H2 - Первый раздел") > strings.Index(got, "H2 - Второй раздел") {
 		t.Fatal("порядок структуры изменился")
 	}
-	for _, placeholder := range []string{"{{.Title}}", "{{.Keywords}}", "{{.LSIWords}}", "{{.Structure}}"} {
+	for _, placeholder := range []string{"{{.Title}}", "{{.Keywords}}", "{{.LSIWords}}", "{{.GeneratedStructure}}"} {
 		if strings.Contains(got, placeholder) {
 			t.Fatalf("в готовом промпте остался placeholder %s", placeholder)
 		}
@@ -33,7 +33,7 @@ func TestBuildArticlePromptSubstitutesValuesWithoutChangingOrder(t *testing.T) {
 }
 
 func TestBuildArticlePromptAllowsEmptyKeywordsAndLSIWords(t *testing.T) {
-	got, err := BuildArticlePrompt(ArticlePromptData{Title: "Название", Structure: "H1 - Структура"})
+	got, err := BuildArticlePrompt(ArticlePromptData{Title: "Название", GeneratedStructure: "H1 - Структура"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,8 +48,8 @@ func TestBuildArticlePromptValidatesRequiredFields(t *testing.T) {
 		data ArticlePromptData
 		want string
 	}{
-		{name: "empty title", data: ArticlePromptData{Structure: "H1 - Структура"}, want: "article title is empty"},
-		{name: "blank title", data: ArticlePromptData{Title: " \t\n", Structure: "H1 - Структура"}, want: "article title is empty"},
+		{name: "empty title", data: ArticlePromptData{GeneratedStructure: "H1 - Структура"}, want: "article title is empty"},
+		{name: "blank title", data: ArticlePromptData{Title: " \t\n", GeneratedStructure: "H1 - Структура"}, want: "article title is empty"},
 		{name: "empty structure", data: ArticlePromptData{Title: "Название"}, want: "article structure is empty"},
 	}
 	for _, test := range tests {
@@ -63,11 +63,11 @@ func TestBuildArticlePromptValidatesRequiredFields(t *testing.T) {
 }
 
 func TestBuildArticlePromptCallsAreIndependent(t *testing.T) {
-	first, err := BuildArticlePrompt(ArticlePromptData{Title: "Первая статья", Structure: "H1 - Первая структура"})
+	first, err := BuildArticlePrompt(ArticlePromptData{Title: "Первая статья", GeneratedStructure: "H1 - Первая структура"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := BuildArticlePrompt(ArticlePromptData{Title: "Вторая статья", Structure: "H1 - Вторая структура"})
+	second, err := BuildArticlePrompt(ArticlePromptData{Title: "Вторая статья", GeneratedStructure: "H1 - Вторая структура"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,5 +79,16 @@ func TestBuildArticlePromptCallsAreIndependent(t *testing.T) {
 	}
 	if strings.Contains(second, "Первая статья") || strings.Contains(second, "Первая структура") {
 		t.Fatal("данные первой статьи попали во второй промпт")
+	}
+}
+
+func TestBuildStructurePromptUsesCompetitorStructure(t *testing.T) {
+	data := StructurePromptData{Title: "Как стать логопедом", Structure: "H1 Конкурент\nH2 Раздел"}
+	got, err := BuildStructurePrompt(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, data.Title) || !strings.Contains(got, data.Structure) {
+		t.Fatal("structure prompt does not contain input data")
 	}
 }
