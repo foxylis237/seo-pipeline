@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/foxylis237/seo-pipeline/internal/config"
+	"github.com/foxylis237/seo-pipeline/internal/integrations/arsenkin"
 	"github.com/foxylis237/seo-pipeline/internal/repository"
 	"github.com/foxylis237/seo-pipeline/internal/storage"
 )
@@ -18,11 +19,15 @@ func main() {
 
 	command, err := parseCommand(os.Args)
 	if err != nil {
-		logger.Error(err.Error(), "available_commands", "import, run")
+		logger.Error(err.Error(), "available_commands", "import, run, reset")
 		os.Exit(1)
 	}
 
-	cfg := config.Load()
+	cfg, err := config.Load()
+	if err != nil {
+		logger.Error("не удалось загрузить конфигурацию", "error", err)
+		os.Exit(1)
+	}
 	logger, err = newLogger(cfg.LogLevel, cfg.LogFormat)
 	if err != nil {
 		logger = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -44,6 +49,10 @@ func main() {
 	defer pool.Close()
 
 	logger.Info("подключение к PostgreSQL успешно установлено")
+	if err := repository.ValidateSchema(ctx, pool); err != nil {
+		logger.Error("схема PostgreSQL не согласована с кодом", "error", err)
+		os.Exit(1)
+	}
 
 	articleRepository := repository.NewArticleRepository(pool)
 
@@ -54,9 +63,25 @@ func main() {
 	case "run":
 		err = runPipeline(ctx, articleRepository, cfg, logger)
 
+	case "reset":
+		err = runReset(ctx, articleRepository, logger)
+
 	}
 
 	if err != nil {
+		var arsenkinErr *arsenkin.StageError
+		if errors.As(err, &arsenkinErr) {
+			logger.Error(
+				"этап Arsenkin завершён с ошибкой",
+				"article_id", arsenkinErr.ArticleID,
+				"integration", "arsenkin",
+				"stage", arsenkinErr.Stage,
+				"duration_ms", arsenkinErr.Duration.Milliseconds(),
+				"current_url", arsenkinErr.CurrentURL,
+				"error", arsenkinErr.Err,
+			)
+			os.Exit(1)
+		}
 		var stageErr *keyssoRunError
 		if errors.As(err, &stageErr) {
 			logger.Error(
@@ -111,7 +136,7 @@ func parseCommand(args []string) (string, error) {
 	}
 
 	switch args[1] {
-	case "import", "run":
+	case "import", "run", "reset":
 		return args[1], nil
 	default:
 		return "", fmt.Errorf("неизвестная команда %q", args[1])
@@ -119,8 +144,12 @@ func parseCommand(args []string) (string, error) {
 }
 
 func validateConfig(command string, cfg config.Config) error {
-	if command == "import" {
+	switch command {
+	case "import":
 		return cfg.ValidateImport()
+	case "reset":
+		return cfg.ValidateReset()
+	default:
+		return cfg.ValidateRun()
 	}
-	return cfg.ValidateRun()
 }

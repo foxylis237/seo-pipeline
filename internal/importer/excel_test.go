@@ -62,6 +62,19 @@ func TestReadArticlesAllowsMissingOptionalColumns(t *testing.T) {
 	}
 }
 
+func TestReadArticlesRejectsDuplicateExternalID(t *testing.T) {
+	path := writeWorkbook(t, [][]any{
+		{"id", "article_name"},
+		{7, "Первая статья"},
+		{7, "Вторая статья"},
+	})
+
+	_, err := ReadArticles(path)
+	if err == nil || !strings.Contains(err.Error(), "строка 3: id 7 уже использован в строке 2") {
+		t.Fatalf("ожидалась ошибка повторного external_id, получено: %v", err)
+	}
+}
+
 func writeWorkbook(t *testing.T, rows [][]any) string {
 	t.Helper()
 

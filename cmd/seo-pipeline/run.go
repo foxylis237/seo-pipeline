@@ -12,7 +12,9 @@ import (
 
 	"github.com/foxylis237/seo-pipeline/internal/article"
 	"github.com/foxylis237/seo-pipeline/internal/config"
+	"github.com/foxylis237/seo-pipeline/internal/integrations/arsenkin"
 	"github.com/foxylis237/seo-pipeline/internal/integrations/keysso"
+	"github.com/foxylis237/seo-pipeline/internal/prompts"
 	"github.com/foxylis237/seo-pipeline/internal/repository"
 )
 
@@ -35,14 +37,28 @@ func runPipeline(
 	cfg config.Config,
 	logger *slog.Logger,
 ) error {
-	selected, found, err := articleRepository.GetFirst(ctx)
+	selectedArticles, err := articleRepository.GetAll(ctx)
 	if err != nil {
 		return err
 	}
-	if !found {
-		return fmt.Errorf("первая статья не найдена")
+	if len(selectedArticles) == 0 {
+		return fmt.Errorf("статьи не найдены")
 	}
+	for _, selected := range selectedArticles {
+		if err := runArticlePipeline(ctx, articleRepository, cfg, logger, selected); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
+func runArticlePipeline(
+	ctx context.Context,
+	articleRepository *repository.ArticleRepository,
+	cfg config.Config,
+	logger *slog.Logger,
+	selected article.Article,
+) error {
 	stageStarted := time.Now()
 	stageLogger := logger.With("article_id", selected.ID, "integration", "keysso")
 	stageLogger.Info("обработка статьи начата", keyssoLogFields("article_start", stageStarted, "", 0, 0)...)
@@ -51,7 +67,7 @@ func runPipeline(
 			ctx,
 			articleRepository,
 			selected.ID,
-			newKeyssoRunError(selected.ID, "validate_reference_url", stageStarted, "", 0, 0, fmt.Errorf("у первой статьи пустой reference_url")),
+			newKeyssoRunError(selected.ID, "validate_reference_url", stageStarted, "", 0, 0, fmt.Errorf("у статьи пустой reference_url")),
 		)
 	}
 	stageLogger.Info("этап Keys.so начат", keyssoLogFields("start", stageStarted, "", 0, 0)...)
@@ -99,7 +115,68 @@ func runPipeline(
 	stageLogger.Info("этап Keys.so завершён", keyssoLogFields("complete", stageStarted, "", collectResult.CollectedCount, len(collectResult.CleanedKeywords))...)
 	printKeysSOResult(os.Stdout, selected, collectResult)
 
+	arsenkinStarted := time.Now()
+	arsenkinLogger := logger.With("article_id", selected.ID, "integration", "arsenkin")
+	arsenkinService := arsenkin.New(arsenkin.Config{
+		ArticleID: selected.ID,
+		Email:     cfg.ArsenkinEmail,
+		Password:  cfg.ArsenkinPassword,
+		Headless:  cfg.ArsenkinHeadless,
+	}, logger)
+	arsenkinResult, err := arsenkinService.CollectResearch(ctx, collectResult.CleanedKeywords)
+	if err != nil {
+		return savePipelineError(ctx, articleRepository, selected.ID, err)
+	}
+	if err := articleRepository.SaveArsenkinResearch(
+		ctx,
+		selected.ID,
+		arsenkinResult.WordstatKeywords,
+		arsenkinResult.LSIWords,
+		arsenkinResult.CompetitorStructure,
+	); err != nil {
+		return savePipelineError(ctx, articleRepository, selected.ID, &arsenkin.StageError{
+			ArticleID:  selected.ID,
+			Stage:      "save_result",
+			CurrentURL: "https://arsenkin.ru/tools/copyrighters/",
+			Duration:   time.Since(arsenkinStarted),
+			Err:        fmt.Errorf("сохранить результаты Arsenkin в PostgreSQL: %w", err),
+		})
+	}
+	arsenkinLogger.Info("данные сохранены", "stage", "save_result", "duration_ms", time.Since(arsenkinStarted).Milliseconds(), "current_url", "https://arsenkin.ru/tools/copyrighters/", "wordstat_count", len(arsenkinResult.WordstatKeywords), "lsi_count", len(arsenkinResult.LSIWords), "competitor_structure_length", len(arsenkinResult.CompetitorStructure))
+	arsenkinLogger.Info("этап завершён", "stage", "complete", "duration_ms", time.Since(arsenkinStarted).Milliseconds(), "current_url", "https://arsenkin.ru/tools/copyrighters/", "wordstat_count", len(arsenkinResult.WordstatKeywords), "lsi_count", len(arsenkinResult.LSIWords), "competitor_structure_length", len(arsenkinResult.CompetitorStructure))
+	printArsenkinResult(os.Stdout, selected, arsenkinResult)
+
+	prompt, err := prompts.BuildArticlePrompt(prompts.ArticlePromptData{
+		Title:     selected.Title,
+		Keywords:  formatPromptKeywords(arsenkinResult.WordstatKeywords),
+		LSIWords:  strings.Join(arsenkinResult.LSIWords, "\n"),
+		Structure: arsenkinResult.CompetitorStructure,
+	})
+	if err != nil {
+		return savePipelineError(ctx, articleRepository, selected.ID, fmt.Errorf("build prompt for article %d: %w", selected.ID, err))
+	}
+	if err := articleRepository.MarkArticlePromptBuilt(ctx, selected.ID); err != nil {
+		return savePipelineError(ctx, articleRepository, selected.ID, err)
+	}
+	logger.Info("article prompt built", "article_id", selected.ID, "title", selected.Title)
+	printArticlePrompt(os.Stdout, selected.ID, prompt)
+
 	return nil
+}
+
+func formatPromptKeywords(keywords []article.KeywordFrequency) string {
+	var result strings.Builder
+	for index, keyword := range keywords {
+		if index > 0 {
+			result.WriteByte('\n')
+		}
+		fmt.Fprintf(&result, "%s\t%d", keyword.Query, keyword.Frequency)
+	}
+	return result.String()
+}
+
+func printArticlePrompt(writer io.Writer, articleID int64, prompt string) {
+	fmt.Fprintf(writer, "\n========== ARTICLE PROMPT BEGIN: article_id=%d ==========\n\n%s\n\n========== ARTICLE PROMPT END: article_id=%d ==========\n", articleID, prompt, articleID)
 }
 
 func newKeyssoRunError(articleID int64, stage string, startedAt time.Time, currentURL string, collectedCount, cleanedCount int, err error) *keyssoRunError {
@@ -141,6 +218,41 @@ func printKeysSOResult(writer io.Writer, selected article.Article, result keysso
 	fmt.Fprintln(writer, "Saved to PostgreSQL: yes")
 	fmt.Fprintf(writer, "Current stage: %s\n", currentStage)
 	fmt.Fprintln(writer, "======================")
+}
+
+func printArsenkinResult(writer io.Writer, selected article.Article, result arsenkin.Result) {
+	fmt.Fprintln(writer, "==================================================")
+	fmt.Fprintln(writer, "                ARSENKIN RESULT")
+	fmt.Fprintln(writer, "==================================================")
+	fmt.Fprintln(writer)
+	fmt.Fprintf(writer, "Article ID: %d\n", selected.ID)
+	fmt.Fprintf(writer, "Title: %s\n", selected.Title)
+	fmt.Fprintln(writer)
+	fmt.Fprintln(writer, "--------------- WORDSTAT TOP ----------------")
+	fmt.Fprintln(writer)
+	fmt.Fprintf(writer, "%-42s %s\n", "Запрос", "Частотность")
+	fmt.Fprintln(writer)
+	for _, keyword := range result.WordstatKeywords {
+		fmt.Fprintf(writer, "%-42s %d\n", keyword.Query, keyword.Frequency)
+	}
+	fmt.Fprintln(writer)
+	fmt.Fprintln(writer, "--------------- LSI ------------------------")
+	fmt.Fprintln(writer)
+	for _, word := range result.LSIWords {
+		fmt.Fprintln(writer, word)
+	}
+	fmt.Fprintln(writer)
+	fmt.Fprintln(writer, "----------- COMPETITOR STRUCTURE -----------")
+	fmt.Fprintln(writer)
+	fmt.Fprintln(writer, result.CompetitorStructure)
+	fmt.Fprintln(writer)
+	fmt.Fprintln(writer, "==================================================")
+	fmt.Fprintln(writer)
+	fmt.Fprintf(writer, "Wordstat keywords: %d\n", len(result.WordstatKeywords))
+	fmt.Fprintf(writer, "LSI words: %d\n", len(result.LSIWords))
+	fmt.Fprintf(writer, "Structure length: %d chars\n", len([]rune(result.CompetitorStructure)))
+	fmt.Fprintln(writer)
+	fmt.Fprintln(writer, "==================================================")
 }
 
 func savePipelineError(

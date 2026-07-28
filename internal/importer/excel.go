@@ -63,6 +63,7 @@ func ReadArticles(path string) ([]article.Input, error) {
 
 	// Заранее выделяем память под две статьи.
 	articles := make([]article.Input, 0, defaultLimit)
+	seenExternalIDs := make(map[int]int, defaultLimit)
 
 	// Начинаем со второй строки, так как первая содержит заголовки.
 	for rowIndex := 1; rowIndex < len(rows) && len(articles) < defaultLimit; rowIndex++ {
@@ -87,6 +88,15 @@ func ReadArticles(path string) ([]article.Input, error) {
 				err,
 			)
 		}
+		if previousRow, found := seenExternalIDs[id]; found {
+			return nil, fmt.Errorf(
+				"строка %d: id %d уже использован в строке %d",
+				rowIndex+1,
+				id,
+				previousRow,
+			)
+		}
+		seenExternalIDs[id] = rowIndex + 1
 
 		// Заполняем доменную структуру данными из Excel.
 		title := cellValue(row, columnIndexes["article_name"])

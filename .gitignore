@@ -1,7 +1,9 @@
 # Environment
 .env
+.env.local
 data/keysso-storage-state.json
 data/keysso-browser-profile/
+data/arsenkin-browser-profile/
 
 # Input
 input/*.xlsx

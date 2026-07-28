@@ -29,3 +29,9 @@ type Input struct {
 	Links           string
 	Professions     string
 }
+
+// KeywordFrequency содержит запрос и его частотность Wordstat.
+type KeywordFrequency struct {
+	Query     string `json:"query"`
+	Frequency int    `json:"frequency"`
+}

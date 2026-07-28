@@ -86,7 +86,10 @@ CREATE TABLE article_research (
 
     lsi_words JSONB NOT NULL DEFAULT '[]'::jsonb,
 
-    collected_at TIMESTAMPTZ
+    collected_at TIMESTAMPTZ,
+
+    -- Время последнего изменения любой части исследования.
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 

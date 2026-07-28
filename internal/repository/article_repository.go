@@ -3,11 +3,9 @@ package repository
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 
 	"github.com/foxylis237/seo-pipeline/internal/article"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -21,6 +19,32 @@ func NewArticleRepository(pool *pgxpool.Pool) *ArticleRepository {
 	return &ArticleRepository{
 		pool: pool,
 	}
+}
+
+// Reset удаляет все данные проекта и сбрасывает счётчики идентификаторов.
+func (r *ArticleRepository) Reset(ctx context.Context) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("начать транзакцию очистки базы данных: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	const query = `
+		TRUNCATE TABLE
+			article_outputs,
+			article_metadata,
+			article_research,
+			article_inputs,
+			articles
+		RESTART IDENTITY CASCADE
+	`
+	if _, err := tx.Exec(ctx, query); err != nil {
+		return fmt.Errorf("очистить таблицы проекта: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("завершить транзакцию очистки базы данных: %w", err)
+	}
+	return nil
 }
 
 // Create сохраняет статью и её исходные данные в одной транзакции.
@@ -134,10 +158,10 @@ func (r *ArticleRepository) Create(
 	return created, nil
 }
 
-// GetFirst возвращает только первую статью и её URL конкурента.
-func (r *ArticleRepository) GetFirst(
+// GetAll возвращает статьи с их URL конкурентов в порядке ID.
+func (r *ArticleRepository) GetAll(
 	ctx context.Context,
-) (article.Article, bool, error) {
+) ([]article.Article, error) {
 	const selectQuery = `
 		SELECT
 			a.id,
@@ -152,29 +176,52 @@ func (r *ArticleRepository) GetFirst(
 		FROM articles AS a
 		LEFT JOIN article_inputs AS i ON i.article_id = a.id
 		ORDER BY a.id
-		LIMIT 1
 	`
-
-	var claimed article.Article
-	err := r.pool.QueryRow(ctx, selectQuery).Scan(
-		&claimed.ID,
-		&claimed.ExternalID,
-		&claimed.Title,
-		&claimed.ReferenceURL,
-		&claimed.Status,
-		&claimed.CurrentStep,
-		&claimed.ErrorMessage,
-		&claimed.CreatedAt,
-		&claimed.UpdatedAt,
-	)
+	rows, err := r.pool.Query(ctx, selectQuery)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return article.Article{}, false, nil
-		}
-		return article.Article{}, false, fmt.Errorf("получить первую статью: %w", err)
+		return nil, fmt.Errorf("получить статьи: %w", err)
 	}
+	defer rows.Close()
 
-	return claimed, true, nil
+	articles := make([]article.Article, 0)
+	for rows.Next() {
+		var selected article.Article
+		if err := rows.Scan(
+			&selected.ID,
+			&selected.ExternalID,
+			&selected.Title,
+			&selected.ReferenceURL,
+			&selected.Status,
+			&selected.CurrentStep,
+			&selected.ErrorMessage,
+			&selected.CreatedAt,
+			&selected.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("прочитать статью: %w", err)
+		}
+		articles = append(articles, selected)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("получить статьи: %w", err)
+	}
+	return articles, nil
+}
+
+// MarkArticlePromptBuilt переводит статью к генерации после успешной сборки промпта.
+func (r *ArticleRepository) MarkArticlePromptBuilt(ctx context.Context, articleID int64) error {
+	const query = `
+		UPDATE articles
+		SET current_step = 'article_generation', error_message = NULL, updated_at = NOW()
+		WHERE id = $1
+	`
+	result, err := r.pool.Exec(ctx, query, articleID)
+	if err != nil {
+		return fmt.Errorf("обновить этап статьи после сборки промпта: %w", err)
+	}
+	if result.RowsAffected() != 1 {
+		return fmt.Errorf("статья %d не найдена при обновлении этапа", articleID)
+	}
+	return nil
 }
 
 // SaveCleanedKeywords сохраняет очищенные запросы исследования статьи.
@@ -195,12 +242,13 @@ func (r *ArticleRepository) SaveCleanedKeywords(
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	const researchQuery = `
-		INSERT INTO article_research (article_id, cleaned_keywords, collected_at)
-		VALUES ($1, $2, NOW())
+		INSERT INTO article_research (article_id, cleaned_keywords, collected_at, updated_at)
+		VALUES ($1, $2, NOW(), NOW())
 		ON CONFLICT (article_id) DO UPDATE
 		SET
 			cleaned_keywords = EXCLUDED.cleaned_keywords,
-			collected_at = NOW()
+			collected_at = NOW(),
+			updated_at = NOW()
 	`
 	if _, err := tx.Exec(ctx, researchQuery, articleID, string(encoded)); err != nil {
 		return fmt.Errorf("сохранить очищенные запросы: %w", err)
@@ -217,6 +265,63 @@ func (r *ArticleRepository) SaveCleanedKeywords(
 
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("завершить сохранение исследования: %w", err)
+	}
+	return nil
+}
+
+// SaveArsenkinResearch сохраняет Wordstat и Copywriters одной транзакцией.
+func (r *ArticleRepository) SaveArsenkinResearch(
+	ctx context.Context,
+	articleID int64,
+	wordstat []article.KeywordFrequency,
+	lsiWords []string,
+	competitorStructure string,
+) error {
+	wordstatJSON, err := json.Marshal(wordstat)
+	if err != nil {
+		return fmt.Errorf("закодировать частотности Wordstat: %w", err)
+	}
+	lsiJSON, err := json.Marshal(lsiWords)
+	if err != nil {
+		return fmt.Errorf("закодировать LSI Copywriters: %w", err)
+	}
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("начать транзакцию сохранения Arsenkin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	const researchQuery = `
+		INSERT INTO article_research (
+			article_id, wordstat_keywords, lsi_words, competitor_structure, collected_at, updated_at
+		)
+		VALUES ($1, $2, $3, $4, NOW(), NOW())
+		ON CONFLICT (article_id) DO UPDATE
+		SET
+			wordstat_keywords = EXCLUDED.wordstat_keywords,
+			lsi_words = EXCLUDED.lsi_words,
+			competitor_structure = EXCLUDED.competitor_structure,
+			collected_at = NOW(),
+			updated_at = NOW()
+	`
+	if _, err := tx.Exec(ctx, researchQuery, articleID, string(wordstatJSON), string(lsiJSON), competitorStructure); err != nil {
+		return fmt.Errorf("сохранить исследование Arsenkin: %w", err)
+	}
+
+	const articleQuery = `
+		UPDATE articles
+		SET current_step = 'structure_generation', error_message = NULL, updated_at = NOW()
+		WHERE id = $1
+	`
+	result, err := tx.Exec(ctx, articleQuery, articleID)
+	if err != nil {
+		return fmt.Errorf("обновить текущий этап статьи после Copywriters: %w", err)
+	}
+	if result.RowsAffected() != 1 {
+		return fmt.Errorf("статья %d не найдена при обновлении этапа", articleID)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("завершить сохранение Arsenkin: %w", err)
 	}
 	return nil
 }
