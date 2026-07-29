@@ -69,10 +69,14 @@ Makefile — короткая оболочка над существующим C
 | Цель | Что делает | Параметр | Пример | Эквивалент без Makefile |
 |---|---|---|---|---|
 | `docker-up` | Запускает оба PostgreSQL-сервиса. | Нет. | `make docker-up` | `docker compose up -d` |
+| `docker-start` | Запускает ранее остановленные контейнеры без пересоздания. | Нет. | `make docker-start` | `docker compose start` |
+| `docker-stop` | Останавливает контейнеры, не удаляя их. | Нет. | `make docker-stop` | `docker compose stop` |
 | `docker-down` | Останавливает и удаляет контейнеры сети проекта, сохраняя volumes. | Нет. | `make docker-down` | `docker compose down` |
 | `docker-restart` | Перезапускает сервисы. | Нет. | `make docker-restart` | `docker compose restart` |
 | `docker-logs` | Показывает последние 100 строк и продолжает следить за логами. | Нет. | `make docker-logs` | `docker compose logs --tail=100 --follow` |
 | `docker-ps` | Показывает состояние сервисов. | Нет. | `make docker-ps` | `docker compose ps` |
+
+Для обычной ежедневной паузы используйте `make docker-stop`, а для продолжения — `make docker-start`: контейнеры при этом сохраняются. `make docker-down` удаляет контейнеры и сеть, но не именованные volumes с данными; следующий `make docker-up` создаст контейнеры заново.
 
 `postgres` доступен на `localhost:5432`, `postgres-dry-run` — на `localhost:5433`. Dry-run-контейнер применяет `migrations/*.up.sql` при первичной инициализации своего volume. Отдельного migration runner и Makefile-цели миграции в проекте нет.
 

@@ -16,7 +16,7 @@ TASK_EXTRA_ARGS := $(wordlist 4,$(words $(MAKECMDGOALS)),$(MAKECMDGOALS))
 TASK_OPERATIONS := import run dry-run prepare generate demo-generate article info review fix html result
 REQUIRED_ID_OPERATIONS := prepare generate demo-generate article info review fix html result
 
-.PHONY: help task-1 docker-up docker-down docker-restart docker-logs docker-ps
+.PHONY: help task-1 docker-up docker-start docker-stop docker-down docker-restart docker-logs docker-ps
 .PHONY: test test-race fmt vet build
 
 # ----------------------------------------------------
@@ -91,10 +91,16 @@ task-1: ## Run a task_1 operation
 # Docker
 # ----------------------------------------------------
 
-docker-up: ## Start PostgreSQL services
+docker-up: ## Create and start PostgreSQL containers
 	$(DOCKER_COMPOSE) up -d
 
-docker-down: ## Stop PostgreSQL services
+docker-start: ## Start existing PostgreSQL containers
+	$(DOCKER_COMPOSE) start
+
+docker-stop: ## Stop PostgreSQL containers without removing them
+	$(DOCKER_COMPOSE) stop
+
+docker-down: ## Stop and remove PostgreSQL containers and network
 	$(DOCKER_COMPOSE) down
 
 docker-restart: ## Restart PostgreSQL services
