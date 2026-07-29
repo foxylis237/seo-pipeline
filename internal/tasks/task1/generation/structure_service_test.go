@@ -2,6 +2,7 @@ package generation
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"os"
@@ -17,11 +18,32 @@ import (
 type fakeStructureRepository struct {
 	savedID   int64
 	savedPath string
+	err       error
 }
 
 func (r *fakeStructureRepository) SaveStructurePath(_ context.Context, articleID int64, path string) error {
 	r.savedID, r.savedPath = articleID, path
-	return nil
+	return r.err
+}
+
+func TestStructureServiceDatabaseErrorKeepsPreviousFiles(t *testing.T) {
+	root := t.TempDir()
+	writer := articleoutput.NewWriter(root)
+	paths, err := writer.SaveStructure("37", "tema", "old prompt", "old structure")
+	if err != nil {
+		t.Fatal(err)
+	}
+	databaseErr := errors.New("save structure state failed")
+	repository := &fakeStructureRepository{err: databaseErr}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	service := NewStructureService(repository, testStructureRouter(llm.Response{Text: "new structure"}, logger), writer, logger)
+	input := article.GenerationInput{Article: article.Article{ID: 7, ExternalID: "37", Title: "Тема", Slug: "tema"}}
+
+	if _, err := service.Generate(context.Background(), input); !errors.Is(err, databaseErr) {
+		t.Fatalf("Generate() error = %v, want database error", err)
+	}
+	assertGeneratedFile(t, filepath.Join(root, filepath.FromSlash(paths.StructurePromptPath)), "old prompt")
+	assertGeneratedFile(t, filepath.Join(root, filepath.FromSlash(paths.StructurePath)), "old structure")
 }
 
 func TestStructureServiceGenerate(t *testing.T) {

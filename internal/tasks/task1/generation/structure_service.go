@@ -16,7 +16,7 @@ type StructureRepository interface {
 }
 
 type StructureWriter interface {
-	SaveStructure(externalID, slug, prompt, structure string) (articleoutput.ArticlePaths, error)
+	StageStructure(externalID, slug, prompt, structure string) (*articleoutput.PendingArtifact, error)
 }
 
 type StructureOutput struct {
@@ -51,12 +51,16 @@ func (s *StructureService) Generate(ctx context.Context, input article.Generatio
 		return StructureOutput{}, fmt.Errorf("сгенерировать структуру для external_id %q: %w", input.Article.ExternalID, err)
 	}
 	promptSize := len([]rune(result.Prompt))
-	paths, err := s.writer.SaveStructure(input.Article.ExternalID, input.Article.Slug, result.Prompt, result.Text)
+	pending, err := s.writer.StageStructure(input.Article.ExternalID, input.Article.Slug, result.Prompt, result.Text)
 	if err != nil {
 		logger.Error("ошибка сохранения структуры", "stage", "save_structure", "prompt_size", promptSize, "duration_ms", time.Since(started).Milliseconds(), "error", err)
 		return StructureOutput{}, fmt.Errorf("сохранить структуру для external_id %q: %w", input.Article.ExternalID, err)
 	}
-	if err := s.repository.SaveStructurePath(ctx, input.Article.ID, paths.StructurePath); err != nil {
+	defer pending.Abort()
+	paths := pending.Paths
+	if err := articleoutput.Commit(func() error {
+		return s.repository.SaveStructurePath(ctx, input.Article.ID, paths.StructurePath)
+	}, pending); err != nil {
 		logger.Error("ошибка обновления PostgreSQL", "stage", "save_structure_path", "prompt_size", promptSize, "duration_ms", time.Since(started).Milliseconds(), "error", err)
 		return StructureOutput{}, fmt.Errorf("сохранить результат структуры для external_id %q: %w", input.Article.ExternalID, err)
 	}

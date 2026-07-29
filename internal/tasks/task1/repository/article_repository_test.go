@@ -3,11 +3,13 @@ package repository
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -53,23 +55,6 @@ func TestArticleRepositoryIdempotency(t *testing.T) {
 	assertCount(t, pool, "articles", "external_id = '11'", 1)
 	assertImportedFields(t, pool, second.ID, updated)
 	assertCleanedKeywords(t, pool, second.ID, []string{"старый запрос"})
-	if _, err := pool.Exec(ctx, `
-		UPDATE article_inputs
-		SET seo_title = 'не использовать SEO', profession_name = 'не использовать профессию',
-			image_name = 'не использовать имя', image_url = 'не использовать URL'
-		WHERE article_id = $1
-	`, second.ID); err != nil {
-		t.Fatal(err)
-	}
-	resultInput, err := repository.GetResultInput(ctx, "11")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resultInput.SEOTitle != updated.Title || resultInput.ProfessionName != updated.Keyword ||
-		resultInput.ImageName != updated.Header || resultInput.ImageURL != updated.ImageSlug {
-		t.Fatalf("result mapping = SEO %q, profession %q, image %q, URL %q", resultInput.SEOTitle, resultInput.ProfessionName, resultInput.ImageName, resultInput.ImageURL)
-	}
-
 	if err := repository.SaveCleanedKeywords(ctx, first.ID, []string{"новый запрос"}); err != nil {
 		t.Fatal(err)
 	}
@@ -81,13 +66,13 @@ func TestArticleRepositoryIdempotency(t *testing.T) {
 		t.Fatal(err)
 	}
 	firstWordstat := []article.KeywordFrequency{{Query: "первый", Frequency: 100}}
-	if err := repository.SaveArsenkinResearch(ctx, arsenkinArticle.ID, firstWordstat, []string{"слово"}, "H1 Первый"); err != nil {
+	if err := repository.SavePreparedResearch(ctx, arsenkinArticle.ID, []string{"первый запрос"}, firstWordstat, []string{"слово"}, "H1 Первый"); err != nil {
 		t.Fatal(err)
 	}
 	assertCount(t, pool, "article_research", fmt.Sprintf("article_id = %d", arsenkinArticle.ID), 1)
 
 	secondWordstat := []article.KeywordFrequency{{Query: "второй", Frequency: 200}}
-	if err := repository.SaveArsenkinResearch(ctx, arsenkinArticle.ID, secondWordstat, []string{"новое слово"}, "H1 Второй"); err != nil {
+	if err := repository.SavePreparedResearch(ctx, arsenkinArticle.ID, []string{"второй запрос"}, secondWordstat, []string{"новое слово"}, "H1 Второй"); err != nil {
 		t.Fatal(err)
 	}
 	assertCount(t, pool, "article_research", fmt.Sprintf("article_id = %d", arsenkinArticle.ID), 1)
@@ -112,9 +97,10 @@ func TestArticleRepositoryIdempotency(t *testing.T) {
 	`); err != nil {
 		t.Fatal(err)
 	}
-	err = repository.SaveArsenkinResearch(
+	err = repository.SavePreparedResearch(
 		ctx,
 		arsenkinArticle.ID,
+		[]string{"не должен сохраниться"},
 		[]article.KeywordFrequency{{Query: "не должен сохраниться", Frequency: 300}},
 		[]string{"не должно сохраниться"},
 		"H1 Не должен сохраниться",
@@ -253,14 +239,17 @@ func TestArticleRepositoryIdempotency(t *testing.T) {
 	if clearedArticlePath != nil {
 		t.Fatalf("stale article_path was not cleared: %q", *clearedArticlePath)
 	}
-	if _, err := pool.Exec(ctx, `INSERT INTO article_metadata (article_id, metadata_text) VALUES ($1, 'old')`, arsenkinArticle.ID); err != nil {
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO article_metadata (article_id, metadata_text) VALUES ($1, 'old')
+		ON CONFLICT (article_id) DO UPDATE SET metadata_text = EXCLUDED.metadata_text
+	`, arsenkinArticle.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := repository.ResetArticleForRun(ctx, arsenkinArticle.ID); err != nil {
+	if err := repository.PrepareArticleForRun(ctx, arsenkinArticle.ID); err != nil {
 		t.Fatal(err)
 	}
 	for _, table := range []string{"article_research", "article_metadata", "article_outputs"} {
-		assertCount(t, pool, table, fmt.Sprintf("article_id = %d", arsenkinArticle.ID), 0)
+		assertCount(t, pool, table, fmt.Sprintf("article_id = %d", arsenkinArticle.ID), 1)
 	}
 	var status string
 	var errorMessage *string
@@ -280,6 +269,403 @@ func TestArticleRepositoryIdempotency(t *testing.T) {
 	}
 	if _, err := repository.GetGenerationInput(ctx, "404"); err == nil || !strings.Contains(err.Error(), "не найдена") {
 		t.Fatalf("missing article error = %v", err)
+	}
+}
+
+func TestGetResultInputMapsStructuredInputFields(t *testing.T) {
+	repository, pool := newTestRepository(t)
+	ctx := context.Background()
+	created, err := repository.Create(ctx, article.Input{
+		ExcelID: 21, Title: "старый title", Keyword: "старый key_word",
+		Header: "старый header", ImageSlug: "старый-image-slug",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+		UPDATE article_inputs
+		SET seo_title = 'новый seo_title', profession_name = 'новый profession_name',
+			image_name = 'новый image_name', image_url = 'https://example.test/new-image.jpg'
+		WHERE article_id = $1
+	`, created.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	input, err := repository.GetResultInput(ctx, created.ExternalID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if input.SEOTitle != "новый seo_title" || input.ProfessionName != "новый profession_name" ||
+		input.ImageName != "новый image_name" || input.ImageURL != "https://example.test/new-image.jpg" {
+		t.Fatalf("structured result mapping = SEO %q, profession %q, image %q, URL %q",
+			input.SEOTitle, input.ProfessionName, input.ImageName, input.ImageURL)
+	}
+	if input.SEOTitle == "старый title" || input.ProfessionName == "старый key_word" ||
+		input.ImageName == "старый header" || input.ImageURL == "старый-image-slug" {
+		t.Fatalf("structured fields were replaced by legacy values: %+v", input)
+	}
+
+	if _, err := pool.Exec(ctx, `
+		UPDATE article_inputs
+		SET seo_title = NULL, profession_name = NULL, image_name = NULL, image_url = NULL
+		WHERE article_id = $1
+	`, created.ID); err != nil {
+		t.Fatal(err)
+	}
+	nullInput, err := repository.GetResultInput(ctx, created.ExternalID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if nullInput.SEOTitle != "" || nullInput.ProfessionName != "" || nullInput.ImageName != "" || nullInput.ImageURL != "" {
+		t.Fatalf("NULL structured mapping = SEO %q, profession %q, image %q, URL %q",
+			nullInput.SEOTitle, nullInput.ProfessionName, nullInput.ImageName, nullInput.ImageURL)
+	}
+}
+
+func TestSaveHTMLPathWaitsForResultBeforeCompletion(t *testing.T) {
+	repository, pool := newTestRepository(t)
+	ctx := context.Background()
+	created, err := repository.Create(ctx, article.Input{ExcelID: 25, Title: "HTML", ImageSlug: "html"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO article_outputs (article_id) VALUES ($1)`, created.ID); err != nil {
+		t.Fatal(err)
+	}
+	const htmlPath = "25-html/article.html"
+	if err := repository.SaveHTMLPath(ctx, created.ID, htmlPath); err != nil {
+		t.Fatal(err)
+	}
+	var status, currentStep, savedHTMLPath string
+	if err := pool.QueryRow(ctx, `
+		SELECT a.status, a.current_step, o.html_path
+		FROM articles AS a JOIN article_outputs AS o ON o.article_id = a.id
+		WHERE a.id = $1
+	`, created.ID).Scan(&status, &currentStep, &savedHTMLPath); err != nil {
+		t.Fatal(err)
+	}
+	if status != "processing" || currentStep != "final_file_assembly" || savedHTMLPath != htmlPath {
+		t.Fatalf("state after HTML = status %q, step %q, path %q", status, currentStep, savedHTMLPath)
+	}
+	if err := repository.CompleteGeneration(ctx, created.ID); err != nil {
+		t.Fatal(err)
+	}
+	var completedStep *string
+	if err := pool.QueryRow(ctx, `SELECT status, current_step FROM articles WHERE id = $1`, created.ID).Scan(&status, &completedStep); err != nil {
+		t.Fatal(err)
+	}
+	if status != "completed" || completedStep != nil {
+		t.Fatalf("completed state = status %q, step %v", status, completedStep)
+	}
+
+	failed, err := repository.Create(ctx, article.Input{ExcelID: 26, Title: "Result failure", ImageSlug: "result-failure"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO article_outputs (article_id) VALUES ($1)`, failed.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.SaveHTMLPath(ctx, failed.ID, "26-result-failure/article.html"); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.SaveError(ctx, failed.ID, errors.New("result publication failed")); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `
+		SELECT a.status, a.current_step, o.html_path
+		FROM articles AS a JOIN article_outputs AS o ON o.article_id = a.id
+		WHERE a.id = $1
+	`, failed.ID).Scan(&status, &currentStep, &savedHTMLPath); err != nil {
+		t.Fatal(err)
+	}
+	if status != "failed" || currentStep != "final_file_assembly" || savedHTMLPath != "26-result-failure/article.html" {
+		t.Fatalf("state after result failure = status %q, step %q, path %q", status, currentStep, savedHTMLPath)
+	}
+}
+
+func TestClaimNextIncompleteMarksArticleProcessing(t *testing.T) {
+	repository, pool := newTestRepository(t)
+	ctx := context.Background()
+	created, err := repository.Create(ctx, article.Input{ExcelID: 31, Title: "Ожидающая", ImageSlug: "pending"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	claimed, found, err := repository.ClaimNextIncomplete(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found || claimed.ID != created.ID || claimed.Status != "processing" {
+		t.Fatalf("claim = %+v, found = %v", claimed, found)
+	}
+	var status string
+	if err := pool.QueryRow(ctx, `SELECT status FROM articles WHERE id = $1`, created.ID).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "processing" {
+		t.Fatalf("stored status = %q, want processing", status)
+	}
+}
+
+func TestClaimNextIncompleteConcurrentClaimsGetDifferentArticles(t *testing.T) {
+	repository, _ := newTestRepository(t)
+	ctx := context.Background()
+	first, err := repository.Create(ctx, article.Input{ExcelID: 41, Title: "Первая", ImageSlug: "first"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := repository.Create(ctx, article.Input{ExcelID: 42, Title: "Вторая", ImageSlug: "second"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	results := runConcurrentClaims(t, repository, 2)
+	if !results[0].found || !results[1].found || results[0].article.ID == results[1].article.ID {
+		t.Fatalf("concurrent claims = %+v", results)
+	}
+	claimedIDs := map[int64]bool{results[0].article.ID: true, results[1].article.ID: true}
+	if !claimedIDs[first.ID] || !claimedIDs[second.ID] {
+		t.Fatalf("claimed IDs = %v, want %d and %d", claimedIDs, first.ID, second.ID)
+	}
+	t.Logf("concurrent claims received different article_id: %d and %d", results[0].article.ID, results[1].article.ID)
+}
+
+func TestClaimNextIncompleteConcurrentClaimsDoNotRepeatSingleArticle(t *testing.T) {
+	repository, _ := newTestRepository(t)
+	ctx := context.Background()
+	created, err := repository.Create(ctx, article.Input{ExcelID: 51, Title: "Единственная", ImageSlug: "single"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	results := runConcurrentClaims(t, repository, 2)
+	found := 0
+	for _, result := range results {
+		if result.found {
+			found++
+			if result.article.ID != created.ID {
+				t.Fatalf("claimed article_id = %d, want %d", result.article.ID, created.ID)
+			}
+		}
+	}
+	if found != 1 {
+		t.Fatalf("successful claims = %d, want 1; results = %+v", found, results)
+	}
+	t.Logf("single article_id %d was received by exactly one claim", created.ID)
+}
+
+func TestClaimNextIncompleteStatusSemantics(t *testing.T) {
+	repository, pool := newTestRepository(t)
+	ctx := context.Background()
+	completed := createArticleWithStatus(t, repository, pool, 61, "completed")
+	processing := createArticleWithStatus(t, repository, pool, 62, "processing")
+	failed := createArticleWithStatus(t, repository, pool, 63, "failed")
+	pending := createArticleWithStatus(t, repository, pool, 64, "pending")
+
+	first, found, err := repository.ClaimNextIncomplete(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found || first.ID != pending.ID {
+		t.Fatalf("first claim = %+v, found = %v; want pending article %d after failed article %d", first, found, pending.ID, failed.ID)
+	}
+	if _, found, err := repository.ClaimNextIncomplete(ctx); err != nil || found {
+		t.Fatalf("second claim found = %v, err = %v; failed=%d processing=%d completed=%d must remain ineligible", found, err, failed.ID, processing.ID, completed.ID)
+	}
+}
+
+func TestClaimNextIncompleteReturnsNoCandidateForFailedArticle(t *testing.T) {
+	repository, pool := newTestRepository(t)
+	failed := createArticleWithStatus(t, repository, pool, 65, "failed")
+
+	claimed, found, err := repository.ClaimNextIncomplete(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found {
+		t.Fatalf("claim = %+v, found = true; failed article %d must not be claimed automatically", claimed, failed.ID)
+	}
+}
+
+func TestClaimNextIncompleteRollbackReleasesArticle(t *testing.T) {
+	repository, pool := newTestRepository(t)
+	ctx := context.Background()
+	created, err := repository.Create(ctx, article.Input{ExcelID: 71, Title: "Rollback", ImageSlug: "rollback"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, found, err := claimNextIncomplete(ctx, tx)
+	if err != nil {
+		_ = tx.Rollback(ctx)
+		t.Fatal(err)
+	}
+	if !found || claimed.ID != created.ID || claimed.Status != "processing" {
+		_ = tx.Rollback(ctx)
+		t.Fatalf("transactional claim = %+v, found = %v", claimed, found)
+	}
+	if err := tx.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	var status string
+	if err := pool.QueryRow(ctx, `SELECT status FROM articles WHERE id = $1`, created.ID).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "pending" {
+		t.Fatalf("status after rollback = %q, want pending", status)
+	}
+	reclaimed, found, err := repository.ClaimNextIncomplete(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found || reclaimed.ID != created.ID {
+		t.Fatalf("claim after rollback = %+v, found = %v", reclaimed, found)
+	}
+}
+
+func TestSavePreparedResearchReplacesCompleteResearchAfterSuccessfulPreparation(t *testing.T) {
+	repository, pool := newTestRepository(t)
+	ctx := context.Background()
+	created, err := repository.Create(ctx, article.Input{ExcelID: 81, Title: "Research", ImageSlug: "research"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.SavePreparedResearch(ctx, created.ID,
+		[]string{"старый cleaned"},
+		[]article.KeywordFrequency{{Query: "старый wordstat", Frequency: 10}},
+		[]string{"старый lsi"},
+		"старая структура",
+	); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO article_metadata (article_id, metadata_text) VALUES ($1, 'старые metadata');
+		INSERT INTO article_outputs (article_id, article_path) VALUES ($1, 'old/article.txt');
+	`, created.ID); err != nil {
+		t.Fatal(err)
+	}
+	oldUpdatedAt := researchUpdatedAt(t, pool, created.ID)
+
+	if err := repository.PrepareArticleForRun(ctx, created.ID); err != nil {
+		t.Fatal(err)
+	}
+	assertCount(t, pool, "article_research", fmt.Sprintf("article_id = %d", created.ID), 1)
+	assertCount(t, pool, "article_metadata", fmt.Sprintf("article_id = %d", created.ID), 1)
+	assertCount(t, pool, "article_outputs", fmt.Sprintf("article_id = %d", created.ID), 1)
+	assertCompleteResearch(t, pool, created.ID,
+		[]string{"старый cleaned"},
+		[]article.KeywordFrequency{{Query: "старый wordstat", Frequency: 10}},
+		[]string{"старый lsi"},
+		"старая структура",
+	)
+	if _, err := pool.Exec(ctx, `SELECT pg_sleep(0.01)`); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := repository.SavePreparedResearch(ctx, created.ID,
+		[]string{"новый cleaned"},
+		[]article.KeywordFrequency{{Query: "новый wordstat", Frequency: 20}},
+		[]string{"новый lsi"},
+		"новая структура",
+	); err != nil {
+		t.Fatal(err)
+	}
+	assertCompleteResearch(t, pool, created.ID,
+		[]string{"новый cleaned"},
+		[]article.KeywordFrequency{{Query: "новый wordstat", Frequency: 20}},
+		[]string{"новый lsi"},
+		"новая структура",
+	)
+	if updatedAt := researchUpdatedAt(t, pool, created.ID); !updatedAt.After(oldUpdatedAt) {
+		t.Fatalf("research updated_at = %v, want after %v", updatedAt, oldUpdatedAt)
+	}
+	assertCount(t, pool, "article_metadata", fmt.Sprintf("article_id = %d", created.ID), 0)
+	assertCount(t, pool, "article_outputs", fmt.Sprintf("article_id = %d", created.ID), 0)
+}
+
+type claimResult struct {
+	article article.Article
+	found   bool
+	err     error
+}
+
+func runConcurrentClaims(t *testing.T, repository *ArticleRepository, count int) []claimResult {
+	t.Helper()
+	start := make(chan struct{})
+	results := make([]claimResult, count)
+	var waitGroup sync.WaitGroup
+	waitGroup.Add(count)
+	for index := range results {
+		go func(index int) {
+			defer waitGroup.Done()
+			<-start
+			results[index].article, results[index].found, results[index].err = repository.ClaimNextIncomplete(context.Background())
+		}(index)
+	}
+	close(start)
+	waitGroup.Wait()
+	for _, result := range results {
+		if result.err != nil {
+			t.Fatal(result.err)
+		}
+	}
+	return results
+}
+
+func createArticleWithStatus(t *testing.T, repository *ArticleRepository, pool *pgxpool.Pool, excelID int, status string) article.Article {
+	t.Helper()
+	created, err := repository.Create(context.Background(), article.Input{ExcelID: excelID, Title: status, ImageSlug: status})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(context.Background(), `
+		UPDATE articles
+		SET status = $2, current_step = CASE WHEN $2 = 'completed' THEN NULL ELSE current_step END
+		WHERE id = $1
+	`, created.ID, status); err != nil {
+		t.Fatal(err)
+	}
+	return created
+}
+
+func researchUpdatedAt(t *testing.T, pool *pgxpool.Pool, articleID int64) time.Time {
+	t.Helper()
+	var updatedAt time.Time
+	if err := pool.QueryRow(context.Background(), `SELECT updated_at FROM article_research WHERE article_id = $1`, articleID).Scan(&updatedAt); err != nil {
+		t.Fatal(err)
+	}
+	return updatedAt
+}
+
+func assertCompleteResearch(t *testing.T, pool *pgxpool.Pool, articleID int64, cleaned []string, wordstat []article.KeywordFrequency, lsi []string, structure string) {
+	t.Helper()
+	var cleanedJSON, wordstatJSON, lsiJSON []byte
+	var gotStructure string
+	if err := pool.QueryRow(context.Background(), `
+		SELECT cleaned_keywords, wordstat_keywords, lsi_words, competitor_structure
+		FROM article_research WHERE article_id = $1
+	`, articleID).Scan(&cleanedJSON, &wordstatJSON, &lsiJSON, &gotStructure); err != nil {
+		t.Fatal(err)
+	}
+	var gotCleaned []string
+	var gotWordstat []article.KeywordFrequency
+	var gotLSI []string
+	if err := json.Unmarshal(cleanedJSON, &gotCleaned); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(wordstatJSON, &gotWordstat); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(lsiJSON, &gotLSI); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(gotCleaned, cleaned) || !reflect.DeepEqual(gotWordstat, wordstat) ||
+		!reflect.DeepEqual(gotLSI, lsi) || gotStructure != structure {
+		t.Fatalf("research = cleaned %#v, wordstat %#v, lsi %#v, structure %q", gotCleaned, gotWordstat, gotLSI, gotStructure)
 	}
 }
 
@@ -321,8 +707,10 @@ func newTestRepository(t *testing.T) (*ArticleRepository, *pgxpool.Pool) {
 		"000003_add_wordstat_keywords.up.sql",
 		"000004_add_article_research_updated_at.up.sql",
 		"000005_add_article_review_stage.up.sql",
+		"000006_add_structured_article_metadata.up.sql",
+		"000007_add_result_input_fields.up.sql",
 	} {
-		migration, err := os.ReadFile(filepath.Join("..", "..", "migrations", name))
+		migration, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "migrations", name))
 		if err != nil {
 			t.Fatal(err)
 		}

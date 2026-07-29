@@ -29,7 +29,7 @@ type Repository interface {
 type Writer interface {
 	Read(relativePath string) (string, error)
 	Exists(relativePath string) bool
-	SaveResult(externalID, slug, content string) (articleoutput.ArticlePaths, error)
+	StageResult(externalID, slug, content string) (*articleoutput.PendingArtifact, error)
 }
 
 type Service struct {
@@ -113,43 +113,56 @@ func ParseFAQItems(text string) ([]FAQItem, error) {
 
 // Build loads persisted data and atomically rebuilds result.md without an LLM.
 func (s *Service) Build(ctx context.Context, externalID string) (articleoutput.ArticlePaths, error) {
+	pending, err := s.BuildStaged(ctx, externalID)
+	if err != nil {
+		return articleoutput.ArticlePaths{}, err
+	}
+	defer pending.Abort()
+	if err := articleoutput.Commit(nil, pending); err != nil {
+		return articleoutput.ArticlePaths{}, err
+	}
+	s.logger.Info("result saved", "external_id", externalID, "stage", "result_generation", "result_path", pending.Paths.ResultPath)
+	return pending.Paths, nil
+}
+
+func (s *Service) BuildStaged(ctx context.Context, externalID string) (*articleoutput.PendingArtifact, error) {
 	s.logger.Info("result generation started", "external_id", externalID, "stage", "result_generation")
 	input, err := s.repository.GetResultInput(ctx, externalID)
 	if err != nil {
-		return articleoutput.ArticlePaths{}, fmt.Errorf("load result data for external_id %s: %w", externalID, err)
+		return nil, fmt.Errorf("load result data for external_id %s: %w", externalID, err)
 	}
 	if strings.TrimSpace(input.ArticlePath) == "" {
-		return articleoutput.ArticlePaths{}, fmt.Errorf("article_path is missing for external_id %s", externalID)
+		return nil, fmt.Errorf("article_path is missing for external_id %s", externalID)
 	}
 	articleText, err := s.writer.Read(input.ArticlePath)
 	if err != nil {
-		return articleoutput.ArticlePaths{}, fmt.Errorf("read article file %q: %w", input.ArticlePath, err)
+		return nil, fmt.Errorf("read article file %q: %w", input.ArticlePath, err)
 	}
 	if input.HTMLPath != "" && !s.writer.Exists(input.HTMLPath) {
 		input.HTMLPath = ""
 	}
 	faqItems, err := ParseFAQItems(input.FAQ)
 	if err != nil {
-		return articleoutput.ArticlePaths{}, fmt.Errorf("parse FAQ for result: %w", err)
+		return nil, fmt.Errorf("parse FAQ for result: %w", err)
 	}
 	templateText, err := os.ReadFile(s.templatePath)
 	if err != nil {
-		return articleoutput.ArticlePaths{}, fmt.Errorf("read result template %q: %w", s.templatePath, err)
+		return nil, fmt.Errorf("read result template %q: %w", s.templatePath, err)
 	}
 	tmpl, err := template.New("result.md").Funcs(template.FuncMap{
 		"add": func(left, right int) int { return left + right },
 	}).Option("missingkey=error").Parse(string(templateText))
 	if err != nil {
-		return articleoutput.ArticlePaths{}, fmt.Errorf("parse result template %q: %w", s.templatePath, err)
+		return nil, fmt.Errorf("parse result template %q: %w", s.templatePath, err)
 	}
 	var rendered bytes.Buffer
 	if err := tmpl.Execute(&rendered, templateData{ResultInput: input, Title: input.Article.Title, ReadingTimeMinutes: ReadingTimeMinutes(articleText), FAQItems: faqItems}); err != nil {
-		return articleoutput.ArticlePaths{}, fmt.Errorf("render result template: %w", err)
+		return nil, fmt.Errorf("render result template: %w", err)
 	}
-	paths, err := s.writer.SaveResult(input.Article.ExternalID, input.Article.Slug, rendered.String())
+	pending, err := s.writer.StageResult(input.Article.ExternalID, input.Article.Slug, rendered.String())
 	if err != nil {
-		return articleoutput.ArticlePaths{}, err
+		return nil, err
 	}
-	s.logger.Info("result saved", "article_id", input.Article.ID, "external_id", externalID, "stage", "result_generation", "result_path", paths.ResultPath)
-	return paths, nil
+	s.logger.Info("result staged", "article_id", input.Article.ID, "external_id", externalID, "stage", "result_generation", "result_path", pending.Paths.ResultPath)
+	return pending, nil
 }

@@ -24,8 +24,8 @@ func (r *ArticleRepository) GetResultInput(ctx context.Context, externalID strin
 			a.status, a.current_step, a.error_message, a.created_at, a.updated_at,
 			COALESCE(i.category, ''), COALESCE(m.tags, ''), COALESCE(m.tldr, ''), COALESCE(m.faq, ''),
 			COALESCE(i.professions, ''), COALESCE(i.author, ''), COALESCE(i.key_word, ''),
-			a.title, COALESCE(i.meta_description, ''), COALESCE(i.header, ''),
-			COALESCE(i.key_word, ''), COALESCE(i.header, ''), COALESCE(i.image_slug, ''),
+			COALESCE(i.seo_title, ''), COALESCE(i.meta_description, ''), COALESCE(i.header, ''),
+			COALESCE(i.profession_name, ''), COALESCE(i.image_name, ''), COALESCE(i.image_url, ''),
 			COALESCE(o.article_path, ''), COALESCE(o.html_path, '')
 		FROM articles AS a
 		LEFT JOIN article_inputs AS i ON i.article_id = a.id
@@ -39,8 +39,9 @@ func (r *ArticleRepository) GetResultInput(ctx context.Context, externalID strin
 		&input.Article.Status, &input.Article.CurrentStep, &input.Article.ErrorMessage,
 		&input.Article.CreatedAt, &input.Article.UpdatedAt,
 		&input.Category, &input.Tags, &input.TLDR, &input.FAQ, &input.Professions, &input.Author,
-		&input.Keyword, &input.SEOTitle, &input.MetaDescription, &input.Header, &input.ProfessionName,
-		&input.ImageName, &input.ImageURL, &input.ArticlePath, &input.HTMLPath,
+		&input.Keyword, &input.SEOTitle, &input.MetaDescription, &input.Header,
+		&input.ProfessionName, &input.ImageName, &input.ImageURL,
+		&input.ArticlePath, &input.HTMLPath,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return article.ResultInput{}, fmt.Errorf("статья с external_id %q не найдена", externalID)
@@ -82,20 +83,49 @@ func (r *ArticleRepository) GetDemoGenerationInput(ctx context.Context, external
 	return input, nil
 }
 
-// GetNextIncomplete returns the first article that has not completed task_1.
-func (r *ArticleRepository) GetNextIncomplete(ctx context.Context) (article.Article, bool, error) {
+// ClaimNextIncomplete atomically reserves the first article available for task_1.
+func (r *ArticleRepository) ClaimNextIncomplete(ctx context.Context) (article.Article, bool, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return article.Article{}, false, fmt.Errorf("начать резервирование следующей статьи: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	selected, found, err := claimNextIncomplete(ctx, tx)
+	if err != nil {
+		return article.Article{}, false, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return article.Article{}, false, fmt.Errorf("завершить резервирование следующей статьи: %w", err)
+	}
+	return selected, found, nil
+}
+
+func claimNextIncomplete(ctx context.Context, tx pgx.Tx) (article.Article, bool, error) {
 	const query = `
-		SELECT a.id, a.external_id, a.title, COALESCE(i.image_slug, ''),
-			COALESCE(i.reference_url, ''), a.status, a.current_step, a.error_message,
-			a.created_at, a.updated_at
-		FROM articles AS a
-		LEFT JOIN article_inputs AS i ON i.article_id = a.id
-		WHERE a.status <> 'completed'
-		ORDER BY a.id ASC
-		LIMIT 1
+		WITH candidate AS (
+			SELECT id
+			FROM articles
+			WHERE status = 'pending'
+			ORDER BY id ASC
+			FOR UPDATE SKIP LOCKED
+			LIMIT 1
+		), claimed AS (
+			UPDATE articles AS a
+			SET status = 'processing', updated_at = NOW()
+			FROM candidate
+			WHERE a.id = candidate.id
+			RETURNING a.id, a.external_id, a.title, a.status, a.current_step,
+				a.error_message, a.created_at, a.updated_at
+		)
+		SELECT c.id, c.external_id, c.title, COALESCE(i.image_slug, ''),
+			COALESCE(i.reference_url, ''), c.status, c.current_step, c.error_message,
+			c.created_at, c.updated_at
+		FROM claimed AS c
+		LEFT JOIN article_inputs AS i ON i.article_id = c.id
 	`
 	var selected article.Article
-	err := r.pool.QueryRow(ctx, query).Scan(
+	err := tx.QueryRow(ctx, query).Scan(
 		&selected.ID, &selected.ExternalID, &selected.Title, &selected.Slug,
 		&selected.ReferenceURL, &selected.Status, &selected.CurrentStep,
 		&selected.ErrorMessage, &selected.CreatedAt, &selected.UpdatedAt,
@@ -104,23 +134,23 @@ func (r *ArticleRepository) GetNextIncomplete(ctx context.Context) (article.Arti
 		return article.Article{}, false, nil
 	}
 	if err != nil {
-		return article.Article{}, false, fmt.Errorf("выбрать следующую незавершённую статью: %w", err)
+		return article.Article{}, false, fmt.Errorf("зарезервировать следующую незавершённую статью: %w", err)
 	}
 	return selected, true, nil
 }
 
-// CompleteDemoGeneration marks the MVP flow complete only after result.md exists.
-func (r *ArticleRepository) CompleteDemoGeneration(ctx context.Context, articleID int64) error {
+// CompleteGeneration marks a flow complete only after result.md exists.
+func (r *ArticleRepository) CompleteGeneration(ctx context.Context, articleID int64) error {
 	result, err := r.pool.Exec(ctx, `
 		UPDATE articles
 		SET status = 'completed', current_step = NULL, error_message = NULL, updated_at = NOW()
 		WHERE id = $1
 	`, articleID)
 	if err != nil {
-		return fmt.Errorf("завершить demo-генерацию статьи %d: %w", articleID, err)
+		return fmt.Errorf("завершить генерацию статьи %d: %w", articleID, err)
 	}
 	if result.RowsAffected() != 1 {
-		return fmt.Errorf("статья %d не найдена при завершении demo-генерации", articleID)
+		return fmt.Errorf("статья %d не найдена при завершении генерации", articleID)
 	}
 	return nil
 }
@@ -536,20 +566,14 @@ func (r *ArticleRepository) GetAll(
 	return articles, nil
 }
 
-// ResetArticleForRun removes all derived data and resets processing state.
-// The article row and its imported input remain the current source of the run.
-func (r *ArticleRepository) ResetArticleForRun(ctx context.Context, articleID int64) error {
+// PrepareArticleForRun resets processing state without removing the last successful results.
+func (r *ArticleRepository) PrepareArticleForRun(ctx context.Context, articleID int64) error {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("begin resetting article for run: %w", err)
+		return fmt.Errorf("begin preparing article for run: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	for _, table := range []string{"article_outputs", "article_metadata", "article_research"} {
-		if _, err := tx.Exec(ctx, "DELETE FROM "+table+" WHERE article_id = $1", articleID); err != nil {
-			return fmt.Errorf("clear %s for article %d: %w", table, articleID, err)
-		}
-	}
 	const articleQuery = `
 		UPDATE articles
 		SET status = 'processing', current_step = 'arsenkin_collection',
@@ -558,13 +582,13 @@ func (r *ArticleRepository) ResetArticleForRun(ctx context.Context, articleID in
 	`
 	result, err := tx.Exec(ctx, articleQuery, articleID)
 	if err != nil {
-		return fmt.Errorf("reset article processing state: %w", err)
+		return fmt.Errorf("prepare article processing state: %w", err)
 	}
 	if result.RowsAffected() != 1 {
-		return fmt.Errorf("article %d not found while resetting run", articleID)
+		return fmt.Errorf("article %d not found while preparing run", articleID)
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("finish resetting article for run: %w", err)
+		return fmt.Errorf("finish preparing article for run: %w", err)
 	}
 	return nil
 }
@@ -705,7 +729,7 @@ func (r *ArticleRepository) SaveFixedArticlePath(ctx context.Context, articleID 
 	return nil
 }
 
-// SaveHTMLPath stores final HTML and marks the article completed.
+// SaveHTMLPath stores final HTML and advances to final result assembly.
 func (r *ArticleRepository) SaveHTMLPath(ctx context.Context, articleID int64, htmlPath string) error {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -725,11 +749,12 @@ func (r *ArticleRepository) SaveHTMLPath(ctx context.Context, articleID int64, h
 	}
 	result, err := tx.Exec(ctx, `
 		UPDATE articles
-		SET status = 'completed', current_step = NULL, error_message = NULL, updated_at = NOW()
+		SET status = 'processing', current_step = 'final_file_assembly',
+			error_message = NULL, updated_at = NOW()
 		WHERE id = $1
 	`, articleID)
 	if err != nil {
-		return fmt.Errorf("завершить обработку статьи: %w", err)
+		return fmt.Errorf("обновить этап после HTML: %w", err)
 	}
 	if result.RowsAffected() != 1 {
 		return fmt.Errorf("статья %d не найдена при сохранении HTML", articleID)
@@ -802,14 +827,19 @@ func (r *ArticleRepository) SaveCleanedKeywords(
 	return nil
 }
 
-// SaveArsenkinResearch сохраняет Wordstat и Copywriters одной транзакцией.
-func (r *ArticleRepository) SaveArsenkinResearch(
+// SavePreparedResearch atomically replaces complete research and clears stale generated state.
+func (r *ArticleRepository) SavePreparedResearch(
 	ctx context.Context,
 	articleID int64,
+	cleanedKeywords []string,
 	wordstat []article.KeywordFrequency,
 	lsiWords []string,
 	competitorStructure string,
 ) error {
+	cleanedKeywordsJSON, err := json.Marshal(cleanedKeywords)
+	if err != nil {
+		return fmt.Errorf("закодировать очищенные запросы: %w", err)
+	}
 	wordstatJSON, err := json.Marshal(wordstat)
 	if err != nil {
 		return fmt.Errorf("закодировать частотности Wordstat: %w", err)
@@ -826,19 +856,27 @@ func (r *ArticleRepository) SaveArsenkinResearch(
 
 	const researchQuery = `
 		INSERT INTO article_research (
-			article_id, wordstat_keywords, lsi_words, competitor_structure, collected_at, updated_at
+			article_id, cleaned_keywords, wordstat_keywords, lsi_words,
+			competitor_structure, collected_at, updated_at
 		)
-		VALUES ($1, $2, $3, $4, NOW(), NOW())
+		VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
 		ON CONFLICT (article_id) DO UPDATE
 		SET
+			cleaned_keywords = EXCLUDED.cleaned_keywords,
 			wordstat_keywords = EXCLUDED.wordstat_keywords,
 			lsi_words = EXCLUDED.lsi_words,
 			competitor_structure = EXCLUDED.competitor_structure,
 			collected_at = NOW(),
 			updated_at = NOW()
 	`
-	if _, err := tx.Exec(ctx, researchQuery, articleID, string(wordstatJSON), string(lsiJSON), competitorStructure); err != nil {
+	if _, err := tx.Exec(ctx, researchQuery, articleID, string(cleanedKeywordsJSON), string(wordstatJSON), string(lsiJSON), competitorStructure); err != nil {
 		return fmt.Errorf("сохранить исследование Arsenkin: %w", err)
+	}
+
+	for _, table := range []string{"article_outputs", "article_metadata"} {
+		if _, err := tx.Exec(ctx, "DELETE FROM "+table+" WHERE article_id = $1", articleID); err != nil {
+			return fmt.Errorf("очистить %s после успешного исследования статьи %d: %w", table, articleID, err)
+		}
 	}
 
 	const articleQuery = `

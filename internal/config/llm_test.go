@@ -75,6 +75,18 @@ func TestLoadLLMConfigRejectsMissingEnvironment(t *testing.T) {
 	}
 }
 
+func TestLoadLLMConfigForDryRunDoesNotRequireProviderCredentials(t *testing.T) {
+	path := writeLLMTestConfig(t, "gemini", "MISSING_DRY_RUN_KEY", "")
+	_ = os.Unsetenv("MISSING_DRY_RUN_KEY")
+	cfg, err := LoadLLMConfigForDryRun(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Stages["structure"].PromptTemplate == "" {
+		t.Fatal("dry-run prompt template is empty")
+	}
+}
+
 func TestLoadLLMConfigRejectsMissingPrompt(t *testing.T) {
 	path := writeLLMTestConfig(t, "gemini", "TEST_GEMINI_KEY", filepath.Join(t.TempDir(), "missing.txt"))
 	t.Setenv("TEST_GEMINI_KEY", "test-value")

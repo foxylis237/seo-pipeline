@@ -25,14 +25,14 @@ type fakeLLMClient struct {
 }
 
 type recordingChatFactory struct {
-	results []GenerationResult
+	results []llm.Response
 	errAt   int
 	prompts []string
 	chats   int
 	closed  int
 }
 
-func (f *recordingChatFactory) NewChat(context.Context) (Generator, error) {
+func (f *recordingChatFactory) NewChat(context.Context) (llm.Chat, error) {
 	f.chats++
 	return &recordingChat{factory: f}, nil
 }
@@ -43,8 +43,9 @@ type recordingChat struct {
 }
 
 type fakeResultBuilder struct {
-	err   error
-	calls int
+	err    error
+	calls  int
+	writer *articleoutput.Writer
 }
 
 func (b *fakeResultBuilder) Build(context.Context, string) (articleoutput.ArticlePaths, error) {
@@ -52,13 +53,26 @@ func (b *fakeResultBuilder) Build(context.Context, string) (articleoutput.Articl
 	return articleoutput.ArticlePaths{ResultPath: "37-tema/result.md"}, b.err
 }
 
-func (c *recordingChat) Generate(_ context.Context, prompt string) (GenerationResult, error) {
+func (b *fakeResultBuilder) BuildStaged(context.Context, string) (*articleoutput.PendingArtifact, error) {
+	b.calls++
+	if b.err != nil {
+		return nil, b.err
+	}
+	return b.writer.StageResult("37", "tema", "result")
+}
+
+func newFakeResultBuilder(t *testing.T, err error) *fakeResultBuilder {
+	t.Helper()
+	return &fakeResultBuilder{err: err, writer: articleoutput.NewWriter(t.TempDir())}
+}
+
+func (c *recordingChat) Generate(_ context.Context, prompt string) (llm.Response, error) {
 	c.factory.prompts = append(c.factory.prompts, prompt)
 	if c.factory.errAt > 0 && c.next+1 == c.factory.errAt {
-		return GenerationResult{}, errors.New("chat request failed")
+		return llm.Response{}, errors.New("chat request failed")
 	}
 	if c.next >= len(c.factory.results) {
-		return GenerationResult{}, errors.New("missing chat result")
+		return llm.Response{}, errors.New("missing chat result")
 	}
 	result := c.factory.results[c.next]
 	c.next++
@@ -71,7 +85,7 @@ func (c *recordingChat) Close() error {
 }
 
 func successfulChatFactory() *recordingChatFactory {
-	return &recordingChatFactory{results: []GenerationResult{
+	return &recordingChatFactory{results: []llm.Response{
 		{Text: "Исходная статья", Model: "gemini-test", InputTokens: 10, OutputTokens: 20},
 		{Text: "Метки: Профессия, Обучение, Как стать\nTLDR:\nИтог.\nFAQ:\nВопрос: Как?\nОтвет: Так.", Model: "gemini-test"},
 	}}
@@ -96,7 +110,7 @@ func testGenerationRouter(client *fakeLLMClient, logger *slog.Logger) *llm.Route
 		case "fix":
 			prompt = "fix|{{.Article}}|{{.Review}}|{{.Professions}}|{{.Links}}"
 		case "info":
-			prompt = "info from current chat"
+			prompt = "info from current chat|{{.GeneratedStructure}}"
 		}
 		stages[stage] = config.LLMStageConfig{
 			Provider: "fake", Model: stage, PromptTemplate: prompt,
@@ -130,14 +144,16 @@ type fakePipelineRepository struct {
 	begunStages        []string
 	demoCompleted      bool
 	demoStateSaved     bool
+	completionCalls    int
 }
 
 func (r *fakePipelineRepository) GetDemoGenerationInput(_ context.Context, _ string) (article.GenerationInput, error) {
 	return r.input, nil
 }
 
-func (r *fakePipelineRepository) CompleteDemoGeneration(_ context.Context, _ int64) error {
+func (r *fakePipelineRepository) CompleteGeneration(_ context.Context, _ int64) error {
 	r.demoCompleted = true
+	r.completionCalls++
 	return nil
 }
 
@@ -204,13 +220,33 @@ func (r *fakePipelineRepository) SaveGenerationPaths(_ context.Context, articleI
 	return nil
 }
 
+func TestPipelineDoesNotSaveContextCancellationAsArticleError(t *testing.T) {
+	repository := &fakePipelineRepository{}
+	pipeline := &Pipeline{
+		repository: repository,
+		logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	input := article.GenerationInput{Article: article.Article{ID: 7, ExternalID: "37"}}
+
+	err := pipeline.fail(ctx, pipeline.stageLogger(input), input, "article_generation", context.Canceled)
+
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("fail() error = %v, want context.Canceled", err)
+	}
+	if repository.savedError != nil {
+		t.Fatalf("saved error = %v, want no persisted article error", repository.savedError)
+	}
+}
+
 func TestDemoGenerateUsesOneChatSkipsHTMLAndKeepsMetadataStage(t *testing.T) {
 	input := article.GenerationInput{Article: article.Article{ID: 7, ExternalID: "37", Title: "Тема", Slug: "tema"}}
 	repository := &fakePipelineRepository{input: input}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	client := successfulPipelineClient()
 	chatFactory := successfulChatFactory()
-	builder := &fakeResultBuilder{}
+	builder := newFakeResultBuilder(t, nil)
 	pipeline := NewPipeline(repository, testGenerationRouter(client, logger), chatFactory, articleoutput.NewWriter(t.TempDir()), logger, builder)
 
 	output, err := pipeline.RunDemoByExternalID(context.Background(), "37")
@@ -223,8 +259,8 @@ func TestDemoGenerateUsesOneChatSkipsHTMLAndKeepsMetadataStage(t *testing.T) {
 	if len(client.calls) != 0 || repository.htmlPath != "" {
 		t.Fatalf("demo invoked routed/HTML stages: calls=%v html=%q", client.calls, repository.htmlPath)
 	}
-	if !repository.demoCompleted || !repository.demoStateSaved || builder.calls != 1 || output.Paths.ResultPath == "" {
-		t.Fatalf("demo completion: completed=%t result_calls=%d paths=%+v", repository.demoCompleted, builder.calls, output.Paths)
+	if !repository.demoCompleted || repository.completionCalls != 1 || !repository.demoStateSaved || builder.calls != 1 || output.Paths.ResultPath == "" {
+		t.Fatalf("demo completion: completed=%t completion_calls=%d result_calls=%d paths=%+v", repository.demoCompleted, repository.completionCalls, builder.calls, output.Paths)
 	}
 	if len(repository.begunStages) != 1 || repository.begunStages[0] != "article" {
 		t.Fatalf("demo begun stages = %v", repository.begunStages)
@@ -235,7 +271,7 @@ func TestDemoResultErrorDoesNotCompleteFlow(t *testing.T) {
 	input := article.GenerationInput{Article: article.Article{ID: 7, ExternalID: "37", Title: "Тема", Slug: "tema"}}
 	repository := &fakePipelineRepository{input: input}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	builder := &fakeResultBuilder{err: errors.New("result write failed")}
+	builder := newFakeResultBuilder(t, errors.New("result write failed"))
 	pipeline := NewPipeline(repository, testGenerationRouter(successfulPipelineClient(), logger), successfulChatFactory(), articleoutput.NewWriter(t.TempDir()), logger, builder)
 
 	_, err := pipeline.RunDemoByExternalID(context.Background(), "37")
@@ -248,8 +284,8 @@ func TestDemoInfoFailureDoesNotPersistAtomicState(t *testing.T) {
 	input := article.GenerationInput{Article: article.Article{ID: 7, ExternalID: "37", Title: "Тема", Slug: "tema"}}
 	repository := &fakePipelineRepository{input: input}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	chatFactory := &recordingChatFactory{results: []GenerationResult{{Text: "Статья", Model: "test"}, {Text: "неверный info", Model: "test"}}}
-	pipeline := NewPipeline(repository, testGenerationRouter(successfulPipelineClient(), logger), chatFactory, articleoutput.NewWriter(t.TempDir()), logger, &fakeResultBuilder{})
+	chatFactory := &recordingChatFactory{results: []llm.Response{{Text: "Статья", Model: "test"}, {Text: "неверный info", Model: "test"}}}
+	pipeline := NewPipeline(repository, testGenerationRouter(successfulPipelineClient(), logger), chatFactory, articleoutput.NewWriter(t.TempDir()), logger, newFakeResultBuilder(t, nil))
 
 	_, err := pipeline.RunDemoByExternalID(context.Background(), "37")
 	if err == nil || repository.demoStateSaved || repository.demoCompleted || repository.savedError == nil {
@@ -272,7 +308,8 @@ func TestPipelineRunsRoutedStagesInOrderWithMinimalData(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	client := successfulPipelineClient()
 	chatFactory := successfulChatFactory()
-	pipeline := NewPipeline(repository, testGenerationRouter(client, logger), chatFactory, writer, logger)
+	resultBuilder := newFakeResultBuilder(t, nil)
+	pipeline := NewPipeline(repository, testGenerationRouter(client, logger), chatFactory, writer, logger, resultBuilder)
 
 	output, err := pipeline.RunByExternalID(context.Background(), "37")
 	if err != nil {
@@ -320,6 +357,9 @@ func TestPipelineRunsRoutedStagesInOrderWithMinimalData(t *testing.T) {
 	if repository.articleInfo == "" {
 		t.Fatal("article info was not saved to PostgreSQL repository")
 	}
+	if repository.completionCalls != 1 || resultBuilder.calls != 1 {
+		t.Fatalf("completion calls = %d, result calls = %d; want 1 and 1", repository.completionCalls, resultBuilder.calls)
+	}
 	if got := client.requests["review"].Prompt; !strings.Contains(got, "Исходная статья") || strings.Contains(got, "ключ") {
 		t.Fatalf("review prompt = %q", got)
 	}
@@ -335,6 +375,49 @@ func TestPipelineRunsRoutedStagesInOrderWithMinimalData(t *testing.T) {
 	}
 	if _, err := pipeline.RunByExternalID(context.Background(), "37"); err != nil {
 		t.Fatalf("second generate: %v", err)
+	}
+	if repository.completionCalls != 2 {
+		t.Fatalf("completion calls after second generate = %d, want 2", repository.completionCalls)
+	}
+}
+
+func TestFullPipelineResultBuildErrorDoesNotCompleteArticle(t *testing.T) {
+	assertFullPipelineResultFailure(t, errors.New("result template build failed"))
+}
+
+func TestFullPipelineResultPublicationErrorDoesNotCompleteArticle(t *testing.T) {
+	assertFullPipelineResultFailure(t, errors.New("result publication failed"))
+}
+
+func assertFullPipelineResultFailure(t *testing.T, resultErr error) {
+	t.Helper()
+	repository := &fakePipelineRepository{input: pipelineTestInput()}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	client := successfulPipelineClient()
+	builder := newFakeResultBuilder(t, resultErr)
+	pipeline := NewPipeline(
+		repository,
+		testGenerationRouter(client, logger),
+		successfulChatFactory(),
+		articleoutput.NewWriter(t.TempDir()),
+		logger,
+		builder,
+	)
+
+	if _, err := pipeline.RunByExternalID(context.Background(), "37"); !errors.Is(err, resultErr) {
+		t.Fatalf("pipeline error = %v, want %v", err, resultErr)
+	}
+	if repository.htmlPath == "" {
+		t.Fatal("HTML path was lost after result failure")
+	}
+	if repository.completionCalls != 0 || repository.demoCompleted {
+		t.Fatalf("completion calls = %d, completed = %v; want no completion", repository.completionCalls, repository.demoCompleted)
+	}
+	if repository.savedError == nil || builder.calls != 1 {
+		t.Fatalf("saved error = %v, result calls = %d", repository.savedError, builder.calls)
+	}
+	if strings.Join(client.calls, ",") != "structure,review,fix,html" {
+		t.Fatalf("stages after result error = %v", client.calls)
 	}
 }
 
@@ -493,8 +576,8 @@ func TestRunArticleByExternalIDGeneratesArticleAndInfoInOneChat(t *testing.T) {
 	if !strings.Contains(chatFactory.prompts[0], "Сохранённая структура") {
 		t.Fatalf("article prompt = %q", chatFactory.prompts[0])
 	}
-	if strings.Contains(chatFactory.prompts[1], "Исходная статья") || strings.Contains(chatFactory.prompts[1], "Сохранённая структура") {
-		t.Fatalf("info prompt repeats chat context: %q", chatFactory.prompts[1])
+	if strings.Contains(chatFactory.prompts[1], "Исходная статья") || !strings.Contains(chatFactory.prompts[1], "Сохранённая структура") {
+		t.Fatalf("info prompt has incorrect context: %q", chatFactory.prompts[1])
 	}
 	if output.Paths.ArticlePath == "" || repository.articlePath != output.Paths.ArticlePath {
 		t.Fatalf("article result paths = %+v, %q", output.Paths, repository.articlePath)

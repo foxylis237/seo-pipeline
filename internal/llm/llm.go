@@ -23,12 +23,19 @@ type Request struct {
 
 type Response struct {
 	Text         string
+	Model        string
 	InputTokens  int
 	OutputTokens int
 }
 
 type Client interface {
 	Generate(ctx context.Context, request Request) (Response, error)
+}
+
+// Chat represents one provider conversation without exposing its SDK.
+type Chat interface {
+	Generate(ctx context.Context, prompt string) (Response, error)
+	Close() error
 }
 
 type ErrorType string

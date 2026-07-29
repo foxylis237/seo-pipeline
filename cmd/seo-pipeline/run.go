@@ -28,6 +28,20 @@ type keyssoRunError struct {
 	err            error
 }
 
+type prepareRepository interface {
+	PrepareArticleForRun(context.Context, int64) error
+	SavePreparedResearch(context.Context, int64, []string, []article.KeywordFrequency, []string, string) error
+	SaveError(context.Context, int64, error) error
+}
+
+type keyssoCollector interface {
+	CollectCleanKeywords(context.Context, string) (keysso.CollectResult, error)
+}
+
+type arsenkinCollector interface {
+	CollectResearch(context.Context, []string) (arsenkin.Result, error)
+}
+
 func (e *keyssoRunError) Error() string { return e.err.Error() }
 func (e *keyssoRunError) Unwrap() error { return e.err }
 
@@ -70,6 +84,36 @@ func prepareArticle(
 	writer *articleoutput.Writer,
 	selected article.Article,
 ) error {
+	return prepareArticleWithCollectors(
+		ctx,
+		articleRepository,
+		cfg,
+		logger,
+		selected,
+		keysso.New(keysso.Config{
+			ArticleID: selected.ID,
+			Email:     cfg.KeysSOEmail,
+			Password:  cfg.KeysSOPassword,
+			Headless:  true,
+		}, logger),
+		arsenkin.New(arsenkin.Config{
+			ArticleID: selected.ID,
+			Email:     cfg.ArsenkinEmail,
+			Password:  cfg.ArsenkinPassword,
+			Headless:  cfg.ArsenkinHeadless,
+		}, logger),
+	)
+}
+
+func prepareArticleWithCollectors(
+	ctx context.Context,
+	articleRepository prepareRepository,
+	cfg config.Config,
+	logger *slog.Logger,
+	selected article.Article,
+	keyssoService keyssoCollector,
+	arsenkinService arsenkinCollector,
+) error {
 	articleStarted := time.Now()
 	articleLogger := logger.With(
 		"article_id", selected.ID,
@@ -78,7 +122,10 @@ func prepareArticle(
 		"model", cfg.GeminiModel,
 	)
 	articleLogger.Info("обработка статьи начата", "stage", "article_start")
-	if err := articleRepository.ResetArticleForRun(ctx, selected.ID); err != nil {
+	if err := articleRepository.PrepareArticleForRun(ctx, selected.ID); err != nil {
+		if errors.Is(ctx.Err(), context.Canceled) && errors.Is(err, context.Canceled) {
+			return err
+		}
 		articleLogger.Error("ошибка сброса данных статьи", "stage", "reset", "error", err)
 		return err
 	}
@@ -95,13 +142,7 @@ func prepareArticle(
 	}
 	stageLogger.Info("этап Keys.so начат", keyssoLogFields("start", stageStarted, "", 0, 0)...)
 
-	service := keysso.New(keysso.Config{
-		ArticleID: selected.ID,
-		Email:     cfg.KeysSOEmail,
-		Password:  cfg.KeysSOPassword,
-		Headless:  true,
-	}, logger)
-	collectResult, err := service.CollectCleanKeywords(ctx, selected.ReferenceURL)
+	collectResult, err := keyssoService.CollectCleanKeywords(ctx, selected.ReferenceURL)
 	if err != nil {
 		stage := "collect"
 		currentURL := ""
@@ -126,34 +167,24 @@ func prepareArticle(
 			newKeyssoRunError(selected.ID, "validate_result", stageStarted, "", collectResult.CollectedCount, 0, fmt.Errorf("Keys.so вернул пустой список очищенных запросов")),
 		)
 	}
-	if err := articleRepository.SaveCleanedKeywords(ctx, selected.ID, collectResult.CleanedKeywords); err != nil {
-		return savePipelineError(
-			ctx,
-			articleRepository,
-			selected.ID,
-			newKeyssoRunError(selected.ID, "save_result", stageStarted, "", collectResult.CollectedCount, len(collectResult.CleanedKeywords), fmt.Errorf("сохранить результат в PostgreSQL: %w", err)),
-		)
-	}
-	stageLogger.Info("результат Keys.so сохранён", keyssoLogFields("save_result", stageStarted, "", collectResult.CollectedCount, len(collectResult.CleanedKeywords))...)
+	stageLogger.Info("результат Keys.so собран", keyssoLogFields("collect_result", stageStarted, "", collectResult.CollectedCount, len(collectResult.CleanedKeywords))...)
 	stageLogger.Info("этап Keys.so завершён", keyssoLogFields("complete", stageStarted, "", collectResult.CollectedCount, len(collectResult.CleanedKeywords))...)
-	printKeysSOResult(os.Stdout, selected, collectResult)
 
 	arsenkinStarted := time.Now()
 	arsenkinLogger := logger.With("article_id", selected.ID, "integration", "arsenkin")
-	arsenkinService := arsenkin.New(arsenkin.Config{
-		ArticleID: selected.ID,
-		Email:     cfg.ArsenkinEmail,
-		Password:  cfg.ArsenkinPassword,
-		Headless:  cfg.ArsenkinHeadless,
-	}, logger)
 	arsenkinResult, err := arsenkinService.CollectResearch(ctx, collectResult.CleanedKeywords)
 	if err != nil {
 		return savePipelineError(ctx, articleRepository, selected.ID, err)
 	}
-	if err := articleRepository.SaveArsenkinResearch(
+	wordstatKeywords := make([]article.KeywordFrequency, len(arsenkinResult.WordstatKeywords))
+	for index, keyword := range arsenkinResult.WordstatKeywords {
+		wordstatKeywords[index] = article.KeywordFrequency{Query: keyword.Query, Frequency: keyword.Frequency}
+	}
+	if err := articleRepository.SavePreparedResearch(
 		ctx,
 		selected.ID,
-		arsenkinResult.WordstatKeywords,
+		collectResult.CleanedKeywords,
+		wordstatKeywords,
 		arsenkinResult.LSIWords,
 		arsenkinResult.CompetitorStructure,
 	); err != nil {
@@ -165,8 +196,10 @@ func prepareArticle(
 			Err:        fmt.Errorf("сохранить результаты Arsenkin в PostgreSQL: %w", err),
 		})
 	}
+	stageLogger.Info("результат Keys.so сохранён", keyssoLogFields("save_result", stageStarted, "", collectResult.CollectedCount, len(collectResult.CleanedKeywords))...)
 	arsenkinLogger.Info("данные сохранены", "stage", "save_result", "duration_ms", time.Since(arsenkinStarted).Milliseconds(), "current_url", "https://arsenkin.ru/tools/copyrighters/", "wordstat_count", len(arsenkinResult.WordstatKeywords), "lsi_count", len(arsenkinResult.LSIWords), "competitor_structure_length", len(arsenkinResult.CompetitorStructure))
 	arsenkinLogger.Info("этап завершён", "stage", "complete", "duration_ms", time.Since(arsenkinStarted).Milliseconds(), "current_url", "https://arsenkin.ru/tools/copyrighters/", "wordstat_count", len(arsenkinResult.WordstatKeywords), "lsi_count", len(arsenkinResult.LSIWords), "competitor_structure_length", len(arsenkinResult.CompetitorStructure))
+	printKeysSOResult(os.Stdout, selected, collectResult)
 	printArsenkinResult(os.Stdout, selected, arsenkinResult)
 
 	articleLogger.Info("подготовка статьи завершена", "stage", "complete", "duration_ms", time.Since(articleStarted).Milliseconds())
@@ -252,10 +285,15 @@ func printArsenkinResult(writer io.Writer, selected article.Article, result arse
 
 func savePipelineError(
 	ctx context.Context,
-	articleRepository *repository.ArticleRepository,
+	articleRepository interface {
+		SaveError(context.Context, int64, error) error
+	},
 	articleID int64,
 	processingErr error,
 ) error {
+	if errors.Is(ctx.Err(), context.Canceled) && errors.Is(processingErr, context.Canceled) {
+		return processingErr
+	}
 	if err := articleRepository.SaveError(ctx, articleID, processingErr); err != nil {
 		return errors.Join(processingErr, fmt.Errorf("дополнительно не удалось сохранить ошибку: %w", err))
 	}

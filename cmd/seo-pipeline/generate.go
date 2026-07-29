@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 
 	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/article"
@@ -19,14 +20,17 @@ func runDemoGenerate(ctx context.Context, pipeline *generation.Pipeline, externa
 }
 
 type incompleteArticleRepository interface {
-	GetNextIncomplete(context.Context) (article.Article, bool, error)
+	ClaimNextIncomplete(context.Context) (article.Article, bool, error)
 }
 
 func runAllDemo(ctx context.Context, articleRepository incompleteArticleRepository, runArticle func(context.Context, string) error, logger *slog.Logger) error {
 	completed := 0
 	for {
-		selected, found, err := articleRepository.GetNextIncomplete(ctx)
+		selected, found, err := articleRepository.ClaimNextIncomplete(ctx)
 		if err != nil {
+			if errors.Is(ctx.Err(), context.Canceled) && errors.Is(err, context.Canceled) {
+				return err
+			}
 			logger.Error("не удалось выбрать следующую статью", "stage", "select_next_article", "completed_count", completed, "error", err)
 			return err
 		}
@@ -47,6 +51,9 @@ func runAllDemo(ctx context.Context, articleRepository incompleteArticleReposito
 		articleLogger.Info("обработка статьи начата", "stage", "article_start")
 		articleLogger.Info("атомарный demo-этап начат", "stage", "article_generation")
 		if err := runArticle(ctx, selected.ExternalID); err != nil {
+			if errors.Is(ctx.Err(), context.Canceled) && errors.Is(err, context.Canceled) {
+				return err
+			}
 			articleLogger.Error("обработка статьи остановлена с ошибкой", "stage", "article_generation", "completed_count", completed, "error", err)
 			return err
 		}

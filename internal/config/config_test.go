@@ -89,6 +89,54 @@ func TestLoadReportsSearchedPathWhenEnvIsMissing(t *testing.T) {
 	}
 }
 
+func TestLoadDryRunUsesLocalDefaultsWhenEnvIsMissing(t *testing.T) {
+	t.Setenv("ENV_FILE", "")
+	t.Setenv("SEO_PIPELINE_ENV", "")
+	t.Setenv("APP_ENV", "test")
+	unsetEnv(t, "DATABASE_URL")
+	unsetEnv(t, "DRY_RUN_DATABASE_URL")
+	unsetEnv(t, "INPUT_FILE_PATH")
+
+	cfg, err := LoadDryRun()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.DatabaseURL != "postgres://seo:seo@localhost:5433/seo_dry_run?sslmode=disable" {
+		t.Fatalf("DatabaseURL = %q", cfg.DatabaseURL)
+	}
+	if cfg.InputFilePath != "input/task_1/input.xlsx" {
+		t.Fatalf("InputFilePath = %q", cfg.InputFilePath)
+	}
+	if cfg.OutputDir != filepath.Join("tasks", "task_1", "output", "dry-run") {
+		t.Fatalf("OutputDir = %q", cfg.OutputDir)
+	}
+}
+
+func TestValidateDryRunRejectsUnsafeEnvironmentAndDatabase(t *testing.T) {
+	base := Config{AppEnv: "test", DatabaseURL: "postgres://seo:seo@localhost:5433/seo_dry_run", InputFilePath: "input.xlsx", OutputDir: "output/dry-run"}
+	if err := base.ValidateDryRun(); err != nil {
+		t.Fatalf("safe config: %v", err)
+	}
+
+	unsafeEnv := base
+	unsafeEnv.AppEnv = "production"
+	if err := unsafeEnv.ValidateDryRun(); err == nil || !strings.Contains(err.Error(), "APP_ENV") {
+		t.Fatalf("unsafe environment error = %v", err)
+	}
+
+	unsafeDatabase := base
+	unsafeDatabase.DatabaseURL = "postgres://seo:seo@localhost:5432/seo"
+	if err := unsafeDatabase.ValidateDryRun(); err == nil || !strings.Contains(err.Error(), "database name") {
+		t.Fatalf("unsafe database error = %v", err)
+	}
+
+	unsafeOutput := base
+	unsafeOutput.OutputDir = "tasks/task_1/output"
+	if err := unsafeOutput.ValidateDryRun(); err == nil || !strings.Contains(err.Error(), "OUTPUT_DIR") {
+		t.Fatalf("unsafe output error = %v", err)
+	}
+}
+
 func TestLoadPreservesSystemEnvironment(t *testing.T) {
 	envPath := filepath.Join(t.TempDir(), ".env")
 	if err := os.WriteFile(envPath, []byte("DATABASE_URL=postgres://from-file\n"), 0o600); err != nil {

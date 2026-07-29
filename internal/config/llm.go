@@ -46,6 +46,15 @@ type LLMStageConfig struct {
 }
 
 func LoadLLMConfig(path string) (LLMConfig, error) {
+	return loadLLMConfig(path, true)
+}
+
+// LoadLLMConfigForDryRun loads prompt templates without requiring provider credentials.
+func LoadLLMConfigForDryRun(path string) (LLMConfig, error) {
+	return loadLLMConfig(path, false)
+}
+
+func loadLLMConfig(path string, requireCredentials bool) (LLMConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return LLMConfig{}, fmt.Errorf("прочитать LLM config %q: %w", path, err)
@@ -54,13 +63,13 @@ func LoadLLMConfig(path string) (LLMConfig, error) {
 	if err := yaml.Unmarshal(data, &fileConfig); err != nil {
 		return LLMConfig{}, fmt.Errorf("разобрать LLM config %q: %w", path, err)
 	}
-	if err := validateLLMConfig(&fileConfig.LLM); err != nil {
+	if err := validateLLMConfig(&fileConfig.LLM, requireCredentials); err != nil {
 		return LLMConfig{}, err
 	}
 	return fileConfig.LLM, nil
 }
 
-func validateLLMConfig(cfg *LLMConfig) error {
+func validateLLMConfig(cfg *LLMConfig, requireCredentials bool) error {
 	for name, provider := range cfg.Providers {
 		provider.Type = strings.TrimSpace(provider.Type)
 		provider.APIKeyEnv = strings.TrimSpace(provider.APIKeyEnv)
@@ -77,7 +86,7 @@ func validateLLMConfig(cfg *LLMConfig) error {
 		if provider.APIKeyEnv == "" {
 			return fmt.Errorf("provider %q has empty api_key_env", name)
 		}
-		if strings.TrimSpace(os.Getenv(provider.APIKeyEnv)) == "" {
+		if requireCredentials && strings.TrimSpace(os.Getenv(provider.APIKeyEnv)) == "" {
 			return fmt.Errorf("provider %q requires environment variable %s", name, provider.APIKeyEnv)
 		}
 		cfg.Providers[name] = provider

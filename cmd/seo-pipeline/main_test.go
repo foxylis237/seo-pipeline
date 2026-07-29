@@ -21,6 +21,8 @@ func TestParseCommand(t *testing.T) {
 		{[]string{"seo-pipeline", "task-1", "info", "37"}, taskCommand{Name: "info", ExternalID: "37"}, ""},
 		{[]string{"seo-pipeline", "task-1", "run", "37"}, taskCommand{Name: "run", ExternalID: "37"}, ""},
 		{[]string{"seo-pipeline", "task-1", "run"}, taskCommand{Name: "run"}, ""},
+		{[]string{"seo-pipeline", "task-1", "run", "--dry-run"}, taskCommand{Name: "run", DryRun: true}, ""},
+		{[]string{"seo-pipeline", "--dry-run", "task_1", "run"}, taskCommand{Name: "run", DryRun: true}, ""},
 		{[]string{"seo-pipeline", "task_1", "review", "37"}, taskCommand{Name: "review", ExternalID: "37"}, ""},
 		{[]string{"seo-pipeline", "task_1", "fix", "37"}, taskCommand{Name: "fix", ExternalID: "37"}, ""},
 		{[]string{"seo-pipeline", "task_1", "html", "37"}, taskCommand{Name: "html", ExternalID: "37"}, ""},
@@ -37,6 +39,9 @@ func TestParseCommand(t *testing.T) {
 		{[]string{"seo-pipeline", "demo-generate", "37"}, taskCommand{}, "available task-1 operations"},
 		{[]string{"seo-pipeline", "task-1", "result", "0"}, taskCommand{}, "positive integer"},
 		{[]string{"seo-pipeline", "generate", "37"}, taskCommand{}, "available task-1 operations"},
+		{[]string{"seo-pipeline", "task-1", "generate", "37", "--dry-run"}, taskCommand{}, "supported only"},
+		{[]string{"seo-pipeline", "task-1", "run", "37", "--dry-run"}, taskCommand{}, "supported only"},
+		{[]string{"seo-pipeline", "task-1", "run", "--dry-run", "--dry-run"}, taskCommand{}, "only once"},
 	}
 	for _, test := range tests {
 		got, err := parseCommand(test.args)

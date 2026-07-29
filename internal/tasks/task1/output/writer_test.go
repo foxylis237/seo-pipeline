@@ -1,6 +1,7 @@
 package output
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -97,6 +98,102 @@ func TestWriterSaveArticle(t *testing.T) {
 	assertFileText(t, filepath.Join(root, filepath.FromSlash(paths.HTMLPath)), "<h2>Новый HTML</h2>")
 }
 
+func TestPendingArtifactKeepsPublishedFilesOnPersistenceError(t *testing.T) {
+	root := t.TempDir()
+	writer := NewWriter(root)
+	paths, err := writer.SaveStructure("42", "stage", "старый prompt", "старая structure")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending, err := writer.StageStructure("42", "stage", "новый prompt", "новая structure")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending.files) != 2 {
+		t.Fatalf("staged files = %d, want 2", len(pending.files))
+	}
+	for _, file := range pending.files {
+		if filepath.Dir(file.temporaryPath) != filepath.Dir(file.finalPath) {
+			t.Fatalf("temporary file %q is not in final directory %q", file.temporaryPath, filepath.Dir(file.finalPath))
+		}
+	}
+	databaseErr := errors.New("database rejected stage")
+	if err := Commit(func() error { return databaseErr }, pending); err != databaseErr {
+		t.Fatalf("Commit() error = %v, want database error", err)
+	}
+	assertFileText(t, filepath.Join(root, filepath.FromSlash(paths.StructurePromptPath)), "старый prompt")
+	assertFileText(t, filepath.Join(root, filepath.FromSlash(paths.StructurePath)), "старая structure")
+	assertNoStagingFiles(t, root)
+}
+
+func TestPendingArtifactRestoresAllFilesOnPartialRenameError(t *testing.T) {
+	root := t.TempDir()
+	writer := NewWriter(root)
+	paths, err := writer.SaveStructure("42", "stage", "старый prompt", "старая structure")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending, err := writer.StageStructure("42", "stage", "новый prompt", "новая structure")
+	if err != nil {
+		t.Fatal(err)
+	}
+	renameCalls := 0
+	pending.rename = func(oldPath, newPath string) error {
+		renameCalls++
+		if renameCalls == 2 {
+			return errors.New("forced rename failure")
+		}
+		return os.Rename(oldPath, newPath)
+	}
+	persistCalled := false
+	if err := Commit(func() error { persistCalled = true; return nil }, pending); err == nil {
+		t.Fatal("Commit() error = nil")
+	}
+	if persistCalled {
+		t.Fatal("database callback was called after rename failure")
+	}
+	assertFileText(t, filepath.Join(root, filepath.FromSlash(paths.StructurePromptPath)), "старый prompt")
+	assertFileText(t, filepath.Join(root, filepath.FromSlash(paths.StructurePath)), "старая structure")
+	assertNoStagingFiles(t, root)
+}
+
+func TestPendingArtifactPartialWriteDoesNotDamagePublishedFile(t *testing.T) {
+	root := t.TempDir()
+	writer := NewWriter(root)
+	paths, err := writer.SaveResult("42", "stage", "old complete result")
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer.write = func(file *os.File, data []byte) (int, error) {
+		written, _ := file.Write(data[:len(data)/2])
+		return written, errors.New("forced partial write")
+	}
+	if _, err := writer.StageResult("42", "stage", "new incomplete result"); err == nil {
+		t.Fatal("StageResult() error = nil")
+	}
+	assertFileText(t, filepath.Join(root, filepath.FromSlash(paths.ResultPath)), "old complete result")
+	assertNoStagingFiles(t, root)
+}
+
+func TestPendingArtifactSuccessfulRetryReplacesWholeContent(t *testing.T) {
+	root := t.TempDir()
+	writer := NewWriter(root)
+	paths, err := writer.SaveHTML("42", "stage", "old prompt", "<p>old trailing content</p>")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending, err := writer.StageHTML("42", "stage", "new prompt", "<p>new</p>")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Commit(func() error { return nil }, pending); err != nil {
+		t.Fatal(err)
+	}
+	assertFileText(t, filepath.Join(root, filepath.FromSlash(paths.HTMLPromptPath)), "new prompt")
+	assertFileText(t, filepath.Join(root, filepath.FromSlash(paths.HTMLPath)), "<p>new</p>")
+	assertNoStagingFiles(t, root)
+}
+
 func TestWriterRejectsUnsafePathParts(t *testing.T) {
 	writer := NewWriter(t.TempDir())
 	for _, testCase := range []struct{ externalID, slug string }{
@@ -119,5 +216,21 @@ func assertFileText(t *testing.T, path, want string) {
 	}
 	if string(got) != want {
 		t.Fatalf("file %s = %q, want %q", path, got, want)
+	}
+}
+
+func assertNoStagingFiles(t *testing.T, root string) {
+	t.Helper()
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if strings.HasPrefix(entry.Name(), ".tmp-") || strings.HasPrefix(entry.Name(), ".backup-") {
+			t.Fatalf("staging file remains after operation: %s", path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }

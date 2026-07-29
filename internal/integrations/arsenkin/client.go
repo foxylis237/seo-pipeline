@@ -15,7 +15,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/article"
 	"github.com/mxschmitt/playwright-go"
 	"github.com/xuri/excelize/v2"
 )
@@ -41,8 +40,11 @@ const (
 	resultLimit        = 50
 )
 
-// KeywordFrequency содержит запрос и его частотность Wordstat.
-type KeywordFrequency = article.KeywordFrequency
+// KeywordFrequency contains one Wordstat query and its frequency.
+type KeywordFrequency struct {
+	Query     string `json:"query"`
+	Frequency int    `json:"frequency"`
+}
 
 type rawKeywordFrequency struct {
 	Query     string `json:"query"`

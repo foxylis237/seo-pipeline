@@ -7,6 +7,7 @@ data/arsenkin-browser-profile/
 
 # Input
 input/**/*.xlsx
+!input/task_1/input.xlsx
 tasks/*/input/**/*.xlsx
 
 # macOS

@@ -15,5 +15,30 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
+  postgres-dry-run:
+    image: postgres:17-alpine
+    container_name: seo-postgres-dry-run
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_DB: seo_dry_run
+      POSTGRES_USER: seo
+      POSTGRES_PASSWORD: seo
+
+    ports:
+      - "5433:5432"
+
+    volumes:
+      - postgres_dry_run_data:/var/lib/postgresql/data
+      - ./migrations:/migrations:ro
+      - ./docker/dry-run-init.sh:/docker-entrypoint-initdb.d/10-migrations.sh:ro
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U seo -d seo_dry_run"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
 volumes:
   postgres_data:
+  postgres_dry_run_data:

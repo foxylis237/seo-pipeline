@@ -16,7 +16,7 @@ type queuedArticles struct {
 	next     int
 }
 
-func (q *queuedArticles) GetNextIncomplete(context.Context) (article.Article, bool, error) {
+func (q *queuedArticles) ClaimNextIncomplete(context.Context) (article.Article, bool, error) {
 	if q.next >= len(q.articles) {
 		return article.Article{}, false, nil
 	}

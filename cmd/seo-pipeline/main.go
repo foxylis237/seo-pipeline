@@ -6,13 +6,16 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/foxylis237/seo-pipeline/internal/config"
 	"github.com/foxylis237/seo-pipeline/internal/integrations/arsenkin"
 	"github.com/foxylis237/seo-pipeline/internal/llm"
+	llmgemini "github.com/foxylis237/seo-pipeline/internal/llm/gemini"
 	"github.com/foxylis237/seo-pipeline/internal/storage"
 	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/generation"
 	articleoutput "github.com/foxylis237/seo-pipeline/internal/tasks/task1/output"
@@ -22,6 +25,8 @@ import (
 
 func main() {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	command, err := parseCommand(os.Args)
 	if err != nil {
@@ -29,7 +34,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	cfg, err := config.Load()
+	var cfg config.Config
+	if command.DryRun {
+		cfg, err = config.LoadDryRun()
+	} else {
+		cfg, err = config.Load()
+	}
 	if err != nil {
 		logger.Error("не удалось загрузить конфигурацию", "error", err)
 		os.Exit(1)
@@ -43,15 +53,22 @@ func main() {
 	if command.Name == "import" && command.ImportPath != "" {
 		cfg.InputFilePath = command.ImportPath
 	}
-	if err := validateConfig(command.Name, cfg); err != nil {
+	if command.DryRun {
+		err = cfg.ValidateDryRun()
+	} else {
+		err = validateConfig(command.Name, cfg)
+	}
+	if err != nil {
 		logger.Error("не удалось загрузить конфигурацию", "error", err)
 		os.Exit(1)
 	}
 
-	ctx := context.Background()
-
 	pool, err := storage.NewPostgres(ctx, cfg.DatabaseURL)
 	if err != nil {
+		if isGracefulCancellation(ctx, err) {
+			logger.Info("завершение приложения по сигналу", "stage", "shutdown")
+			return
+		}
 		logger.Error("не удалось подключиться к PostgreSQL", "error", err)
 		os.Exit(1)
 	}
@@ -59,6 +76,10 @@ func main() {
 
 	logger.Info("подключение к PostgreSQL успешно установлено")
 	if err := repository.ValidateSchema(ctx, pool); err != nil {
+		if isGracefulCancellation(ctx, err) {
+			logger.Info("завершение приложения по сигналу", "stage", "shutdown")
+			return
+		}
 		logger.Error("схема PostgreSQL не согласована с кодом", "error", err)
 		os.Exit(1)
 	}
@@ -80,8 +101,20 @@ func main() {
 
 	case "result":
 		_, err = resultService.Build(ctx, command.ExternalID)
+		if err == nil {
+			resultInput, loadErr := articleRepository.GetResultInput(ctx, command.ExternalID)
+			if loadErr != nil {
+				err = loadErr
+			} else {
+				err = articleRepository.CompleteGeneration(ctx, resultInput.Article.ID)
+			}
+		}
 
 	case "run", "generate", "demo-generate", "article", "info", "review", "fix", "html":
+		if command.DryRun {
+			err = runDryRun(ctx, articleRepository, cfg, taskLogger, writer, resultService)
+			break
+		}
 		llmConfig, configErr := config.LoadLLMConfig("config/config.yaml")
 		if configErr != nil {
 			err = configErr
@@ -92,11 +125,11 @@ func main() {
 			break
 		}
 		clients := make(map[string]llm.Client)
-		var geminiClient *generation.GeminiGenerator
+		var geminiClient *llmgemini.Client
 		for name, provider := range llmConfig.Providers {
 			switch provider.Type {
 			case "gemini":
-				client, generatorErr := generation.NewGeminiGenerator(ctx, os.Getenv(provider.APIKeyEnv), cfg.GeminiModel)
+				client, generatorErr := llmgemini.NewClient(ctx, os.Getenv(provider.APIKeyEnv), cfg.GeminiModel)
 				if generatorErr != nil {
 					err = fmt.Errorf("создать LLM provider %q: %w", name, generatorErr)
 					break
@@ -153,6 +186,10 @@ func main() {
 	}
 
 	if err != nil {
+		if isGracefulCancellation(ctx, err) {
+			taskLogger.Info("завершение приложения по сигналу", "stage", "shutdown")
+			return
+		}
 		var arsenkinErr *arsenkin.StageError
 		if errors.As(err, &arsenkinErr) {
 			taskLogger.Error(
@@ -187,6 +224,10 @@ func main() {
 	taskLogger.Info("task completed", "stage", "complete", "duration_ms", time.Since(taskStarted).Milliseconds())
 }
 
+func isGracefulCancellation(ctx context.Context, err error) bool {
+	return errors.Is(ctx.Err(), context.Canceled) && errors.Is(err, context.Canceled)
+}
+
 func newLogger(levelValue, formatValue string) (*slog.Logger, error) {
 	var level slog.Level
 	switch strings.ToLower(strings.TrimSpace(levelValue)) {
@@ -219,9 +260,34 @@ type taskCommand struct {
 	Name       string
 	ExternalID string
 	ImportPath string
+	DryRun     bool
 }
 
 func parseCommand(args []string) (taskCommand, error) {
+	dryRun := false
+	filtered := make([]string, 0, len(args))
+	for index, arg := range args {
+		if index > 0 && arg == "--dry-run" {
+			if dryRun {
+				return taskCommand{}, fmt.Errorf("--dry-run may be specified only once")
+			}
+			dryRun = true
+			continue
+		}
+		filtered = append(filtered, arg)
+	}
+	command, err := parseTaskCommand(filtered)
+	if err != nil {
+		return taskCommand{}, err
+	}
+	if dryRun && (command.Name != "run" || command.ExternalID != "") {
+		return taskCommand{}, fmt.Errorf("--dry-run is supported only for task-1 run without external_id")
+	}
+	command.DryRun = dryRun
+	return command, nil
+}
+
+func parseTaskCommand(args []string) (taskCommand, error) {
 	const available = "available task-1 operations: import, run, demo-generate, prepare, generate, article, info, review, fix, html, result"
 	if len(args) < 3 || (args[1] != "task-1" && args[1] != "task_1") {
 		return taskCommand{}, fmt.Errorf("usage: seo-pipeline task-1 <operation> [arguments]; %s", available)

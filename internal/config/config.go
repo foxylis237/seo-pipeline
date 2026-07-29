@@ -3,15 +3,18 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/joho/godotenv"
 )
 
 // Config содержит настройки приложения.
 type Config struct {
+	AppEnv        string
 	DatabaseURL   string
 	InputFilePath string
 	OutputDir     string
@@ -31,11 +34,28 @@ type Config struct {
 //
 // Переменные окружения имеют приоритет над значениями из файла .env.
 func Load() (Config, error) {
+	return load(true)
+}
+
+// LoadDryRun loads local settings without requiring an environment file or paid-service credentials.
+func LoadDryRun() (Config, error) {
+	return load(false)
+}
+
+func load(requireEnvFile bool) (Config, error) {
 	envPath, err := envFilePath()
 	if err != nil {
 		return Config{}, err
 	}
-	if err := godotenv.Load(envPath); err != nil {
+	configuredEnvFile := os.Getenv("ENV_FILE") != "" || os.Getenv("SEO_PIPELINE_ENV") != ""
+	if !requireEnvFile && !configuredEnvFile {
+		err = nil
+	} else if _, statErr := os.Stat(envPath); statErr == nil {
+		err = godotenv.Load(envPath)
+	} else {
+		err = statErr
+	}
+	if err != nil {
 		// Не включаем ошибку парсера: она может содержать строку из .env с секретом.
 		return Config{}, fmt.Errorf("failed to load .env\n\nsearched:\n%s", envPath)
 	}
@@ -49,6 +69,7 @@ func Load() (Config, error) {
 	}
 
 	cfg := Config{
+		AppEnv:        os.Getenv("APP_ENV"),
 		DatabaseURL:   os.Getenv("DATABASE_URL"),
 		InputFilePath: os.Getenv("INPUT_FILE_PATH"),
 		OutputDir:     os.Getenv("OUTPUT_DIR"),
@@ -65,7 +86,7 @@ func Load() (Config, error) {
 	}
 
 	if cfg.InputFilePath == "" {
-		cfg.InputFilePath = "tasks/task_1/input/input.xlsx"
+		cfg.InputFilePath = "input/task_1/input.xlsx"
 	}
 	if cfg.OutputDir == "" {
 		cfg.OutputDir = "tasks/task_1/output"
@@ -75,6 +96,13 @@ func Load() (Config, error) {
 	}
 	if cfg.LogFormat == "" {
 		cfg.LogFormat = "text"
+	}
+	if !requireEnvFile {
+		cfg.DatabaseURL = os.Getenv("DRY_RUN_DATABASE_URL")
+		if cfg.DatabaseURL == "" {
+			cfg.DatabaseURL = "postgres://seo:seo@localhost:5433/seo_dry_run?sslmode=disable"
+		}
+		cfg.OutputDir = filepath.Join(cfg.OutputDir, "dry-run")
 	}
 
 	return cfg, nil
@@ -166,6 +194,35 @@ func (c Config) ValidatePrepare() error {
 	}
 	if c.ArsenkinPassword == "" {
 		return fmt.Errorf("ARSENKIN_PASSWORD is required")
+	}
+	return nil
+}
+
+// ValidateDryRun checks only local resources used by the offline pipeline.
+func (c Config) ValidateDryRun() error {
+	appEnv := strings.ToLower(strings.TrimSpace(c.AppEnv))
+	if appEnv != "local" && appEnv != "test" {
+		return fmt.Errorf("dry-run requires APP_ENV=local or APP_ENV=test")
+	}
+	if c.DatabaseURL == "" {
+		return fmt.Errorf("DRY_RUN_DATABASE_URL is required")
+	}
+	if c.InputFilePath == "" {
+		return fmt.Errorf("INPUT_FILE_PATH is required")
+	}
+	parsed, err := url.Parse(c.DatabaseURL)
+	if err != nil || parsed.Scheme != "postgres" && parsed.Scheme != "postgresql" {
+		return fmt.Errorf("DRY_RUN_DATABASE_URL must be a valid PostgreSQL URL")
+	}
+	databaseName := strings.ToLower(strings.TrimPrefix(parsed.EscapedPath(), "/"))
+	if decoded, decodeErr := url.PathUnescape(databaseName); decodeErr == nil {
+		databaseName = decoded
+	}
+	if !strings.Contains(databaseName, "test") && !strings.Contains(databaseName, "dry_run") && !strings.Contains(databaseName, "dry-run") {
+		return fmt.Errorf("dry-run database name %q must contain test, dry_run, or dry-run", databaseName)
+	}
+	if filepath.Base(filepath.Clean(c.OutputDir)) != "dry-run" {
+		return fmt.Errorf("dry-run OUTPUT_DIR must end with dry-run")
 	}
 	return nil
 }

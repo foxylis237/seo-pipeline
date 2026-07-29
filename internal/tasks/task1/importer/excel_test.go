@@ -1,12 +1,28 @@
 package importer
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/xuri/excelize/v2"
 )
+
+func TestProjectInputWorkbookIsReadable(t *testing.T) {
+	path := filepath.Join("..", "..", "..", "..", "input", "task_1", "input.xlsx")
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("project input workbook %q is unavailable: %v", path, err)
+	}
+
+	articles, err := ReadArticles(path)
+	if err != nil {
+		t.Fatalf("read project input workbook %q: %v", path, err)
+	}
+	if len(articles) == 0 {
+		t.Fatal("project input workbook contains no importable articles")
+	}
+}
 
 func TestReadArticlesRejectsEmptyTitle(t *testing.T) {
 	path := writeWorkbook(t, [][]any{
