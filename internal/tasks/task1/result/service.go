@@ -1,0 +1,155 @@
+// Package result assembles result.md from persisted article data.
+package result
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"log/slog"
+	"os"
+	"strings"
+	"text/template"
+
+	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/article"
+	articleoutput "github.com/foxylis237/seo-pipeline/internal/tasks/task1/output"
+)
+
+const TemplatePath = "tasks/task_1/templates/result.md.tmpl"
+
+// FAQItem is one structured question and answer rendered in result.md.
+type FAQItem struct {
+	Question string
+	Answer   string
+}
+
+type Repository interface {
+	GetResultInput(ctx context.Context, externalID string) (article.ResultInput, error)
+}
+
+type Writer interface {
+	Read(relativePath string) (string, error)
+	Exists(relativePath string) bool
+	SaveResult(externalID, slug, content string) (articleoutput.ArticlePaths, error)
+}
+
+type Service struct {
+	repository   Repository
+	writer       Writer
+	logger       *slog.Logger
+	templatePath string
+}
+
+func NewService(repository Repository, writer Writer, logger *slog.Logger) *Service {
+	return &Service{repository: repository, writer: writer, logger: logger, templatePath: TemplatePath}
+}
+
+// ReadingTimeMinutes calculates reading time at 180 words per minute.
+func ReadingTimeMinutes(text string) int {
+	words := len(strings.Fields(text))
+	if words == 0 {
+		return 0
+	}
+	return (words + 179) / 180
+}
+
+type templateData struct {
+	article.ResultInput
+	Title              string
+	ReadingTimeMinutes int
+	FAQItems           []FAQItem
+}
+
+// ParseFAQItems converts persisted FAQ text into question-answer pairs.
+func ParseFAQItems(text string) ([]FAQItem, error) {
+	text = strings.TrimSpace(strings.ReplaceAll(text, "\r\n", "\n"))
+	if text == "" {
+		return nil, nil
+	}
+	var items []FAQItem
+	var current *FAQItem
+	section := ""
+	flush := func() error {
+		if current == nil {
+			return nil
+		}
+		current.Question = strings.TrimSpace(current.Question)
+		current.Answer = strings.TrimSpace(current.Answer)
+		if current.Question == "" || current.Answer == "" {
+			return fmt.Errorf("FAQ item must contain both question and answer")
+		}
+		items = append(items, *current)
+		return nil
+	}
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(trimmed, "Вопрос:"):
+			if err := flush(); err != nil {
+				return nil, err
+			}
+			current = &FAQItem{Question: strings.TrimSpace(strings.TrimPrefix(trimmed, "Вопрос:"))}
+			section = "question"
+		case strings.HasPrefix(trimmed, "Ответ:"):
+			if current == nil {
+				return nil, fmt.Errorf("FAQ answer appears before question")
+			}
+			current.Answer = strings.TrimSpace(strings.TrimPrefix(trimmed, "Ответ:"))
+			section = "answer"
+		case current != nil && trimmed != "":
+			if section == "answer" {
+				current.Answer = strings.TrimSpace(current.Answer + "\n" + trimmed)
+			} else {
+				current.Question = strings.TrimSpace(current.Question + "\n" + trimmed)
+			}
+		case current == nil && trimmed != "":
+			return nil, fmt.Errorf("FAQ text must use Вопрос: and Ответ: markers")
+		}
+	}
+	if err := flush(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+// Build loads persisted data and atomically rebuilds result.md without an LLM.
+func (s *Service) Build(ctx context.Context, externalID string) (articleoutput.ArticlePaths, error) {
+	s.logger.Info("result generation started", "external_id", externalID, "stage", "result_generation")
+	input, err := s.repository.GetResultInput(ctx, externalID)
+	if err != nil {
+		return articleoutput.ArticlePaths{}, fmt.Errorf("load result data for external_id %s: %w", externalID, err)
+	}
+	if strings.TrimSpace(input.ArticlePath) == "" {
+		return articleoutput.ArticlePaths{}, fmt.Errorf("article_path is missing for external_id %s", externalID)
+	}
+	articleText, err := s.writer.Read(input.ArticlePath)
+	if err != nil {
+		return articleoutput.ArticlePaths{}, fmt.Errorf("read article file %q: %w", input.ArticlePath, err)
+	}
+	if input.HTMLPath != "" && !s.writer.Exists(input.HTMLPath) {
+		input.HTMLPath = ""
+	}
+	faqItems, err := ParseFAQItems(input.FAQ)
+	if err != nil {
+		return articleoutput.ArticlePaths{}, fmt.Errorf("parse FAQ for result: %w", err)
+	}
+	templateText, err := os.ReadFile(s.templatePath)
+	if err != nil {
+		return articleoutput.ArticlePaths{}, fmt.Errorf("read result template %q: %w", s.templatePath, err)
+	}
+	tmpl, err := template.New("result.md").Funcs(template.FuncMap{
+		"add": func(left, right int) int { return left + right },
+	}).Option("missingkey=error").Parse(string(templateText))
+	if err != nil {
+		return articleoutput.ArticlePaths{}, fmt.Errorf("parse result template %q: %w", s.templatePath, err)
+	}
+	var rendered bytes.Buffer
+	if err := tmpl.Execute(&rendered, templateData{ResultInput: input, Title: input.Article.Title, ReadingTimeMinutes: ReadingTimeMinutes(articleText), FAQItems: faqItems}); err != nil {
+		return articleoutput.ArticlePaths{}, fmt.Errorf("render result template: %w", err)
+	}
+	paths, err := s.writer.SaveResult(input.Article.ExternalID, input.Article.Slug, rendered.String())
+	if err != nil {
+		return articleoutput.ArticlePaths{}, err
+	}
+	s.logger.Info("result saved", "article_id", input.Article.ID, "external_id", externalID, "stage", "result_generation", "result_path", paths.ResultPath)
+	return paths, nil
+}

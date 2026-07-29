@@ -11,12 +11,13 @@ import (
 	"time"
 
 	"github.com/foxylis237/seo-pipeline/internal/config"
-	"github.com/foxylis237/seo-pipeline/internal/generation"
 	"github.com/foxylis237/seo-pipeline/internal/integrations/arsenkin"
 	"github.com/foxylis237/seo-pipeline/internal/llm"
-	articleoutput "github.com/foxylis237/seo-pipeline/internal/output"
-	"github.com/foxylis237/seo-pipeline/internal/repository"
 	"github.com/foxylis237/seo-pipeline/internal/storage"
+	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/generation"
+	articleoutput "github.com/foxylis237/seo-pipeline/internal/tasks/task1/output"
+	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/repository"
+	resultassembly "github.com/foxylis237/seo-pipeline/internal/tasks/task1/result"
 )
 
 func main() {
@@ -63,8 +64,10 @@ func main() {
 	}
 
 	articleRepository := repository.NewArticleRepository(pool)
-
 	taskLogger := logger.With("task", "task_1", "operation", command.Name)
+	writer := articleoutput.NewWriter(cfg.OutputDir)
+	resultService := resultassembly.NewService(articleRepository, writer, taskLogger)
+
 	taskStarted := time.Now()
 	taskLogger.Info("task started", "stage", "start")
 	switch command.Name {
@@ -75,7 +78,10 @@ func main() {
 		writer := articleoutput.NewWriter(cfg.OutputDir)
 		err = runPrepare(ctx, articleRepository, cfg, taskLogger, writer, command.ExternalID)
 
-	case "generate", "article", "info", "review", "fix", "html":
+	case "result":
+		_, err = resultService.Build(ctx, command.ExternalID)
+
+	case "run", "generate", "demo-generate", "article", "info", "review", "fix", "html":
 		llmConfig, configErr := config.LoadLLMConfig("config/config.yaml")
 		if configErr != nil {
 			err = configErr
@@ -116,16 +122,23 @@ func main() {
 			err = fmt.Errorf("Gemini provider is not configured")
 			break
 		}
-		writer := articleoutput.NewWriter(cfg.OutputDir)
 		router := llm.NewRouter(llmConfig, clients, taskLogger)
-		generationPipeline := generation.NewPipeline(articleRepository, router, writer, taskLogger)
+		generationPipeline := generation.NewPipeline(articleRepository, router, geminiClient, writer, taskLogger, resultService)
 		switch command.Name {
 		case "generate":
 			err = runGenerate(ctx, generationPipeline, command.ExternalID)
-		case "article":
+		case "run":
+			if command.ExternalID == "" {
+				err = runAllDemo(ctx, articleRepository, func(ctx context.Context, externalID string) error {
+					return runDemoGenerate(ctx, generationPipeline, externalID)
+				}, taskLogger)
+			} else {
+				err = runDemoGenerate(ctx, generationPipeline, command.ExternalID)
+			}
+		case "demo-generate":
+			err = runDemoGenerate(ctx, generationPipeline, command.ExternalID)
+		case "article", "info":
 			err = runArticle(ctx, generationPipeline, command.ExternalID)
-		case "info":
-			err = runInfo(ctx, generationPipeline, command.ExternalID)
 		case "review":
 			err = runReview(ctx, generationPipeline, command.ExternalID)
 		case "fix":
@@ -209,18 +222,15 @@ type taskCommand struct {
 }
 
 func parseCommand(args []string) (taskCommand, error) {
-	const available = "available task_1 operations: import, prepare, generate, article, info, review, fix, html"
-	if len(args) == 3 && isStandaloneLLMOperation(args[1]) {
-		return parseExternalIDCommand(args[1], args[2])
-	}
-	if len(args) < 3 || args[1] != "task_1" {
-		return taskCommand{}, fmt.Errorf("usage: seo-pipeline <article|info|review|fix|html> <external_id> or seo-pipeline task_1 <operation> [arguments]; %s", available)
+	const available = "available task-1 operations: import, run, demo-generate, prepare, generate, article, info, review, fix, html, result"
+	if len(args) < 3 || (args[1] != "task-1" && args[1] != "task_1") {
+		return taskCommand{}, fmt.Errorf("usage: seo-pipeline task-1 <operation> [arguments]; %s", available)
 	}
 	task := args[2]
 	switch task {
 	case "import":
 		if len(args) > 4 {
-			return taskCommand{}, fmt.Errorf("usage: seo-pipeline task_1 import [excel_path]")
+			return taskCommand{}, fmt.Errorf("usage: seo-pipeline task-1 import [excel_path]")
 		}
 		command := taskCommand{Name: task}
 		if len(args) == 4 {
@@ -230,22 +240,21 @@ func parseCommand(args []string) (taskCommand, error) {
 			}
 		}
 		return command, nil
-	case "prepare", "generate", "article", "info", "review", "fix", "html":
+	case "run":
+		if len(args) == 3 {
+			return taskCommand{Name: task}, nil
+		}
 		if len(args) != 4 {
-			return taskCommand{}, fmt.Errorf("usage: seo-pipeline task_1 %s <external_id>", task)
+			return taskCommand{}, fmt.Errorf("usage: seo-pipeline task-1 run [external_id]")
+		}
+		return parseExternalIDCommand(task, args[3])
+	case "prepare", "generate", "review", "fix", "info", "html", "result", "article", "demo-generate":
+		if len(args) != 4 {
+			return taskCommand{}, fmt.Errorf("usage: seo-pipeline task-1 %s <external_id>", task)
 		}
 		return parseExternalIDCommand(task, args[3])
 	default:
-		return taskCommand{}, fmt.Errorf("unknown task_1 operation %q; %s", task, available)
-	}
-}
-
-func isStandaloneLLMOperation(operation string) bool {
-	switch operation {
-	case "article", "info", "review", "fix", "html":
-		return true
-	default:
-		return false
+		return taskCommand{}, fmt.Errorf("unknown task-1 operation %q; %s", task, available)
 	}
 }
 
@@ -278,8 +287,10 @@ func validateConfig(command string, cfg config.Config) error {
 		return cfg.ValidateImport()
 	case "prepare":
 		return cfg.ValidatePrepare()
-	case "generate", "article", "info", "review", "fix", "html":
+	case "run", "generate", "demo-generate", "article", "info", "review", "fix", "html":
 		return cfg.ValidateGenerate()
+	case "result":
+		return cfg.ValidateReset()
 	default:
 		return fmt.Errorf("unknown task %q", command)
 	}

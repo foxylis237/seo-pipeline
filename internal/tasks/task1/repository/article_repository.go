@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/foxylis237/seo-pipeline/internal/article"
+	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/article"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -15,6 +15,145 @@ import (
 // ArticleRepository работает со статьями в PostgreSQL.
 type ArticleRepository struct {
 	pool *pgxpool.Pool
+}
+
+// GetResultInput loads article, inputs, structured metadata and output paths.
+func (r *ArticleRepository) GetResultInput(ctx context.Context, externalID string) (article.ResultInput, error) {
+	const query = `
+		SELECT a.id, a.external_id, a.title, COALESCE(i.image_slug, ''),
+			a.status, a.current_step, a.error_message, a.created_at, a.updated_at,
+			COALESCE(i.category, ''), COALESCE(m.tags, ''), COALESCE(m.tldr, ''), COALESCE(m.faq, ''),
+			COALESCE(i.professions, ''), COALESCE(i.author, ''), COALESCE(i.key_word, ''),
+			a.title, COALESCE(i.meta_description, ''), COALESCE(i.header, ''),
+			COALESCE(i.key_word, ''), COALESCE(i.header, ''), COALESCE(i.image_slug, ''),
+			COALESCE(o.article_path, ''), COALESCE(o.html_path, '')
+		FROM articles AS a
+		LEFT JOIN article_inputs AS i ON i.article_id = a.id
+		LEFT JOIN article_metadata AS m ON m.article_id = a.id
+		LEFT JOIN article_outputs AS o ON o.article_id = a.id
+		WHERE a.external_id = $1
+	`
+	var input article.ResultInput
+	err := r.pool.QueryRow(ctx, query, externalID).Scan(
+		&input.Article.ID, &input.Article.ExternalID, &input.Article.Title, &input.Article.Slug,
+		&input.Article.Status, &input.Article.CurrentStep, &input.Article.ErrorMessage,
+		&input.Article.CreatedAt, &input.Article.UpdatedAt,
+		&input.Category, &input.Tags, &input.TLDR, &input.FAQ, &input.Professions, &input.Author,
+		&input.Keyword, &input.SEOTitle, &input.MetaDescription, &input.Header, &input.ProfessionName,
+		&input.ImageName, &input.ImageURL, &input.ArticlePath, &input.HTMLPath,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return article.ResultInput{}, fmt.Errorf("статья с external_id %q не найдена", externalID)
+	}
+	if err != nil {
+		return article.ResultInput{}, fmt.Errorf("загрузить данные result для external_id %q: %w", externalID, err)
+	}
+	if strings.TrimSpace(input.Article.Slug) == "" {
+		return article.ResultInput{}, fmt.Errorf("для статьи external_id %q отсутствует image_slug", externalID)
+	}
+	return input, nil
+}
+
+// GetDemoGenerationInput loads only fields needed by article and info generation.
+func (r *ArticleRepository) GetDemoGenerationInput(ctx context.Context, externalID string) (article.GenerationInput, error) {
+	const query = `
+		SELECT a.id, a.external_id, a.title, COALESCE(i.image_slug, ''),
+			a.status, a.current_step, a.error_message, a.created_at, a.updated_at,
+			COALESCE(i.professions, ''), COALESCE(i.links, '')
+		FROM articles AS a
+		LEFT JOIN article_inputs AS i ON i.article_id = a.id
+		WHERE a.external_id = $1
+	`
+	var input article.GenerationInput
+	err := r.pool.QueryRow(ctx, query, externalID).Scan(
+		&input.Article.ID, &input.Article.ExternalID, &input.Article.Title, &input.Article.Slug,
+		&input.Article.Status, &input.Article.CurrentStep, &input.Article.ErrorMessage,
+		&input.Article.CreatedAt, &input.Article.UpdatedAt, &input.Professions, &input.Links,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return article.GenerationInput{}, fmt.Errorf("статья с external_id %q не найдена", externalID)
+	}
+	if err != nil {
+		return article.GenerationInput{}, fmt.Errorf("загрузить demo-данные для external_id %q: %w", externalID, err)
+	}
+	if strings.TrimSpace(input.Article.Slug) == "" {
+		return article.GenerationInput{}, fmt.Errorf("для статьи external_id %q отсутствует image_slug", externalID)
+	}
+	return input, nil
+}
+
+// GetNextIncomplete returns the first article that has not completed task_1.
+func (r *ArticleRepository) GetNextIncomplete(ctx context.Context) (article.Article, bool, error) {
+	const query = `
+		SELECT a.id, a.external_id, a.title, COALESCE(i.image_slug, ''),
+			COALESCE(i.reference_url, ''), a.status, a.current_step, a.error_message,
+			a.created_at, a.updated_at
+		FROM articles AS a
+		LEFT JOIN article_inputs AS i ON i.article_id = a.id
+		WHERE a.status <> 'completed'
+		ORDER BY a.id ASC
+		LIMIT 1
+	`
+	var selected article.Article
+	err := r.pool.QueryRow(ctx, query).Scan(
+		&selected.ID, &selected.ExternalID, &selected.Title, &selected.Slug,
+		&selected.ReferenceURL, &selected.Status, &selected.CurrentStep,
+		&selected.ErrorMessage, &selected.CreatedAt, &selected.UpdatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return article.Article{}, false, nil
+	}
+	if err != nil {
+		return article.Article{}, false, fmt.Errorf("выбрать следующую незавершённую статью: %w", err)
+	}
+	return selected, true, nil
+}
+
+// CompleteDemoGeneration marks the MVP flow complete only after result.md exists.
+func (r *ArticleRepository) CompleteDemoGeneration(ctx context.Context, articleID int64) error {
+	result, err := r.pool.Exec(ctx, `
+		UPDATE articles
+		SET status = 'completed', current_step = NULL, error_message = NULL, updated_at = NOW()
+		WHERE id = $1
+	`, articleID)
+	if err != nil {
+		return fmt.Errorf("завершить demo-генерацию статьи %d: %w", articleID, err)
+	}
+	if result.RowsAffected() != 1 {
+		return fmt.Errorf("статья %d не найдена при завершении demo-генерации", articleID)
+	}
+	return nil
+}
+
+// SaveDemoArticleInfo atomically persists the article path and parsed info after
+// both responses from the shared LLM chat have succeeded.
+func (r *ArticleRepository) SaveDemoArticleInfo(ctx context.Context, articleID int64, articlePath, rawText string, info article.ArticleInfo) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("начать сохранение demo-этапа: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO article_outputs (article_id, article_path, updated_at)
+		VALUES ($1, $2, NOW())
+		ON CONFLICT (article_id) DO UPDATE
+		SET article_path = EXCLUDED.article_path, updated_at = NOW()
+	`, articleID, articlePath); err != nil {
+		return fmt.Errorf("сохранить путь demo-статьи: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO article_metadata (article_id, tags, tldr, faq, metadata_text, updated_at)
+		VALUES ($1, $2, $3, $4, $5, NOW())
+		ON CONFLICT (article_id) DO UPDATE
+		SET tags = EXCLUDED.tags, tldr = EXCLUDED.tldr, faq = EXCLUDED.faq,
+			metadata_text = EXCLUDED.metadata_text, updated_at = NOW()
+	`, articleID, info.Tags, info.TLDR, info.FAQ, rawText); err != nil {
+		return fmt.Errorf("сохранить информацию demo-статьи: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("завершить сохранение demo-этапа: %w", err)
+	}
+	return nil
 }
 
 // GetSavedGenerationInput loads only persisted artifacts needed to resume generation.
@@ -151,7 +290,7 @@ func (r *ArticleRepository) BeginGenerationStage(ctx context.Context, articleID 
 }
 
 // SaveArticleInfo stores publication information and advances to the review stage.
-func (r *ArticleRepository) SaveArticleInfo(ctx context.Context, articleID int64, info string) error {
+func (r *ArticleRepository) SaveArticleInfo(ctx context.Context, articleID int64, rawText string, info article.ArticleInfo) error {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("начать сохранение информации для публикации: %w", err)
@@ -159,11 +298,15 @@ func (r *ArticleRepository) SaveArticleInfo(ctx context.Context, articleID int64
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO article_metadata (article_id, metadata_text, updated_at)
-		VALUES ($1, $2, NOW())
+		INSERT INTO article_metadata (article_id, tags, tldr, faq, metadata_text, updated_at)
+		VALUES ($1, $2, $3, $4, $5, NOW())
 		ON CONFLICT (article_id) DO UPDATE
-		SET metadata_text = EXCLUDED.metadata_text, updated_at = NOW()
-	`, articleID, info); err != nil {
+		SET tags = EXCLUDED.tags,
+			tldr = EXCLUDED.tldr,
+			faq = EXCLUDED.faq,
+			metadata_text = EXCLUDED.metadata_text,
+			updated_at = NOW()
+	`, articleID, info.Tags, info.TLDR, info.FAQ, rawText); err != nil {
 		return fmt.Errorf("сохранить информацию для публикации: %w", err)
 	}
 	result, err := tx.Exec(ctx, `
@@ -319,6 +462,27 @@ func (r *ArticleRepository) Create(
 	}
 
 	return created, nil
+}
+
+// Import inserts a new article or refreshes the imported fields of an existing
+// external_id. The boolean reports whether a new article row was added.
+func (r *ArticleRepository) Import(ctx context.Context, input article.Input) (article.Article, bool, error) {
+	var existing article.Article
+	err := r.pool.QueryRow(ctx, `
+		SELECT id, external_id, title, status, current_step, error_message, created_at, updated_at
+		FROM articles WHERE external_id = $1
+	`, fmt.Sprint(input.ExcelID)).Scan(
+		&existing.ID, &existing.ExternalID, &existing.Title, &existing.Status,
+		&existing.CurrentStep, &existing.ErrorMessage, &existing.CreatedAt, &existing.UpdatedAt,
+	)
+	if err == nil {
+		return existing, false, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return article.Article{}, false, fmt.Errorf("проверить импортированную статью: %w", err)
+	}
+	created, err := r.Create(ctx, input)
+	return created, true, err
 }
 
 // GetAll возвращает статьи с их URL конкурентов в порядке ID.

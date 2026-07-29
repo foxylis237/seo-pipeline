@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/foxylis237/seo-pipeline/internal/article"
 	"github.com/foxylis237/seo-pipeline/internal/llm"
-	articleoutput "github.com/foxylis237/seo-pipeline/internal/output"
+	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/article"
+	articleoutput "github.com/foxylis237/seo-pipeline/internal/tasks/task1/output"
 )
 
 type PipelineRepository interface {
@@ -20,11 +20,18 @@ type PipelineRepository interface {
 	BeginGeneration(ctx context.Context, articleID int64) error
 	BeginGenerationStage(ctx context.Context, articleID int64, stage string) error
 	SaveGenerationPaths(ctx context.Context, articleID int64, structurePath, articlePath string) error
-	SaveArticleInfo(ctx context.Context, articleID int64, info string) error
+	SaveArticleInfo(ctx context.Context, articleID int64, rawText string, info article.ArticleInfo) error
+	SaveDemoArticleInfo(ctx context.Context, articleID int64, articlePath, rawText string, info article.ArticleInfo) error
 	SaveReviewPath(ctx context.Context, articleID int64, reviewPath string) error
 	SaveFixedArticlePath(ctx context.Context, articleID int64, fixedArticlePath string) error
 	SaveHTMLPath(ctx context.Context, articleID int64, htmlPath string) error
 	SaveError(ctx context.Context, articleID int64, processingErr error) error
+	GetDemoGenerationInput(ctx context.Context, externalID string) (article.GenerationInput, error)
+	CompleteDemoGeneration(ctx context.Context, articleID int64) error
+}
+
+type ResultBuilder interface {
+	Build(ctx context.Context, externalID string) (articleoutput.ArticlePaths, error)
 }
 
 type PipelineWriter interface {
@@ -59,15 +66,21 @@ type Pipeline struct {
 	writer           PipelineWriter
 	structureService *StructureService
 	router           *llm.Router
+	chatFactory      ChatFactory
 	logger           *slog.Logger
+	resultBuilder    ResultBuilder
 }
 
-func NewPipeline(repository PipelineRepository, router *llm.Router, writer PipelineWriter, logger *slog.Logger) *Pipeline {
-	return &Pipeline{
+func NewPipeline(repository PipelineRepository, router *llm.Router, chatFactory ChatFactory, writer PipelineWriter, logger *slog.Logger, resultBuilder ...ResultBuilder) *Pipeline {
+	pipeline := &Pipeline{
 		repository: repository, writer: writer,
 		structureService: NewStructureService(repository, router, writer, logger), router: router,
-		logger: logger,
+		chatFactory: chatFactory, logger: logger,
 	}
+	if len(resultBuilder) > 0 {
+		pipeline.resultBuilder = resultBuilder[0]
+	}
+	return pipeline
 }
 
 func (p *Pipeline) RunByExternalID(ctx context.Context, externalID string) (PipelineOutput, error) {
@@ -96,7 +109,7 @@ func (p *Pipeline) Run(ctx context.Context, input article.GenerationInput) (Pipe
 	}
 	logger.Info("structure generation completed", "stage", "structure_generation", "result_path", structureOutput.Paths.StructurePath)
 
-	articleOutput, err := p.runArticle(ctx, input, structureOutput.Structure, structureOutput.Paths.StructurePath)
+	articleOutput, err := p.runArticleAndInfo(ctx, input, structureOutput.Structure, structureOutput.Paths.StructurePath, false)
 	if err != nil {
 		return PipelineOutput{}, err
 	}
@@ -116,8 +129,43 @@ func (p *Pipeline) Run(ctx context.Context, input article.GenerationInput) (Pipe
 		return PipelineOutput{}, err
 	}
 	paths = htmlOutput.Paths
+	if p.resultBuilder != nil {
+		resultPaths, resultErr := p.resultBuilder.Build(ctx, input.Article.ExternalID)
+		if resultErr != nil {
+			return PipelineOutput{}, p.fail(ctx, logger, input, "result_generation", resultErr)
+		}
+		paths.ResultPath = resultPaths.ResultPath
+	}
 	logger.Info("generation pipeline completed", "stage", "generation_pipeline", "duration_ms", time.Since(started).Milliseconds())
 	return PipelineOutput{Paths: paths}, nil
+}
+
+// RunDemoByExternalID generates only article, info and result using one Gemini chat.
+func (p *Pipeline) RunDemoByExternalID(ctx context.Context, externalID string) (PipelineOutput, error) {
+	input, err := p.repository.GetDemoGenerationInput(ctx, externalID)
+	if err != nil {
+		return PipelineOutput{}, &StageError{ExternalID: externalID, Stage: "load_demo_data", Err: err}
+	}
+	logger := p.stageLogger(input)
+	if err := p.repository.BeginGenerationStage(ctx, input.Article.ID, "article"); err != nil {
+		return PipelineOutput{}, p.fail(ctx, logger, input, "begin_demo_generation", err)
+	}
+	output, err := p.runArticleAndInfo(ctx, input, "", "", true)
+	if err != nil {
+		return PipelineOutput{}, err
+	}
+	if p.resultBuilder == nil {
+		return PipelineOutput{}, p.fail(ctx, logger, input, "result_generation", fmt.Errorf("result builder is not configured"))
+	}
+	resultPaths, err := p.resultBuilder.Build(ctx, externalID)
+	if err != nil {
+		return PipelineOutput{}, p.fail(ctx, logger, input, "result_generation", err)
+	}
+	if err := p.repository.CompleteDemoGeneration(ctx, input.Article.ID); err != nil {
+		return PipelineOutput{}, p.fail(ctx, logger, input, "complete_demo_generation", err)
+	}
+	output.Paths.ResultPath = resultPaths.ResultPath
+	return PipelineOutput{Paths: output.Paths}, nil
 }
 
 type stageOutput struct {
@@ -125,11 +173,16 @@ type stageOutput struct {
 	Paths articleoutput.ArticlePaths
 }
 
-func (p *Pipeline) runArticle(ctx context.Context, input article.GenerationInput, structure, structurePath string) (stageOutput, error) {
+type articleStageOutput struct {
+	stageOutput
+	Info string
+}
+
+func (p *Pipeline) runArticleAndInfo(ctx context.Context, input article.GenerationInput, structure, structurePath string, atomicDemo bool) (output articleStageOutput, returnErr error) {
 	started := time.Now()
 	logger := p.stageLogger(input)
 	logger.Info("article generation started", "stage", "article_generation")
-	result, err := p.router.Generate(ctx, llm.Call{Stage: "article", ArticleID: input.Article.ID, Data: struct {
+	articleCall, err := p.router.Prepare(llm.Call{Stage: "article", ArticleID: input.Article.ID, Data: struct {
 		Title              string
 		Keywords           string
 		LSIWords           string
@@ -139,53 +192,79 @@ func (p *Pipeline) runArticle(ctx context.Context, input article.GenerationInput
 		LSIWords: strings.Join(input.LSIWords, "\n"), GeneratedStructure: structure,
 	}})
 	if err != nil {
-		return stageOutput{}, p.fail(ctx, logger, input, "article_generation", err)
+		return articleStageOutput{}, p.fail(ctx, logger, input, "article_generation", err)
 	}
-	text := strings.TrimSpace(strings.ReplaceAll(result.Text, "[[ARTICLE_COMPLETE]]", ""))
-	if text == "" {
-		return stageOutput{}, p.fail(ctx, logger, input, "article_generation", fmt.Errorf("article returned an empty response"))
-	}
-	paths, err := p.writer.SaveArticle(input.Article.ExternalID, input.Article.Slug, result.Prompt, text, result.Model)
+	chat, err := p.chatFactory.NewChat(ctx)
 	if err != nil {
-		return stageOutput{}, p.fail(ctx, logger, input, "save_article", err)
+		return articleStageOutput{}, p.fail(ctx, logger, input, "article_generation", err)
 	}
-	if err := p.repository.SaveGenerationPaths(ctx, input.Article.ID, structurePath, paths.ArticlePath); err != nil {
-		return stageOutput{}, p.fail(ctx, logger, input, "save_article_path", err)
+	defer func() {
+		if err := chat.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close article Gemini chat: %w", err))
+		}
+	}()
+	logger.Info("Gemini chat created", "stage", "article_generation", "model", articleCall.Model)
+	articleCtx, cancelArticle := context.WithTimeout(ctx, articleCall.Timeout)
+	articleResult, err := chat.Generate(articleCtx, articleCall.Prompt)
+	cancelArticle()
+	if err != nil {
+		return articleStageOutput{}, p.fail(ctx, logger, input, "article_generation", err)
 	}
-	logger.Info("article generation completed", "stage", "article_generation", "prompt_size", len([]rune(result.Prompt)), "input_tokens", result.InputTokens, "output_tokens", result.OutputTokens, "duration_ms", time.Since(started).Milliseconds(), "result_path", paths.ArticlePath)
-	return stageOutput{Text: text, Paths: paths}, nil
-}
+	text := strings.TrimSpace(strings.ReplaceAll(articleResult.Text, "[[ARTICLE_COMPLETE]]", ""))
+	if text == "" {
+		return articleStageOutput{}, p.fail(ctx, logger, input, "article_generation", fmt.Errorf("article returned an empty response"))
+	}
+	logger.Info("article generated", "stage", "article_generation", "model", articleResult.Model, "prompt_size", len([]rune(articleCall.Prompt)), "input_tokens", articleResult.InputTokens, "output_tokens", articleResult.OutputTokens, "duration_ms", time.Since(started).Milliseconds())
+	paths, err := p.writer.SaveArticle(input.Article.ExternalID, input.Article.Slug, articleCall.Prompt, text, articleResult.Model)
+	if err != nil {
+		return articleStageOutput{}, p.fail(ctx, logger, input, "save_article", err)
+	}
+	if !atomicDemo {
+		if err := p.repository.SaveGenerationPaths(ctx, input.Article.ID, structurePath, paths.ArticlePath); err != nil {
+			return articleStageOutput{}, p.fail(ctx, logger, input, "save_article_path", err)
+		}
+	}
+	logger.Info("article saved", "stage", "article_generation", "model", articleResult.Model, "result_path", paths.ArticlePath)
 
-func (p *Pipeline) runInfo(ctx context.Context, input article.GenerationInput, structure, articleText string) (stageOutput, error) {
-	started := time.Now()
-	logger := p.stageLogger(input)
+	infoStarted := time.Now()
 	logger.Info("article info generation started", "stage", "info")
-	logger.Info("waiting for Gemini response", "stage", "info")
-	result, err := p.router.Generate(ctx, llm.Call{Stage: "info", ArticleID: input.Article.ID, Data: struct {
-		Structure string
-		Article   string
-	}{Structure: structure, Article: articleText}})
+	infoCall, err := p.router.Prepare(llm.Call{Stage: "info", ArticleID: input.Article.ID, Data: struct{}{}})
 	if err != nil {
-		logger.Error("article info generation failed", "stage", "info", "duration_ms", time.Since(started).Milliseconds(), "error", err)
-		return stageOutput{}, p.fail(ctx, logger, input, "metadata_generation", err)
+		return articleStageOutput{}, p.fail(ctx, logger, input, "metadata_generation", err)
 	}
-	text := strings.TrimSpace(result.Text)
-	if text == "" {
+	infoCtx, cancelInfo := context.WithTimeout(ctx, infoCall.Timeout)
+	infoResult, err := chat.Generate(infoCtx, infoCall.Prompt)
+	cancelInfo()
+	if err != nil {
+		return articleStageOutput{}, p.fail(ctx, logger, input, "metadata_generation", err)
+	}
+	articleInfo := infoResult.Text
+	if strings.TrimSpace(articleInfo) == "" {
 		err := fmt.Errorf("article info returned an empty response")
-		logger.Error("article info generation failed", "stage", "info", "duration_ms", time.Since(started).Milliseconds(), "error", err)
-		return stageOutput{}, p.fail(ctx, logger, input, "metadata_generation", err)
+		return articleStageOutput{}, p.fail(ctx, logger, input, "metadata_generation", err)
 	}
-	paths, err := p.writer.SaveArticleInfo(input.Article.ExternalID, input.Article.Slug, result.Prompt, text)
+	logger.Info("article info generated", "stage", "info", "model", infoResult.Model, "prompt_size", len([]rune(infoCall.Prompt)), "input_tokens", infoResult.InputTokens, "output_tokens", infoResult.OutputTokens, "duration_ms", time.Since(infoStarted).Milliseconds())
+	logger.Info("article info parsing started", "stage", "info")
+	parsedInfo, err := article.ParseArticleInfo(articleInfo)
 	if err != nil {
-		logger.Error("article info generation failed", "stage", "info", "duration_ms", time.Since(started).Milliseconds(), "error", err)
-		return stageOutput{}, p.fail(ctx, logger, input, "save_article_info", err)
+		return articleStageOutput{}, p.fail(ctx, logger, input, "metadata_parsing", err)
 	}
-	if err := p.repository.SaveArticleInfo(ctx, input.Article.ID, text); err != nil {
-		logger.Error("article info generation failed", "stage", "info", "duration_ms", time.Since(started).Milliseconds(), "error", err)
-		return stageOutput{}, p.fail(ctx, logger, input, "save_article_info_state", err)
+	logger.Info("article info parsed", "stage", "info")
+	if atomicDemo {
+		paths, err = p.writer.SaveArticleInfo(input.Article.ExternalID, input.Article.Slug, infoCall.Prompt, articleInfo)
+		if err != nil {
+			return articleStageOutput{}, p.fail(ctx, logger, input, "save_article_info_files", err)
+		}
+		err = p.repository.SaveDemoArticleInfo(ctx, input.Article.ID, paths.ArticlePath, articleInfo, parsedInfo)
+	} else {
+		err = p.repository.SaveArticleInfo(ctx, input.Article.ID, articleInfo, parsedInfo)
 	}
-	logger.Info("article info saved", "stage", "info", "duration_ms", time.Since(started).Milliseconds(), "result_path", paths.ArticleInfoPath)
-	return stageOutput{Text: text, Paths: paths}, nil
+	if err != nil {
+		return articleStageOutput{}, p.fail(ctx, logger, input, "save_article_info_state", err)
+	}
+	logger.Info("article info saved", "stage", "info")
+	logger.Info("article stage completed", "stage", "article_generation", "duration_ms", time.Since(started).Milliseconds(), "result_path", paths.ArticlePath)
+	return articleStageOutput{stageOutput: stageOutput{Text: text, Paths: paths}, Info: articleInfo}, nil
 }
 
 func (p *Pipeline) runReview(ctx context.Context, input article.GenerationInput, articleText string) (stageOutput, error) {
@@ -277,27 +356,7 @@ func (p *Pipeline) RunArticleByExternalID(ctx context.Context, externalID string
 	if err := p.repository.BeginGenerationStage(ctx, input.Article.ID, "article"); err != nil {
 		return PipelineOutput{}, p.fail(ctx, p.stageLogger(input), input, "begin_article", err)
 	}
-	output, err := p.runArticle(ctx, input, structure, saved.StructurePath)
-	return PipelineOutput{Paths: output.Paths}, err
-}
-
-func (p *Pipeline) RunInfoByExternalID(ctx context.Context, externalID string) (PipelineOutput, error) {
-	saved, input, err := p.loadSavedInput(ctx, externalID, "info")
-	if err != nil {
-		return PipelineOutput{}, err
-	}
-	articleText, err := p.readRequiredArtifact(ctx, input, "info", "article", saved.ArticlePath)
-	if err != nil {
-		return PipelineOutput{}, err
-	}
-	structure, err := p.readRequiredArtifact(ctx, input, "info", "structure", saved.StructurePath)
-	if err != nil {
-		return PipelineOutput{}, err
-	}
-	if err := p.repository.BeginGenerationStage(ctx, input.Article.ID, "info"); err != nil {
-		return PipelineOutput{}, p.fail(ctx, p.stageLogger(input), input, "begin_info", err)
-	}
-	output, err := p.runInfo(ctx, input, structure, articleText)
+	output, err := p.runArticleAndInfo(ctx, input, structure, saved.StructurePath, false)
 	return PipelineOutput{Paths: output.Paths}, err
 }
 

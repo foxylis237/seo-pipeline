@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/foxylis237/seo-pipeline/internal/repository"
+	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/repository"
 )
 
 func runReset(ctx context.Context, articleRepository *repository.ArticleRepository, logger *slog.Logger) error {
@@ -20,7 +20,7 @@ func runReset(ctx context.Context, articleRepository *repository.ArticleReposito
 	fmt.Println("Счетчики ID сброшены.")
 	fmt.Println()
 	fmt.Println("После этого можно сразу выполнить:")
-	fmt.Println("go run ./cmd/seo-pipeline import")
-	fmt.Println("go run ./cmd/seo-pipeline run")
+	fmt.Println("go run ./cmd/seo-pipeline task-1 import")
+	fmt.Println("go run ./cmd/seo-pipeline task-1 run <external_id>")
 	return nil
 }

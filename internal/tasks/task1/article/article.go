@@ -57,3 +57,23 @@ type SavedGenerationInput struct {
 	ReviewPath       string
 	FixedArticlePath string
 }
+
+// ResultInput contains persisted fields used to assemble result.md.
+type ResultInput struct {
+	Article         Article
+	Category        string
+	Tags            string
+	TLDR            string
+	FAQ             string
+	Professions     string
+	Author          string
+	Keyword         string
+	SEOTitle        string
+	MetaDescription string
+	Header          string
+	ProfessionName  string
+	ImageName       string
+	ImageURL        string
+	ArticlePath     string
+	HTMLPath        string
+}

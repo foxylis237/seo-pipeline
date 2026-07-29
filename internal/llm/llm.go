@@ -132,6 +132,14 @@ type RoutedResponse struct {
 	Model    string
 }
 
+// PreparedCall contains a rendered stage prompt and its configured routing data.
+type PreparedCall struct {
+	Prompt   string
+	Provider string
+	Model    string
+	Timeout  time.Duration
+}
+
 type Router struct {
 	config            config.LLMConfig
 	clients           map[string]Client
@@ -149,6 +157,10 @@ func NewRouter(cfg config.LLMConfig, clients map[string]Client, logger *slog.Log
 }
 
 func (r *Router) Generate(ctx context.Context, call Call) (RoutedResponse, error) {
+	prepared, err := r.Prepare(call)
+	if err != nil {
+		return RoutedResponse{}, err
+	}
 	stage, found := r.config.Stages[call.Stage]
 	if !found {
 		return RoutedResponse{}, fmt.Errorf("LLM stage %q is not configured", call.Stage)
@@ -157,15 +169,7 @@ func (r *Router) Generate(ctx context.Context, call Call) (RoutedResponse, error
 	if !found {
 		return RoutedResponse{}, fmt.Errorf("LLM provider %q for stage %q is not registered", stage.Provider, call.Stage)
 	}
-	tmpl, err := template.New(call.Stage).Parse(stage.PromptTemplate)
-	if err != nil {
-		return RoutedResponse{}, fmt.Errorf("parse prompt for stage %q: %w", call.Stage, err)
-	}
-	var prompt bytes.Buffer
-	if err := tmpl.Execute(&prompt, call.Data); err != nil {
-		return RoutedResponse{}, fmt.Errorf("render prompt for stage %q: %w", call.Stage, err)
-	}
-	request := Request{Prompt: prompt.String(), Model: stage.Model, Temperature: *stage.Temperature, MaxTokens: stage.MaxTokens}
+	request := Request{Prompt: prepared.Prompt, Model: stage.Model, Temperature: *stage.Temperature, MaxTokens: stage.MaxTokens}
 	stageCtx, cancel := context.WithTimeout(ctx, stage.Timeout)
 	defer cancel()
 	for attempt := 1; attempt <= 3; attempt++ {
@@ -191,7 +195,7 @@ func (r *Router) Generate(ctx context.Context, call Call) (RoutedResponse, error
 		if requestErr == nil {
 			fields = append(fields, "input_tokens", response.InputTokens, "output_tokens", response.OutputTokens)
 			r.logger.Info("LLM request completed", fields...)
-			return RoutedResponse{Response: response, Prompt: prompt.String(), Provider: stage.Provider, Model: stage.Model}, nil
+			return RoutedResponse{Response: response, Prompt: prepared.Prompt, Provider: stage.Provider, Model: stage.Model}, nil
 		}
 		retryable := isTemporary(requestErr)
 		statusCode, errorType, providerMessage := errorLogFields(requestErr)
@@ -205,6 +209,26 @@ func (r *Router) Generate(ctx context.Context, call Call) (RoutedResponse, error
 		}
 	}
 	return RoutedResponse{}, fmt.Errorf("LLM stage %q failed", call.Stage)
+}
+
+// Prepare renders a configured stage without sending an LLM request.
+func (r *Router) Prepare(call Call) (PreparedCall, error) {
+	stage, found := r.config.Stages[call.Stage]
+	if !found {
+		return PreparedCall{}, fmt.Errorf("LLM stage %q is not configured", call.Stage)
+	}
+	tmpl, err := template.New(call.Stage).Parse(stage.PromptTemplate)
+	if err != nil {
+		return PreparedCall{}, fmt.Errorf("parse prompt for stage %q: %w", call.Stage, err)
+	}
+	var prompt bytes.Buffer
+	if err := tmpl.Execute(&prompt, call.Data); err != nil {
+		return PreparedCall{}, fmt.Errorf("render prompt for stage %q: %w", call.Stage, err)
+	}
+	if strings.TrimSpace(prompt.String()) == "" {
+		return PreparedCall{}, fmt.Errorf("LLM stage %q rendered an empty prompt", call.Stage)
+	}
+	return PreparedCall{Prompt: prompt.String(), Provider: stage.Provider, Model: stage.Model, Timeout: stage.Timeout}, nil
 }
 
 func (r *Router) startHeartbeat(ctx context.Context, call Call, provider, model string, attempt int, started time.Time) func() {

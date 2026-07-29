@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/foxylis237/seo-pipeline/internal/article"
+	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/article"
 )
 
 type fakeArticleReader struct {

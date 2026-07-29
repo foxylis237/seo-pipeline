@@ -7,7 +7,7 @@ llm:
     structure:
       provider: gemini
       model: ${GEMINI_MODEL}
-      prompt: prompts/structure.txt
+      prompt: tasks/task_1/prompts/structure.txt
       temperature: 0.3
       max_tokens: 3000
       timeout: 120s
@@ -15,7 +15,7 @@ llm:
     article:
       provider: gemini
       model: ${GEMINI_MODEL}
-      prompt: prompts/article.txt
+      prompt: tasks/task_1/prompts/article.txt
       temperature: 0.7
       max_tokens: 10000
       timeout: 180s
@@ -23,7 +23,7 @@ llm:
     info:
       provider: gemini
       model: ${GEMINI_MODEL}
-      prompt: internal/prompts/article_info.txt
+      prompt: tasks/task_1/prompts/article_info.txt
       temperature: 0.2
       max_tokens: 4000
       timeout: 180s
@@ -31,7 +31,7 @@ llm:
     review:
       provider: gemini
       model: ${GEMINI_MODEL}
-      prompt: prompts/review.txt
+      prompt: tasks/task_1/prompts/review.txt
       temperature: 0.2
       max_tokens: 5000
       timeout: 120s
@@ -39,7 +39,7 @@ llm:
     fix:
       provider: gemini
       model: ${GEMINI_MODEL}
-      prompt: prompts/fix_article.txt
+      prompt: tasks/task_1/prompts/fix_article.txt
       temperature: 0.4
       max_tokens: 10000
       timeout: 300s
@@ -47,7 +47,7 @@ llm:
     html:
       provider: gemini
       model: ${GEMINI_MODEL}
-      prompt: prompts/html.txt
+      prompt: tasks/task_1/prompts/html.txt
       temperature: 0.1
       max_tokens: 12000
       timeout: 180s

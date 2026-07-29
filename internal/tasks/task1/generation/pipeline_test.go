@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/foxylis237/seo-pipeline/internal/article"
 	"github.com/foxylis237/seo-pipeline/internal/config"
 	"github.com/foxylis237/seo-pipeline/internal/llm"
-	articleoutput "github.com/foxylis237/seo-pipeline/internal/output"
+	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/article"
+	articleoutput "github.com/foxylis237/seo-pipeline/internal/tasks/task1/output"
 )
 
 type fakeLLMClient struct {
@@ -22,6 +22,59 @@ type fakeLLMClient struct {
 	errors    map[string]error
 	calls     []string
 	requests  map[string]llm.Request
+}
+
+type recordingChatFactory struct {
+	results []GenerationResult
+	errAt   int
+	prompts []string
+	chats   int
+	closed  int
+}
+
+func (f *recordingChatFactory) NewChat(context.Context) (Generator, error) {
+	f.chats++
+	return &recordingChat{factory: f}, nil
+}
+
+type recordingChat struct {
+	factory *recordingChatFactory
+	next    int
+}
+
+type fakeResultBuilder struct {
+	err   error
+	calls int
+}
+
+func (b *fakeResultBuilder) Build(context.Context, string) (articleoutput.ArticlePaths, error) {
+	b.calls++
+	return articleoutput.ArticlePaths{ResultPath: "37-tema/result.md"}, b.err
+}
+
+func (c *recordingChat) Generate(_ context.Context, prompt string) (GenerationResult, error) {
+	c.factory.prompts = append(c.factory.prompts, prompt)
+	if c.factory.errAt > 0 && c.next+1 == c.factory.errAt {
+		return GenerationResult{}, errors.New("chat request failed")
+	}
+	if c.next >= len(c.factory.results) {
+		return GenerationResult{}, errors.New("missing chat result")
+	}
+	result := c.factory.results[c.next]
+	c.next++
+	return result, nil
+}
+
+func (c *recordingChat) Close() error {
+	c.factory.closed++
+	return nil
+}
+
+func successfulChatFactory() *recordingChatFactory {
+	return &recordingChatFactory{results: []GenerationResult{
+		{Text: "Исходная статья", Model: "gemini-test", InputTokens: 10, OutputTokens: 20},
+		{Text: "Метки: Профессия, Обучение, Как стать\nTLDR:\nИтог.\nFAQ:\nВопрос: Как?\nОтвет: Так.", Model: "gemini-test"},
+	}}
 }
 
 func (c *fakeLLMClient) Generate(_ context.Context, request llm.Request) (llm.Response, error) {
@@ -43,7 +96,7 @@ func testGenerationRouter(client *fakeLLMClient, logger *slog.Logger) *llm.Route
 		case "fix":
 			prompt = "fix|{{.Article}}|{{.Review}}|{{.Professions}}|{{.Links}}"
 		case "info":
-			prompt = "info|{{.Structure}}|{{.Article}}"
+			prompt = "info from current chat"
 		}
 		stages[stage] = config.LLMStageConfig{
 			Provider: "fake", Model: stage, PromptTemplate: prompt,
@@ -75,6 +128,17 @@ type fakePipelineRepository struct {
 	savedError         error
 	generationBegun    bool
 	begunStages        []string
+	demoCompleted      bool
+	demoStateSaved     bool
+}
+
+func (r *fakePipelineRepository) GetDemoGenerationInput(_ context.Context, _ string) (article.GenerationInput, error) {
+	return r.input, nil
+}
+
+func (r *fakePipelineRepository) CompleteDemoGeneration(_ context.Context, _ int64) error {
+	r.demoCompleted = true
+	return nil
 }
 
 func (r *fakePipelineRepository) BeginGeneration(_ context.Context, _ int64) error {
@@ -96,8 +160,15 @@ func (r *fakePipelineRepository) SaveReviewPath(_ context.Context, _ int64, path
 	return nil
 }
 
-func (r *fakePipelineRepository) SaveArticleInfo(_ context.Context, _ int64, info string) error {
-	r.articleInfo = info
+func (r *fakePipelineRepository) SaveArticleInfo(_ context.Context, _ int64, rawText string, _ article.ArticleInfo) error {
+	r.articleInfo = rawText
+	return nil
+}
+
+func (r *fakePipelineRepository) SaveDemoArticleInfo(_ context.Context, _ int64, articlePath, rawText string, _ article.ArticleInfo) error {
+	r.articlePath = articlePath
+	r.articleInfo = rawText
+	r.demoStateSaved = true
 	return nil
 }
 
@@ -133,6 +204,59 @@ func (r *fakePipelineRepository) SaveGenerationPaths(_ context.Context, articleI
 	return nil
 }
 
+func TestDemoGenerateUsesOneChatSkipsHTMLAndKeepsMetadataStage(t *testing.T) {
+	input := article.GenerationInput{Article: article.Article{ID: 7, ExternalID: "37", Title: "Тема", Slug: "tema"}}
+	repository := &fakePipelineRepository{input: input}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	client := successfulPipelineClient()
+	chatFactory := successfulChatFactory()
+	builder := &fakeResultBuilder{}
+	pipeline := NewPipeline(repository, testGenerationRouter(client, logger), chatFactory, articleoutput.NewWriter(t.TempDir()), logger, builder)
+
+	output, err := pipeline.RunDemoByExternalID(context.Background(), "37")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if chatFactory.chats != 1 || len(chatFactory.prompts) != 2 {
+		t.Fatalf("chats=%d prompts=%d, want one chat and two prompts", chatFactory.chats, len(chatFactory.prompts))
+	}
+	if len(client.calls) != 0 || repository.htmlPath != "" {
+		t.Fatalf("demo invoked routed/HTML stages: calls=%v html=%q", client.calls, repository.htmlPath)
+	}
+	if !repository.demoCompleted || !repository.demoStateSaved || builder.calls != 1 || output.Paths.ResultPath == "" {
+		t.Fatalf("demo completion: completed=%t result_calls=%d paths=%+v", repository.demoCompleted, builder.calls, output.Paths)
+	}
+	if len(repository.begunStages) != 1 || repository.begunStages[0] != "article" {
+		t.Fatalf("demo begun stages = %v", repository.begunStages)
+	}
+}
+
+func TestDemoResultErrorDoesNotCompleteFlow(t *testing.T) {
+	input := article.GenerationInput{Article: article.Article{ID: 7, ExternalID: "37", Title: "Тема", Slug: "tema"}}
+	repository := &fakePipelineRepository{input: input}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	builder := &fakeResultBuilder{err: errors.New("result write failed")}
+	pipeline := NewPipeline(repository, testGenerationRouter(successfulPipelineClient(), logger), successfulChatFactory(), articleoutput.NewWriter(t.TempDir()), logger, builder)
+
+	_, err := pipeline.RunDemoByExternalID(context.Background(), "37")
+	if err == nil || repository.demoCompleted || repository.savedError == nil {
+		t.Fatalf("err=%v completed=%t saved_error=%v", err, repository.demoCompleted, repository.savedError)
+	}
+}
+
+func TestDemoInfoFailureDoesNotPersistAtomicState(t *testing.T) {
+	input := article.GenerationInput{Article: article.Article{ID: 7, ExternalID: "37", Title: "Тема", Slug: "tema"}}
+	repository := &fakePipelineRepository{input: input}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	chatFactory := &recordingChatFactory{results: []GenerationResult{{Text: "Статья", Model: "test"}, {Text: "неверный info", Model: "test"}}}
+	pipeline := NewPipeline(repository, testGenerationRouter(successfulPipelineClient(), logger), chatFactory, articleoutput.NewWriter(t.TempDir()), logger, &fakeResultBuilder{})
+
+	_, err := pipeline.RunDemoByExternalID(context.Background(), "37")
+	if err == nil || repository.demoStateSaved || repository.demoCompleted || repository.savedError == nil {
+		t.Fatalf("err=%v state_saved=%t completed=%t saved_error=%v", err, repository.demoStateSaved, repository.demoCompleted, repository.savedError)
+	}
+}
+
 func TestPipelineRunsRoutedStagesInOrderWithMinimalData(t *testing.T) {
 	root := t.TempDir()
 	input := article.GenerationInput{
@@ -147,7 +271,8 @@ func TestPipelineRunsRoutedStagesInOrderWithMinimalData(t *testing.T) {
 	writer := articleoutput.NewWriter(root)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	client := successfulPipelineClient()
-	pipeline := NewPipeline(repository, testGenerationRouter(client, logger), writer, logger)
+	chatFactory := successfulChatFactory()
+	pipeline := NewPipeline(repository, testGenerationRouter(client, logger), chatFactory, writer, logger)
 
 	output, err := pipeline.RunByExternalID(context.Background(), "37")
 	if err != nil {
@@ -182,9 +307,18 @@ func TestPipelineRunsRoutedStagesInOrderWithMinimalData(t *testing.T) {
 	if repository.reviewPath != "37-tema/generated/review.txt" || repository.fixedArticlePath != "37-tema/generated/fixed_article.txt" || repository.htmlPath != "37-tema/article.html" {
 		t.Fatalf("review/fix/html paths = %q, %q, %q", repository.reviewPath, repository.fixedArticlePath, repository.htmlPath)
 	}
-	wantOrder := []string{"structure", "article", "review", "fix", "html"}
+	wantOrder := []string{"structure", "review", "fix", "html"}
 	if strings.Join(client.calls, ",") != strings.Join(wantOrder, ",") {
 		t.Fatalf("stage order = %v", client.calls)
+	}
+	if chatFactory.chats != 1 || chatFactory.closed != 1 || len(chatFactory.prompts) != 2 {
+		t.Fatalf("article chat: chats=%d closed=%d prompts=%d", chatFactory.chats, chatFactory.closed, len(chatFactory.prompts))
+	}
+	if !strings.Contains(chatFactory.prompts[0], "H1: Тема") || strings.Contains(chatFactory.prompts[1], "Исходная статья") {
+		t.Fatalf("shared chat prompts = %#v", chatFactory.prompts)
+	}
+	if repository.articleInfo == "" {
+		t.Fatal("article info was not saved to PostgreSQL repository")
 	}
 	if got := client.requests["review"].Prompt; !strings.Contains(got, "Исходная статья") || strings.Contains(got, "ключ") {
 		t.Fatalf("review prompt = %q", got)
@@ -210,12 +344,12 @@ func TestPipelineStopsAfterStageError(t *testing.T) {
 	client := successfulPipelineClient()
 	client.errors["fix"] = errors.New("fix failed")
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	pipeline := NewPipeline(repository, testGenerationRouter(client, logger), articleoutput.NewWriter(root), logger)
+	pipeline := NewPipeline(repository, testGenerationRouter(client, logger), successfulChatFactory(), articleoutput.NewWriter(root), logger)
 
 	if _, err := pipeline.RunByExternalID(context.Background(), "37"); err == nil {
 		t.Fatal("pipeline error = nil")
 	}
-	if strings.Join(client.calls, ",") != "structure,article,review,fix" {
+	if strings.Join(client.calls, ",") != "structure,review,fix" {
 		t.Fatalf("calls after error = %v", client.calls)
 	}
 	if repository.fixedArticlePath != "" || repository.htmlPath != "" || repository.savedError == nil {
@@ -229,7 +363,7 @@ func TestPipelineDoesNotSaveEmptyReview(t *testing.T) {
 	client := successfulPipelineClient()
 	client.responses["review"] = llm.Response{Text: " \n"}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	pipeline := NewPipeline(repository, testGenerationRouter(client, logger), articleoutput.NewWriter(root), logger)
+	pipeline := NewPipeline(repository, testGenerationRouter(client, logger), successfulChatFactory(), articleoutput.NewWriter(root), logger)
 
 	if _, err := pipeline.RunByExternalID(context.Background(), "37"); err == nil {
 		t.Fatal("pipeline error = nil")
@@ -237,7 +371,7 @@ func TestPipelineDoesNotSaveEmptyReview(t *testing.T) {
 	if repository.reviewPath != "" || repository.fixedArticlePath != "" || repository.htmlPath != "" {
 		t.Fatalf("empty result was saved: review=%q fixed=%q html=%q", repository.reviewPath, repository.fixedArticlePath, repository.htmlPath)
 	}
-	if strings.Join(client.calls, ",") != "structure,article,review" {
+	if strings.Join(client.calls, ",") != "structure,review" {
 		t.Fatalf("calls after empty result = %v", client.calls)
 	}
 }
@@ -260,7 +394,7 @@ func TestRunFixByExternalIDCallsOnlyFixAndSavesResult(t *testing.T) {
 	repository := &fakePipelineRepository{savedInput: savedPipelineInput(paths)}
 	client := successfulPipelineClient()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	pipeline := NewPipeline(repository, testGenerationRouter(client, logger), writer, logger)
+	pipeline := NewPipeline(repository, testGenerationRouter(client, logger), successfulChatFactory(), writer, logger)
 
 	output, err := pipeline.RunFixByExternalID(context.Background(), "37")
 	if err != nil {
@@ -288,7 +422,7 @@ func TestRunReviewByExternalIDCallsOnlyReviewAndSavesResult(t *testing.T) {
 	repository := &fakePipelineRepository{savedInput: savedPipelineInput(paths)}
 	client := successfulPipelineClient()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	pipeline := NewPipeline(repository, testGenerationRouter(client, logger), writer, logger)
+	pipeline := NewPipeline(repository, testGenerationRouter(client, logger), successfulChatFactory(), writer, logger)
 
 	output, err := pipeline.RunReviewByExternalID(context.Background(), "37")
 	if err != nil {
@@ -315,7 +449,7 @@ func TestRunHTMLByExternalIDCallsOnlyHTMLAndSavesResult(t *testing.T) {
 	repository := &fakePipelineRepository{savedInput: savedPipelineInput(paths)}
 	client := successfulPipelineClient()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	pipeline := NewPipeline(repository, testGenerationRouter(client, logger), writer, logger)
+	pipeline := NewPipeline(repository, testGenerationRouter(client, logger), successfulChatFactory(), writer, logger)
 
 	output, err := pipeline.RunHTMLByExternalID(context.Background(), "37")
 	if err != nil {
@@ -332,7 +466,7 @@ func TestRunHTMLByExternalIDCallsOnlyHTMLAndSavesResult(t *testing.T) {
 	}
 }
 
-func TestRunArticleByExternalIDCallsOnlyArticleAndUsesSavedStructure(t *testing.T) {
+func TestRunArticleByExternalIDGeneratesArticleAndInfoInOneChat(t *testing.T) {
 	root := t.TempDir()
 	writer := articleoutput.NewWriter(root)
 	paths, err := writer.SaveStructure("37", "tema", "structure prompt", "Сохранённая структура")
@@ -342,89 +476,58 @@ func TestRunArticleByExternalIDCallsOnlyArticleAndUsesSavedStructure(t *testing.
 	input := pipelineTestInput()
 	repository := &fakePipelineRepository{input: input, savedInput: savedPipelineInput(paths)}
 	client := successfulPipelineClient()
+	chatFactory := successfulChatFactory()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	pipeline := NewPipeline(repository, testGenerationRouter(client, logger), writer, logger)
+	pipeline := NewPipeline(repository, testGenerationRouter(client, logger), chatFactory, writer, logger)
 
 	output, err := pipeline.RunArticleByExternalID(context.Background(), "37")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(client.calls, ",") != "article" || strings.Join(repository.begunStages, ",") != "article" {
+	if len(client.calls) != 0 || strings.Join(repository.begunStages, ",") != "article" {
 		t.Fatalf("calls=%v begun=%v", client.calls, repository.begunStages)
 	}
-	if !strings.Contains(client.requests["article"].Prompt, "Сохранённая структура") {
-		t.Fatalf("article prompt = %q", client.requests["article"].Prompt)
+	if chatFactory.chats != 1 || chatFactory.closed != 1 || len(chatFactory.prompts) != 2 {
+		t.Fatalf("chat: created=%d closed=%d prompts=%d", chatFactory.chats, chatFactory.closed, len(chatFactory.prompts))
+	}
+	if !strings.Contains(chatFactory.prompts[0], "Сохранённая структура") {
+		t.Fatalf("article prompt = %q", chatFactory.prompts[0])
+	}
+	if strings.Contains(chatFactory.prompts[1], "Исходная статья") || strings.Contains(chatFactory.prompts[1], "Сохранённая структура") {
+		t.Fatalf("info prompt repeats chat context: %q", chatFactory.prompts[1])
 	}
 	if output.Paths.ArticlePath == "" || repository.articlePath != output.Paths.ArticlePath {
 		t.Fatalf("article result paths = %+v, %q", output.Paths, repository.articlePath)
 	}
-}
-
-func TestRunInfoByExternalIDCallsOnlyInfoAndSavesPromptAndResult(t *testing.T) {
-	root := t.TempDir()
-	writer := articleoutput.NewWriter(root)
-	paths, err := writer.SaveStructure("37", "tema", "structure prompt", "H1: Сохранённая структура")
-	if err != nil {
-		t.Fatal(err)
+	if repository.articleInfo == "" {
+		t.Fatal("article info was not saved")
 	}
-	paths, err = writer.SaveArticle("37", "tema", "article prompt", "Сохранённая статья", "model")
-	if err != nil {
-		t.Fatal(err)
-	}
-	repository := &fakePipelineRepository{savedInput: savedPipelineInput(paths)}
-	client := successfulPipelineClient()
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	pipeline := NewPipeline(repository, testGenerationRouter(client, logger), writer, logger)
-
-	output, err := pipeline.RunInfoByExternalID(context.Background(), "37")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Join(client.calls, ",") != "info" || strings.Join(repository.begunStages, ",") != "info" {
-		t.Fatalf("calls=%v begun=%v", client.calls, repository.begunStages)
-	}
-	prompt := client.requests["info"].Prompt
-	if !strings.Contains(prompt, "H1: Сохранённая структура") || !strings.Contains(prompt, "Сохранённая статья") {
-		t.Fatalf("info prompt = %q", prompt)
-	}
-	if repository.articleInfo == "" || output.Paths.ArticleInfoPath == "" {
-		t.Fatalf("saved info=%q paths=%+v", repository.articleInfo, output.Paths)
-	}
-	assertGeneratedFile(t, filepath.Join(root, filepath.FromSlash(output.Paths.ArticleInfoPromptPath)), prompt)
-	assertGeneratedFile(t, filepath.Join(root, filepath.FromSlash(output.Paths.ArticleInfoPath)), repository.articleInfo)
-	if _, err := pipeline.RunInfoByExternalID(context.Background(), "37"); err != nil {
-		t.Fatalf("second info: %v", err)
+	for _, relativePath := range []string{"37-tema/prompts/article_info_prompt.txt", "37-tema/generated/article_info.txt"} {
+		if _, err := os.Stat(filepath.Join(root, relativePath)); !os.IsNotExist(err) {
+			t.Fatalf("info file must not be created: %s", relativePath)
+		}
 	}
 }
 
-func TestRunInfoByExternalIDRequiresArticleAndStructure(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+func TestRunArticleByExternalIDSavesErrorWhenInfoFails(t *testing.T) {
 	root := t.TempDir()
 	writer := articleoutput.NewWriter(root)
-	articlePaths, err := writer.SaveArticle("37", "tema", "prompt", "article", "model")
+	paths, err := writer.SaveStructure("37", "tema", "structure prompt", "structure")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, testCase := range []struct {
-		name    string
-		saved   article.SavedGenerationInput
-		missing string
-	}{
-		{name: "article", saved: savedPipelineInput(articleoutput.ArticlePaths{StructurePath: "unused"}), missing: "article"},
-		{name: "structure", saved: savedPipelineInput(articlePaths), missing: "structure"},
-	} {
-		t.Run(testCase.name, func(t *testing.T) {
-			repository := &fakePipelineRepository{savedInput: testCase.saved}
-			client := successfulPipelineClient()
-			pipeline := NewPipeline(repository, testGenerationRouter(client, logger), writer, logger)
-			_, err := pipeline.RunInfoByExternalID(context.Background(), "37")
-			if err == nil || !strings.Contains(err.Error(), testCase.missing) {
-				t.Fatalf("error = %v", err)
-			}
-			if len(client.calls) != 0 || len(repository.begunStages) != 0 {
-				t.Fatalf("calls=%v begun=%v", client.calls, repository.begunStages)
-			}
-		})
+	repository := &fakePipelineRepository{input: pipelineTestInput(), savedInput: savedPipelineInput(paths)}
+	chatFactory := successfulChatFactory()
+	chatFactory.errAt = 2
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	pipeline := NewPipeline(repository, testGenerationRouter(successfulPipelineClient(), logger), chatFactory, writer, logger)
+
+	_, err = pipeline.RunArticleByExternalID(context.Background(), "37")
+	if err == nil || repository.savedError == nil {
+		t.Fatalf("error=%v saved_error=%v", err, repository.savedError)
+	}
+	if repository.articlePath == "" || repository.articleInfo != "" || chatFactory.closed != 1 {
+		t.Fatalf("article_path=%q info=%q closed=%d", repository.articlePath, repository.articleInfo, chatFactory.closed)
 	}
 }
 
@@ -440,7 +543,7 @@ func TestRunFixByExternalIDRequiresReviewBeforeLLMCall(t *testing.T) {
 	repository := &fakePipelineRepository{savedInput: saved}
 	client := successfulPipelineClient()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	pipeline := NewPipeline(repository, testGenerationRouter(client, logger), writer, logger)
+	pipeline := NewPipeline(repository, testGenerationRouter(client, logger), successfulChatFactory(), writer, logger)
 
 	_, err = pipeline.RunFixByExternalID(context.Background(), "37")
 	if err == nil || !strings.Contains(err.Error(), "missing saved review result") {
@@ -455,7 +558,7 @@ func TestRunHTMLByExternalIDRequiresFixedArticle(t *testing.T) {
 	repository := &fakePipelineRepository{savedInput: savedPipelineInput(articleoutput.ArticlePaths{})}
 	client := successfulPipelineClient()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	pipeline := NewPipeline(repository, testGenerationRouter(client, logger), articleoutput.NewWriter(t.TempDir()), logger)
+	pipeline := NewPipeline(repository, testGenerationRouter(client, logger), successfulChatFactory(), articleoutput.NewWriter(t.TempDir()), logger)
 
 	_, err := pipeline.RunHTMLByExternalID(context.Background(), "37")
 	if err == nil || !strings.Contains(err.Error(), "missing saved fixed article result") {
@@ -480,7 +583,7 @@ func successfulPipelineClient() *fakeLLMClient {
 		responses: map[string]llm.Response{
 			"structure": {Text: "H1: Тема\nH2: Раздел"},
 			"article":   {Text: "Исходная статья", InputTokens: 10, OutputTokens: 20},
-			"info":      {Text: "**Название**\n\nТема\n\n**Метки**\n\nПрофессия, Обучение, Как стать"},
+			"info":      {Text: "Метки: Профессия, Обучение, Как стать\nTLDR:\nИтог.\nFAQ:\nВопрос: Как?\nОтвет: Так."},
 			"review":    {Text: "Замечания review"},
 			"fix":       {Text: "Исправленная статья"},
 			"html":      {Text: "```html\n<h2>Исправленная статья</h2>\n```"},

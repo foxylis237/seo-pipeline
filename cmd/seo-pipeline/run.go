@@ -10,12 +10,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/foxylis237/seo-pipeline/internal/article"
 	"github.com/foxylis237/seo-pipeline/internal/config"
 	"github.com/foxylis237/seo-pipeline/internal/integrations/arsenkin"
 	"github.com/foxylis237/seo-pipeline/internal/integrations/keysso"
-	articleoutput "github.com/foxylis237/seo-pipeline/internal/output"
-	"github.com/foxylis237/seo-pipeline/internal/repository"
+	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/article"
+	articleoutput "github.com/foxylis237/seo-pipeline/internal/tasks/task1/output"
+	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/repository"
 )
 
 type keyssoRunError struct {

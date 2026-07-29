@@ -7,6 +7,7 @@ data/arsenkin-browser-profile/
 
 # Input
 input/**/*.xlsx
+tasks/*/input/**/*.xlsx
 
 # macOS
 .DS_Store
@@ -17,6 +18,7 @@ logs/
 
 # Output
 /output/
+tasks/*/output/
 
 # IDE
 .vscode/

@@ -24,6 +24,32 @@ type ArticlePaths struct {
 	FixedArticlePath      string
 	HTMLPromptPath        string
 	HTMLPath              string
+	ResultPath            string
+}
+
+// SaveResult atomically writes or replaces the final text summary.
+func (w *Writer) SaveResult(externalID, slug, content string) (ArticlePaths, error) {
+	paths, articleDirectory, err := w.articlePaths(externalID, slug)
+	if err != nil {
+		return ArticlePaths{}, err
+	}
+	if err := os.MkdirAll(articleDirectory, 0o755); err != nil {
+		return ArticlePaths{}, fmt.Errorf("create article directory: %w", err)
+	}
+	if err := writeFileAtomic(filepath.Join(w.root, filepath.FromSlash(paths.ResultPath)), []byte(content)); err != nil {
+		return ArticlePaths{}, fmt.Errorf("write result: %w", err)
+	}
+	return paths, nil
+}
+
+// Exists reports whether a saved relative output path points to a regular file.
+func (w *Writer) Exists(relativePath string) bool {
+	cleaned := filepath.Clean(filepath.FromSlash(relativePath))
+	if relativePath == "" || filepath.IsAbs(cleaned) || cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
+		return false
+	}
+	info, err := os.Stat(filepath.Join(w.root, cleaned))
+	return err == nil && info.Mode().IsRegular()
 }
 
 // SaveArticleInfo writes or replaces the rendered info prompt and publication information.
@@ -205,6 +231,7 @@ func (w *Writer) articlePaths(externalID, slug string) (ArticlePaths, string, er
 		FixedArticlePath:      filepath.ToSlash(filepath.Join(directoryName, "generated", "fixed_article.txt")),
 		HTMLPromptPath:        filepath.ToSlash(filepath.Join(directoryName, "prompts", "article_html_prompt.txt")),
 		HTMLPath:              filepath.ToSlash(filepath.Join(directoryName, "article.html")),
+		ResultPath:            filepath.ToSlash(filepath.Join(directoryName, "result.md")),
 	}, articleDirectory, nil
 }
 

@@ -65,10 +65,10 @@ func Load() (Config, error) {
 	}
 
 	if cfg.InputFilePath == "" {
-		cfg.InputFilePath = "input/task_1/input.xlsx"
+		cfg.InputFilePath = "tasks/task_1/input/input.xlsx"
 	}
 	if cfg.OutputDir == "" {
-		cfg.OutputDir = "output"
+		cfg.OutputDir = "tasks/task_1/output"
 	}
 	if cfg.LogLevel == "" {
 		cfg.LogLevel = "info"

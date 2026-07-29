@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/foxylis237/seo-pipeline/internal/article"
+	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/article"
 )
 
 // ArticleReader provides generated article text without coupling validation to filesystem details.

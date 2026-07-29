@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/foxylis237/seo-pipeline/internal/article"
+	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/article"
 	"github.com/xuri/excelize/v2"
 )
 

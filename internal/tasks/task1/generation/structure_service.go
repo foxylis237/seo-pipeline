@@ -6,9 +6,9 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/foxylis237/seo-pipeline/internal/article"
 	"github.com/foxylis237/seo-pipeline/internal/llm"
-	articleoutput "github.com/foxylis237/seo-pipeline/internal/output"
+	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/article"
+	articleoutput "github.com/foxylis237/seo-pipeline/internal/tasks/task1/output"
 )
 
 type StructureRepository interface {

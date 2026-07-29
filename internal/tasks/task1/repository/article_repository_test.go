@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/foxylis237/seo-pipeline/internal/article"
+	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/article"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -53,6 +53,22 @@ func TestArticleRepositoryIdempotency(t *testing.T) {
 	assertCount(t, pool, "articles", "external_id = '11'", 1)
 	assertImportedFields(t, pool, second.ID, updated)
 	assertCleanedKeywords(t, pool, second.ID, []string{"старый запрос"})
+	if _, err := pool.Exec(ctx, `
+		UPDATE article_inputs
+		SET seo_title = 'не использовать SEO', profession_name = 'не использовать профессию',
+			image_name = 'не использовать имя', image_url = 'не использовать URL'
+		WHERE article_id = $1
+	`, second.ID); err != nil {
+		t.Fatal(err)
+	}
+	resultInput, err := repository.GetResultInput(ctx, "11")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resultInput.SEOTitle != updated.Title || resultInput.ProfessionName != updated.Keyword ||
+		resultInput.ImageName != updated.Header || resultInput.ImageURL != updated.ImageSlug {
+		t.Fatalf("result mapping = SEO %q, profession %q, image %q, URL %q", resultInput.SEOTitle, resultInput.ProfessionName, resultInput.ImageName, resultInput.ImageURL)
+	}
 
 	if err := repository.SaveCleanedKeywords(ctx, first.ID, []string{"новый запрос"}); err != nil {
 		t.Fatal(err)
@@ -161,21 +177,22 @@ func TestArticleRepositoryIdempotency(t *testing.T) {
 	if currentStep != "metadata_generation" {
 		t.Fatalf("current_step before info = %q, want metadata_generation", currentStep)
 	}
-	const articleInfo = "Название, метки, TL;DR и FAQ"
-	if err := repository.SaveArticleInfo(ctx, arsenkinArticle.ID, articleInfo); err != nil {
+	const articleInfo = "Метки: Логопед, Переподготовка, Как стать\nTLDR:\nИтог.\nFAQ:\nВопрос: Как?\nОтвет: Так."
+	parsedInfo := article.ArticleInfo{Tags: "Логопед, Переподготовка, Как стать", TLDR: "Итог.", FAQ: "Вопрос: Как?\nОтвет: Так."}
+	if err := repository.SaveArticleInfo(ctx, arsenkinArticle.ID, articleInfo, parsedInfo); err != nil {
 		t.Fatal(err)
 	}
-	var savedArticleInfo string
+	var savedArticleInfo, savedTags, savedTLDR, savedFAQ string
 	var infoError *string
 	if err := pool.QueryRow(ctx, `
-		SELECT m.metadata_text, a.current_step, a.error_message
+		SELECT m.metadata_text, m.tags, m.tldr, m.faq, a.current_step, a.error_message
 		FROM article_metadata AS m
 		JOIN articles AS a ON a.id = m.article_id
 		WHERE m.article_id = $1
-	`, arsenkinArticle.ID).Scan(&savedArticleInfo, &currentStep, &infoError); err != nil {
+	`, arsenkinArticle.ID).Scan(&savedArticleInfo, &savedTags, &savedTLDR, &savedFAQ, &currentStep, &infoError); err != nil {
 		t.Fatal(err)
 	}
-	if savedArticleInfo != articleInfo || currentStep != "article_review" || infoError != nil {
+	if savedArticleInfo != articleInfo || savedTags != parsedInfo.Tags || savedTLDR != parsedInfo.TLDR || savedFAQ != parsedInfo.FAQ || currentStep != "article_review" || infoError != nil {
 		t.Fatalf("article info state = %q, %q, %v", savedArticleInfo, currentStep, infoError)
 	}
 	const reviewPath = "12-arsenkin/generated/review.txt"
