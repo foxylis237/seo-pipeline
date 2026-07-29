@@ -12,7 +12,6 @@ import (
 
 	"github.com/foxylis237/seo-pipeline/internal/article"
 	"github.com/foxylis237/seo-pipeline/internal/config"
-	"github.com/foxylis237/seo-pipeline/internal/generation"
 	"github.com/foxylis237/seo-pipeline/internal/integrations/arsenkin"
 	"github.com/foxylis237/seo-pipeline/internal/integrations/keysso"
 	articleoutput "github.com/foxylis237/seo-pipeline/internal/output"
@@ -32,12 +31,11 @@ type keyssoRunError struct {
 func (e *keyssoRunError) Error() string { return e.err.Error() }
 func (e *keyssoRunError) Unwrap() error { return e.err }
 
-func runPipeline(
+func runPrepare(
 	ctx context.Context,
 	articleRepository *repository.ArticleRepository,
 	cfg config.Config,
 	logger *slog.Logger,
-	generationPipeline *generation.Pipeline,
 	writer *articleoutput.Writer,
 	targetExternalID string,
 ) error {
@@ -53,7 +51,7 @@ func runPipeline(
 		if targetExternalID != "" && selected.ExternalID != targetExternalID {
 			continue
 		}
-		if err := runArticlePipeline(ctx, articleRepository, cfg, logger, generationPipeline, writer, selected); err != nil {
+		if err := prepareArticle(ctx, articleRepository, cfg, logger, writer, selected); err != nil {
 			return err
 		}
 		processed++
@@ -64,12 +62,11 @@ func runPipeline(
 	return nil
 }
 
-func runArticlePipeline(
+func prepareArticle(
 	ctx context.Context,
 	articleRepository *repository.ArticleRepository,
 	cfg config.Config,
 	logger *slog.Logger,
-	generationPipeline *generation.Pipeline,
 	writer *articleoutput.Writer,
 	selected article.Article,
 ) error {
@@ -85,11 +82,6 @@ func runArticlePipeline(
 		articleLogger.Error("ошибка сброса данных статьи", "stage", "reset", "error", err)
 		return err
 	}
-	if err := writer.ResetArticle(selected.ExternalID, selected.Slug); err != nil {
-		articleLogger.Error("ошибка сброса файлов статьи", "stage", "reset", "error", err)
-		return savePipelineError(ctx, articleRepository, selected.ID, fmt.Errorf("reset output for article %d: %w", selected.ID, err))
-	}
-
 	stageStarted := time.Now()
 	stageLogger := logger.With("article_id", selected.ID, "integration", "keysso")
 	stageLogger.Info("обработка статьи начата", keyssoLogFields("article_start", stageStarted, "", 0, 0)...)
@@ -177,16 +169,7 @@ func runArticlePipeline(
 	arsenkinLogger.Info("этап завершён", "stage", "complete", "duration_ms", time.Since(arsenkinStarted).Milliseconds(), "current_url", "https://arsenkin.ru/tools/copyrighters/", "wordstat_count", len(arsenkinResult.WordstatKeywords), "lsi_count", len(arsenkinResult.LSIWords), "competitor_structure_length", len(arsenkinResult.CompetitorStructure))
 	printArsenkinResult(os.Stdout, selected, arsenkinResult)
 
-	_, err = generationPipeline.Run(ctx, article.GenerationInput{
-		Article:             selected,
-		CompetitorStructure: arsenkinResult.CompetitorStructure,
-		WordstatKeywords:    arsenkinResult.WordstatKeywords,
-		LSIWords:            arsenkinResult.LSIWords,
-	})
-	if err != nil {
-		return savePipelineError(ctx, articleRepository, selected.ID, err)
-	}
-	articleLogger.Info("обработка статьи завершена", "stage", "complete", "duration_ms", time.Since(articleStarted).Milliseconds())
+	articleLogger.Info("подготовка статьи завершена", "stage", "complete", "duration_ms", time.Since(articleStarted).Milliseconds())
 
 	return nil
 }

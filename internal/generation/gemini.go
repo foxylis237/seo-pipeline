@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/foxylis237/seo-pipeline/internal/llm"
 	"google.golang.org/genai"
 )
 
@@ -18,6 +19,35 @@ type GeminiGenerator struct {
 	client     *genai.Client
 	httpClient *http.Client
 	model      string
+}
+
+// Generate implements the provider-neutral stateless LLM client.
+func (g *GeminiGenerator) Generate(ctx context.Context, request llm.Request) (llm.Response, error) {
+	if strings.TrimSpace(request.Prompt) == "" {
+		return llm.Response{}, fmt.Errorf("prompt is empty")
+	}
+	temperature := float32(request.Temperature)
+	response, err := g.client.Models.GenerateContent(ctx, request.Model, genai.Text(request.Prompt), &genai.GenerateContentConfig{
+		Temperature:     &temperature,
+		MaxOutputTokens: int32(request.MaxTokens),
+	})
+	if err != nil {
+		var apiError genai.APIError
+		if errors.As(err, &apiError) {
+			return llm.Response{}, llm.NewStatusError(apiError.Code, apiError.Message)
+		}
+		return llm.Response{}, fmt.Errorf("Gemini request: %w", err)
+	}
+	text := response.Text()
+	if strings.TrimSpace(text) == "" {
+		return llm.Response{}, fmt.Errorf("Gemini returned an empty response")
+	}
+	result := llm.Response{Text: text}
+	if response.UsageMetadata != nil {
+		result.InputTokens = int(response.UsageMetadata.PromptTokenCount)
+		result.OutputTokens = int(response.UsageMetadata.CandidatesTokenCount)
+	}
+	return result, nil
 }
 
 func NewGeminiGenerator(ctx context.Context, apiKey, model string) (*GeminiGenerator, error) {

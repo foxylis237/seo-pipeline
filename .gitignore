@@ -6,7 +6,7 @@ data/keysso-browser-profile/
 data/arsenkin-browser-profile/
 
 # Input
-input/*.xlsx
+input/**/*.xlsx
 
 # macOS
 .DS_Store

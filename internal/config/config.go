@@ -65,7 +65,7 @@ func Load() (Config, error) {
 	}
 
 	if cfg.InputFilePath == "" {
-		cfg.InputFilePath = "input/input.xlsx"
+		cfg.InputFilePath = "input/task_1/input.xlsx"
 	}
 	if cfg.OutputDir == "" {
 		cfg.OutputDir = "output"
@@ -144,17 +144,14 @@ func (c Config) ValidateGenerate() error {
 	if c.DatabaseURL == "" {
 		return fmt.Errorf("DATABASE_URL is required")
 	}
-	if c.GeminiAPIKey == "" {
-		return fmt.Errorf("GEMINI_API_KEY is required")
-	}
 	if c.GeminiModel == "" {
 		return fmt.Errorf("GEMINI_MODEL is required")
 	}
 	return nil
 }
 
-// ValidateRun проверяет настройки текущего этапа run.
-func (c Config) ValidateRun() error {
+// ValidatePrepare checks settings required by external research collection.
+func (c Config) ValidatePrepare() error {
 	if c.DatabaseURL == "" {
 		return fmt.Errorf("DATABASE_URL is required")
 	}
@@ -169,12 +166,6 @@ func (c Config) ValidateRun() error {
 	}
 	if c.ArsenkinPassword == "" {
 		return fmt.Errorf("ARSENKIN_PASSWORD is required")
-	}
-	if c.GeminiAPIKey == "" {
-		return fmt.Errorf("GEMINI_API_KEY is required")
-	}
-	if c.GeminiModel == "" {
-		return fmt.Errorf("GEMINI_MODEL is required")
 	}
 	return nil
 }

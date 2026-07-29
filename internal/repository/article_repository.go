@@ -17,11 +17,45 @@ type ArticleRepository struct {
 	pool *pgxpool.Pool
 }
 
+// GetSavedGenerationInput loads only persisted artifacts needed to resume generation.
+func (r *ArticleRepository) GetSavedGenerationInput(ctx context.Context, externalID string) (article.SavedGenerationInput, error) {
+	const query = `
+		SELECT a.id, a.external_id, a.title, COALESCE(i.image_slug, ''),
+			a.status, a.current_step, a.error_message, a.created_at, a.updated_at,
+			COALESCE(i.professions, ''), COALESCE(i.links, ''),
+			COALESCE(o.structure_path, ''), COALESCE(o.article_path, ''),
+			COALESCE(o.metadata_path, ''), COALESCE(o.final_path, '')
+		FROM articles AS a
+		LEFT JOIN article_inputs AS i ON i.article_id = a.id
+		LEFT JOIN article_outputs AS o ON o.article_id = a.id
+		WHERE a.external_id = $1
+	`
+	var input article.SavedGenerationInput
+	err := r.pool.QueryRow(ctx, query, externalID).Scan(
+		&input.Article.ID, &input.Article.ExternalID, &input.Article.Title, &input.Article.Slug,
+		&input.Article.Status, &input.Article.CurrentStep, &input.Article.ErrorMessage,
+		&input.Article.CreatedAt, &input.Article.UpdatedAt,
+		&input.Professions, &input.Links, &input.StructurePath, &input.ArticlePath,
+		&input.ReviewPath, &input.FixedArticlePath,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return article.SavedGenerationInput{}, fmt.Errorf("статья с external_id %q не найдена", externalID)
+	}
+	if err != nil {
+		return article.SavedGenerationInput{}, fmt.Errorf("загрузить сохранённые результаты для external_id %q: %w", externalID, err)
+	}
+	if strings.TrimSpace(input.Article.Slug) == "" {
+		return article.SavedGenerationInput{}, fmt.Errorf("для статьи external_id %q отсутствует image_slug", externalID)
+	}
+	return input, nil
+}
+
 // GetGenerationInput loads persisted data required by implemented LLM stages.
 func (r *ArticleRepository) GetGenerationInput(ctx context.Context, externalID string) (article.GenerationInput, error) {
 	const query = `
 		SELECT a.id, a.external_id, a.title, COALESCE(i.image_slug, ''),
 			a.status, a.current_step, a.error_message, a.created_at, a.updated_at,
+			COALESCE(i.professions, ''), COALESCE(i.links, ''),
 			r.competitor_structure,
 			COALESCE(r.wordstat_keywords, '[]'::jsonb),
 			COALESCE(r.lsi_words, '[]'::jsonb)
@@ -36,7 +70,8 @@ func (r *ArticleRepository) GetGenerationInput(ctx context.Context, externalID s
 	err := r.pool.QueryRow(ctx, query, externalID).Scan(
 		&input.Article.ID, &input.Article.ExternalID, &input.Article.Title, &input.Article.Slug,
 		&input.Article.Status, &input.Article.CurrentStep, &input.Article.ErrorMessage,
-		&input.Article.CreatedAt, &input.Article.UpdatedAt, &competitorStructure, &wordstatJSON, &lsiJSON,
+		&input.Article.CreatedAt, &input.Article.UpdatedAt, &input.Professions, &input.Links,
+		&competitorStructure, &wordstatJSON, &lsiJSON,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return article.GenerationInput{}, fmt.Errorf("статья с external_id %q не найдена", externalID)
@@ -65,6 +100,88 @@ func NewArticleRepository(pool *pgxpool.Pool) *ArticleRepository {
 	return &ArticleRepository{
 		pool: pool,
 	}
+}
+
+// BeginGeneration atomically makes completed, failed, or processing articles ready for a fresh generation run.
+func (r *ArticleRepository) BeginGeneration(ctx context.Context, articleID int64) error {
+	const query = `
+		UPDATE articles
+		SET status = 'processing', current_step = 'structure_generation',
+			error_message = NULL, updated_at = NOW()
+		WHERE id = $1
+	`
+	result, err := r.pool.Exec(ctx, query, articleID)
+	if err != nil {
+		return fmt.Errorf("подготовить статью %d к генерации: %w", articleID, err)
+	}
+	if result.RowsAffected() != 1 {
+		return fmt.Errorf("статья %d не найдена при подготовке к генерации", articleID)
+	}
+	return nil
+}
+
+// BeginGenerationStage prepares one resumable stage without resetting saved artifacts.
+func (r *ArticleRepository) BeginGenerationStage(ctx context.Context, articleID int64, stage string) error {
+	var currentStep string
+	switch stage {
+	case "article":
+		currentStep = "article_generation"
+	case "info":
+		currentStep = "metadata_generation"
+	case "review", "fix":
+		currentStep = "article_review"
+	case "html":
+		currentStep = "html_generation"
+	default:
+		return fmt.Errorf("неподдерживаемый отдельный этап генерации %q", stage)
+	}
+	const query = `
+		UPDATE articles
+		SET status = 'processing', current_step = $2, error_message = NULL, updated_at = NOW()
+		WHERE id = $1
+	`
+	result, err := r.pool.Exec(ctx, query, articleID, currentStep)
+	if err != nil {
+		return fmt.Errorf("подготовить статью %d к этапу %s: %w", articleID, stage, err)
+	}
+	if result.RowsAffected() != 1 {
+		return fmt.Errorf("статья %d не найдена при подготовке этапа %s", articleID, stage)
+	}
+	return nil
+}
+
+// SaveArticleInfo stores publication information and advances to the review stage.
+func (r *ArticleRepository) SaveArticleInfo(ctx context.Context, articleID int64, info string) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("начать сохранение информации для публикации: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO article_metadata (article_id, metadata_text, updated_at)
+		VALUES ($1, $2, NOW())
+		ON CONFLICT (article_id) DO UPDATE
+		SET metadata_text = EXCLUDED.metadata_text, updated_at = NOW()
+	`, articleID, info); err != nil {
+		return fmt.Errorf("сохранить информацию для публикации: %w", err)
+	}
+	result, err := tx.Exec(ctx, `
+		UPDATE articles
+		SET status = 'processing', current_step = 'article_review',
+			error_message = NULL, updated_at = NOW()
+		WHERE id = $1
+	`, articleID)
+	if err != nil {
+		return fmt.Errorf("обновить этап после информации для публикации: %w", err)
+	}
+	if result.RowsAffected() != 1 {
+		return fmt.Errorf("статья %d не найдена при сохранении информации для публикации", articleID)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("завершить сохранение информации для публикации: %w", err)
+	}
+	return nil
 }
 
 // Reset удаляет все данные проекта и сбрасывает счётчики идентификаторов.
@@ -349,7 +466,7 @@ func (r *ArticleRepository) SaveGenerationPaths(ctx context.Context, articleID i
 	}
 	const articleQuery = `
 		UPDATE articles
-		SET current_step = 'metadata_generation', error_message = NULL, updated_at = NOW()
+		SET current_step = 'article_review', error_message = NULL, updated_at = NOW()
 		WHERE id = $1
 	`
 	result, err := tx.Exec(ctx, articleQuery, articleID)
@@ -361,6 +478,100 @@ func (r *ArticleRepository) SaveGenerationPaths(ctx context.Context, articleID i
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("finish saving article path: %w", err)
+	}
+	return nil
+}
+
+// SaveReviewPath stores the review artifact without advancing past the fix stage.
+func (r *ArticleRepository) SaveReviewPath(ctx context.Context, articleID int64, reviewPath string) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("начать сохранение пути ревью: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	outputResult, err := tx.Exec(ctx, `
+		UPDATE article_outputs
+		SET metadata_path = $2, updated_at = NOW()
+		WHERE article_id = $1
+	`, articleID, reviewPath)
+	if err != nil {
+		return fmt.Errorf("сохранить путь ревью: %w", err)
+	}
+	if outputResult.RowsAffected() != 1 {
+		return fmt.Errorf("результаты статьи %d не найдены при сохранении ревью", articleID)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("завершить сохранение пути ревью: %w", err)
+	}
+	return nil
+}
+
+// SaveFixedArticlePath stores the corrected article and advances to HTML generation.
+func (r *ArticleRepository) SaveFixedArticlePath(ctx context.Context, articleID int64, fixedArticlePath string) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("начать сохранение исправленной статьи: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	outputResult, err := tx.Exec(ctx, `
+		UPDATE article_outputs
+		SET final_path = $2, updated_at = NOW()
+		WHERE article_id = $1
+	`, articleID, fixedArticlePath)
+	if err != nil {
+		return fmt.Errorf("сохранить путь исправленной статьи: %w", err)
+	}
+	if outputResult.RowsAffected() != 1 {
+		return fmt.Errorf("результаты статьи %d не найдены при сохранении исправленной статьи", articleID)
+	}
+	result, err := tx.Exec(ctx, `
+		UPDATE articles
+		SET current_step = 'html_generation', error_message = NULL, updated_at = NOW()
+		WHERE id = $1
+	`, articleID)
+	if err != nil {
+		return fmt.Errorf("обновить этап после исправления статьи: %w", err)
+	}
+	if result.RowsAffected() != 1 {
+		return fmt.Errorf("статья %d не найдена при сохранении исправленной статьи", articleID)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("завершить сохранение исправленной статьи: %w", err)
+	}
+	return nil
+}
+
+// SaveHTMLPath stores final HTML and marks the article completed.
+func (r *ArticleRepository) SaveHTMLPath(ctx context.Context, articleID int64, htmlPath string) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("начать сохранение HTML: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	outputResult, err := tx.Exec(ctx, `
+		UPDATE article_outputs
+		SET html_path = $2, updated_at = NOW()
+		WHERE article_id = $1
+	`, articleID, htmlPath)
+	if err != nil {
+		return fmt.Errorf("сохранить путь HTML: %w", err)
+	}
+	if outputResult.RowsAffected() != 1 {
+		return fmt.Errorf("результаты статьи %d не найдены при сохранении HTML", articleID)
+	}
+	result, err := tx.Exec(ctx, `
+		UPDATE articles
+		SET status = 'completed', current_step = NULL, error_message = NULL, updated_at = NOW()
+		WHERE id = $1
+	`, articleID)
+	if err != nil {
+		return fmt.Errorf("завершить обработку статьи: %w", err)
+	}
+	if result.RowsAffected() != 1 {
+		return fmt.Errorf("статья %d не найдена при сохранении HTML", articleID)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("завершить сохранение HTML: %w", err)
 	}
 	return nil
 }
@@ -484,11 +695,11 @@ func (r *ArticleRepository) SaveArsenkinResearch(
 	return nil
 }
 
-// SaveError сохраняет последнюю ошибку обработки статьи без смены этапа.
+// SaveError marks processing as failed and stores the last error without advancing the stage.
 func (r *ArticleRepository) SaveError(ctx context.Context, articleID int64, processingErr error) error {
 	const query = `
 		UPDATE articles
-		SET error_message = $2, updated_at = NOW()
+		SET status = 'failed', error_message = $2, updated_at = NOW()
 		WHERE id = $1
 	`
 	if _, err := r.pool.Exec(ctx, query, articleID, processingErr.Error()); err != nil {

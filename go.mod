@@ -8,6 +8,7 @@ require (
 	github.com/mxschmitt/playwright-go v0.6100.0
 	github.com/xuri/excelize/v2 v2.11.0
 	google.golang.org/genai v1.65.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (

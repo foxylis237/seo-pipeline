@@ -41,7 +41,7 @@ func (g FakeGenerator) Close() error { return nil }
 func (g FakeGenerator) NewChat(_ context.Context) (Generator, error) {
 	results := g.Results
 	if len(results) == 0 {
-		results = []GenerationResult{g.Result, g.Result}
+		results = []GenerationResult{g.Result, g.Result, g.Result}
 	}
 	return &fakeChat{results: results, err: g.Err}, nil
 }

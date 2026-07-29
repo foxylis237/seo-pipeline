@@ -149,8 +149,82 @@ func TestArticleRepositoryIdempotency(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT current_step FROM articles WHERE id = $1`, arsenkinArticle.ID).Scan(&currentStep); err != nil {
 		t.Fatal(err)
 	}
+	if currentStep != "article_review" {
+		t.Fatalf("current_step = %q, want article_review", currentStep)
+	}
+	if err := repository.BeginGenerationStage(ctx, arsenkinArticle.ID, "info"); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT current_step FROM articles WHERE id = $1`, arsenkinArticle.ID).Scan(&currentStep); err != nil {
+		t.Fatal(err)
+	}
 	if currentStep != "metadata_generation" {
-		t.Fatalf("current_step = %q, want metadata_generation", currentStep)
+		t.Fatalf("current_step before info = %q, want metadata_generation", currentStep)
+	}
+	const articleInfo = "Название, метки, TL;DR и FAQ"
+	if err := repository.SaveArticleInfo(ctx, arsenkinArticle.ID, articleInfo); err != nil {
+		t.Fatal(err)
+	}
+	var savedArticleInfo string
+	var infoError *string
+	if err := pool.QueryRow(ctx, `
+		SELECT m.metadata_text, a.current_step, a.error_message
+		FROM article_metadata AS m
+		JOIN articles AS a ON a.id = m.article_id
+		WHERE m.article_id = $1
+	`, arsenkinArticle.ID).Scan(&savedArticleInfo, &currentStep, &infoError); err != nil {
+		t.Fatal(err)
+	}
+	if savedArticleInfo != articleInfo || currentStep != "article_review" || infoError != nil {
+		t.Fatalf("article info state = %q, %q, %v", savedArticleInfo, currentStep, infoError)
+	}
+	const reviewPath = "12-arsenkin/generated/review.txt"
+	if err := repository.SaveReviewPath(ctx, arsenkinArticle.ID, reviewPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT current_step FROM articles WHERE id = $1`, arsenkinArticle.ID).Scan(&currentStep); err != nil {
+		t.Fatal(err)
+	}
+	if currentStep != "article_review" {
+		t.Fatalf("current_step after review = %q, want article_review until fix succeeds", currentStep)
+	}
+	const fixedArticlePath = "12-arsenkin/generated/fixed_article.txt"
+	if err := repository.SaveFixedArticlePath(ctx, arsenkinArticle.ID, fixedArticlePath); err != nil {
+		t.Fatal(err)
+	}
+	var savedReviewPath, savedFixedArticlePath string
+	if err := pool.QueryRow(ctx, `SELECT metadata_path, final_path FROM article_outputs WHERE article_id = $1`, arsenkinArticle.ID).Scan(&savedReviewPath, &savedFixedArticlePath); err != nil {
+		t.Fatal(err)
+	}
+	if savedReviewPath != reviewPath || savedFixedArticlePath != fixedArticlePath {
+		t.Fatalf("review/fixed paths = %q, %q", savedReviewPath, savedFixedArticlePath)
+	}
+	if err := pool.QueryRow(ctx, `SELECT current_step FROM articles WHERE id = $1`, arsenkinArticle.ID).Scan(&currentStep); err != nil {
+		t.Fatal(err)
+	}
+	if currentStep != "html_generation" {
+		t.Fatalf("current_step after fix = %q, want html_generation", currentStep)
+	}
+	if _, err := pool.Exec(ctx, `
+		UPDATE articles
+		SET status = 'completed', current_step = NULL, error_message = 'old error'
+		WHERE id = $1
+	`, arsenkinArticle.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.BeginGeneration(ctx, arsenkinArticle.ID); err != nil {
+		t.Fatal(err)
+	}
+	var generationStatus string
+	var generationError *string
+	if err := pool.QueryRow(ctx, `
+		SELECT status, current_step, error_message
+		FROM articles WHERE id = $1
+	`, arsenkinArticle.ID).Scan(&generationStatus, &currentStep, &generationError); err != nil {
+		t.Fatal(err)
+	}
+	if generationStatus != "processing" || currentStep != "structure_generation" || generationError != nil {
+		t.Fatalf("generation start state = status %q, step %q, error %v", generationStatus, currentStep, generationError)
 	}
 	if err := repository.SaveStructurePath(ctx, arsenkinArticle.ID, structurePath); err != nil {
 		t.Fatal(err)
@@ -229,6 +303,7 @@ func newTestRepository(t *testing.T) (*ArticleRepository, *pgxpool.Pool) {
 		"000002_add_articles_external_id.up.sql",
 		"000003_add_wordstat_keywords.up.sql",
 		"000004_add_article_research_updated_at.up.sql",
+		"000005_add_article_review_stage.up.sql",
 	} {
 		migration, err := os.ReadFile(filepath.Join("..", "..", "migrations", name))
 		if err != nil {

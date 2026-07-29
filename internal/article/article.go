@@ -43,4 +43,17 @@ type GenerationInput struct {
 	CompetitorStructure string
 	WordstatKeywords    []KeywordFrequency
 	LSIWords            []string
+	Professions         string
+	Links               string
+}
+
+// SavedGenerationInput contains persisted artifacts required to resume one LLM stage.
+type SavedGenerationInput struct {
+	Article          Article
+	Professions      string
+	Links            string
+	StructurePath    string
+	ArticlePath      string
+	ReviewPath       string
+	FixedArticlePath string
 }

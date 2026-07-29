@@ -140,27 +140,19 @@ func TestLoadParsesArsenkinHeadless(t *testing.T) {
 	}
 }
 
-func TestValidateRunRequiresGeminiConfiguration(t *testing.T) {
+func TestValidatePrepareDoesNotRequireGeminiConfiguration(t *testing.T) {
 	cfg := Config{
 		DatabaseURL: "postgres://database",
 		KeysSOEmail: "email", KeysSOPassword: "password",
 		ArsenkinEmail: "email", ArsenkinPassword: "password",
 	}
-	if err := cfg.ValidateRun(); err == nil || err.Error() != "GEMINI_API_KEY is required" {
-		t.Fatalf("ValidateRun() error = %v", err)
-	}
-	cfg.GeminiAPIKey = "secret"
-	if err := cfg.ValidateRun(); err == nil || err.Error() != "GEMINI_MODEL is required" {
-		t.Fatalf("ValidateRun() error = %v", err)
-	}
-	cfg.GeminiModel = "configured-model"
-	if err := cfg.ValidateRun(); err != nil {
-		t.Fatalf("ValidateRun() error = %v", err)
+	if err := cfg.ValidatePrepare(); err != nil {
+		t.Fatalf("ValidatePrepare() error = %v", err)
 	}
 }
 
 func TestValidateGenerateDoesNotRequireCollectorCredentials(t *testing.T) {
-	cfg := Config{DatabaseURL: "postgres://database", GeminiAPIKey: "secret", GeminiModel: "model"}
+	cfg := Config{DatabaseURL: "postgres://database", GeminiModel: "gemini-test"}
 	if err := cfg.ValidateGenerate(); err != nil {
 		t.Fatalf("ValidateGenerate() error = %v", err)
 	}

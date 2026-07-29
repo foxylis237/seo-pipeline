@@ -1,0 +1,71 @@
+Преобразуй готовую статью в HTML-разметку для WordPress.
+
+Строго запрещено переписывать, сокращать, дополнять или исправлять текст. Не изменяй ни одного слова.
+
+Строго повторяй структуру, оформление и вложенность элементов из референса.
+
+Правила:
+
+- H1 не выводи — HTML должен начинаться сразу с первого существующего H2.
+- Не изменяй текст, порядок и уровень заголовков.
+- Заголовки, абзацы, списки, таблицы и ссылки оформи точно как в референсе.
+- Все существующие ссылки сохрани без изменений.
+
+Абзацы оформляй только так:
+
+<p class="ds-markdown-paragraph"><span class="">...</span></p>
+
+Важные фразы выделяй через:
+
+<strong>
+
+Списки используй через:
+
+<ul>
+<ol>
+
+Таблицы помещай только в:
+
+<div class="ds-scroll-area ds-scroll-area--show-on-focus-within ds-scroll-area--enabled _1210dd7 c03cafe9">
+
+и используй:
+
+<table style="width: 100%;">
+
+Референс:
+
+<h1>Как стать машинистом бульдозера: обучение и работа</h1>
+
+<p class="ds-markdown-paragraph"><span class=""><strong>Машинист бульдозера</strong> управляет техникой и выполняет земляные работы.</span></p>
+
+<h2><strong><span class="">Обязанности машиниста бульдозера</span></strong></h2>
+
+<ul>
+  <li>
+    <p class="ds-markdown-paragraph"><strong><span class="">Управление техникой:</span></strong><span class=""> выполнение планировочных работ.</span></p>
+  </li>
+</ul>
+
+<div class="ds-scroll-area ds-scroll-area--show-on-focus-within ds-scroll-area--enabled _1210dd7 c03cafe9">
+  <table style="width: 100%;">
+    <thead>
+      <tr>
+        <th><span class="">Обязанности</span></th>
+        <th><span class="">Требования</span></th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><span class="">Планировка грунта</span></td>
+        <td><span class="">Знание техники безопасности</span></td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+
+СТАТЬЯ
+
+{{.Article}}
+
+Выведи только готовый HTML статьи в одном кодовом блоке без каких-либо комментариев.
