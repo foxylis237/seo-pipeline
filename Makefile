@@ -9,14 +9,14 @@ CLI := $(GO) run ./cmd/seo-pipeline $(TASK)
 BINARY := bin/seo-pipeline
 DRY_RUN_DATABASE_URL ?= postgres://seo:seo@localhost:5433/seo_dry_run?sslmode=disable
 
-# Namespaced task_1 syntax: make task-1 <operation> [article_id|excel_path].
+# Namespaced task_1 syntax: make task-1 <operation> [article_id|limit].
 TASK_OPERATION := $(word 2,$(MAKECMDGOALS))
 TASK_ARG := $(word 3,$(MAKECMDGOALS))
 TASK_EXTRA_ARGS := $(wordlist 4,$(words $(MAKECMDGOALS)),$(MAKECMDGOALS))
 TASK_OPERATIONS := import run dry-run prepare generate demo-generate article info review fix html result
 REQUIRED_ID_OPERATIONS := prepare generate demo-generate article info review fix html result
 
-.PHONY: help task-1 docker-up docker-start docker-stop docker-down docker-restart docker-logs docker-ps
+.PHONY: help import task-1 docker-up docker-start docker-stop docker-down docker-restart docker-logs docker-ps
 .PHONY: test test-race fmt vet build
 
 # ----------------------------------------------------
@@ -26,7 +26,7 @@ REQUIRED_ID_OPERATIONS := prepare generate demo-generate article info review fix
 help: ## Show all available commands
 	@printf 'SEO Pipeline commands\n\n'
 	@printf 'task_1 operations:\n'
-	@printf '  %-32s %s\n' 'make task-1 import [path]' 'Import articles from Excel'
+	@printf '  %-32s %s\n' 'make import [limit]' 'Import articles from Excel'
 	@printf '  %-32s %s\n' 'make task-1 run [ID]' 'Run pending articles or one article'
 	@printf '  %-32s %s\n' 'make task-1 dry-run' 'Run the isolated local pipeline'
 	@printf '  %-32s %s\n' 'make task-1 prepare ID' 'Collect article research'
@@ -44,6 +44,24 @@ help: ## Show all available commands
 # ----------------------------------------------------
 # task_1
 # ----------------------------------------------------
+
+IMPORT_ARG := $(word 2,$(MAKECMDGOALS))
+IMPORT_EXTRA_ARGS := $(wordlist 3,$(words $(MAKECMDGOALS)),$(MAKECMDGOALS))
+
+import: ## Import all articles or at most the given number
+	@if [ -n "$(strip $(IMPORT_EXTRA_ARGS))" ]; then \
+		printf 'Too many arguments.\n\nExample:\n\nmake import 10\n'; \
+		exit 1; \
+	fi
+	@if [ -n "$(IMPORT_ARG)" ] && ! printf '%s' "$(IMPORT_ARG)" | grep -Eq '^[1-9][0-9]*$$'; then \
+		printf 'Import limit must be a positive integer.\n\nExample:\n\nmake import 10\n'; \
+		exit 1; \
+	fi
+	@if [ -n "$(IMPORT_ARG)" ]; then \
+		$(CLI) import "$(IMPORT_ARG)"; \
+	else \
+		$(CLI) import; \
+	fi
 
 task-1: ## Run a task_1 operation
 	@if [ -z "$(TASK_OPERATION)" ]; then \
@@ -91,11 +109,11 @@ task-1: ## Run a task_1 operation
 # Docker
 # ----------------------------------------------------
 
-docker-up: ## Create and start PostgreSQL containers
-	$(DOCKER_COMPOSE) up -d
+docker-up: ## Create, start, and wait for PostgreSQL
+	$(DOCKER_COMPOSE) up -d --wait
 
-docker-start: ## Start existing PostgreSQL containers
-	$(DOCKER_COMPOSE) start
+docker-start: ## Start and wait for PostgreSQL services
+	$(DOCKER_COMPOSE) up -d --wait
 
 docker-stop: ## Stop PostgreSQL containers without removing them
 	$(DOCKER_COMPOSE) stop
@@ -103,8 +121,9 @@ docker-stop: ## Stop PostgreSQL containers without removing them
 docker-down: ## Stop and remove PostgreSQL containers and network
 	$(DOCKER_COMPOSE) down
 
-docker-restart: ## Restart PostgreSQL services
+docker-restart: ## Restart and wait for PostgreSQL services
 	$(DOCKER_COMPOSE) restart
+	$(DOCKER_COMPOSE) up -d --wait
 
 docker-logs: ## Follow PostgreSQL service logs
 	$(DOCKER_COMPOSE) logs --tail=100 --follow
@@ -140,6 +159,8 @@ build: ## Build the CLI binary
 %:
 	@if [ "$(firstword $(MAKECMDGOALS))" = 'task-1' ] && \
 		{ [ "$@" = "$(TASK_OPERATION)" ] || [ "$@" = "$(TASK_ARG)" ]; }; then \
+		:; \
+	elif [ "$(firstword $(MAKECMDGOALS))" = 'import' ] && [ "$@" = "$(IMPORT_ARG)" ]; then \
 		:; \
 	else \
 		printf 'Unknown command: %s\n\nRun make help to see available commands.\n' "$@"; \

@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/article"
 	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/importer"
@@ -17,32 +19,54 @@ func runImport(
 	ctx context.Context,
 	articleRepository articleImporter,
 	inputFilePath string,
+	reportDirectory string,
+	limit int,
 	logger *slog.Logger,
 ) error {
-	articles, err := importer.ReadArticles(inputFilePath)
-	if err != nil {
-		return fmt.Errorf("прочитать Excel: %w", err)
+	startedAt := time.Now().UTC()
+	report := importer.Report{
+		StartedAt: startedAt,
+		InputFile: inputFilePath,
+		Limit:     limit,
+		Errors:    make([]importer.RowError, 0),
+	}
+	rows, readErr := importer.ReadRows(inputFilePath)
+	var importErr error
+	if readErr != nil {
+		importErr = fmt.Errorf("прочитать Excel: %w", readErr)
+		report.FatalError = importErr.Error()
 	}
 
-	found := len(articles)
-	added := 0
-	skipped := 0
-	logger.Info("Excel успешно прочитан", "found_count", found)
+	for _, row := range rows {
+		report.Summary.Viewed++
+		if row.Empty {
+			report.Summary.Empty++
+			continue
+		}
+		if len(row.Errors) > 0 {
+			report.Summary.Invalid++
+			report.Errors = append(report.Errors, importer.RowError{
+				ExcelRow: row.Number, ExternalID: row.ExternalID, Title: row.Title,
+				Errors: append([]string(nil), row.Errors...), Time: time.Now().UTC(),
+			})
+			continue
+		}
 
-	for _, input := range articles {
-		createdArticle, created, err := articleRepository.Import(ctx, input)
+		createdArticle, created, err := articleRepository.Import(ctx, row.Input)
 		if err != nil {
-			return fmt.Errorf(
+			importErr = fmt.Errorf(
 				"сохранить статью из Excel с ID %d и названием %q: %w",
-				input.ExcelID,
-				input.Title,
+				row.Input.ExcelID,
+				row.Input.Title,
 				err,
 			)
+			report.FatalError = importErr.Error()
+			break
 		}
 
 		if !created {
-			skipped++
-			logger.Info(
+			report.Summary.Existing++
+			logger.Debug(
 				"ранее импортированная статья пропущена",
 				"article_id", createdArticle.ID,
 				"external_id", createdArticle.ExternalID,
@@ -50,21 +74,30 @@ func runImport(
 			)
 			continue
 		}
-		added++
+		report.Summary.Imported++
 		logger.Info(
 			"новая статья импортирована",
 			"article_id", createdArticle.ID,
 			"external_id", createdArticle.ExternalID,
-			"title", input.Title,
+			"title", row.Input.Title,
 		)
+		if limit > 0 && report.Summary.Imported >= limit {
+			report.Summary.LimitReached = true
+			break
+		}
 	}
 
+	report.FinishedAt = time.Now().UTC()
+	reportPath, reportErr := importer.SaveReport(reportDirectory, report)
 	logger.Info(
 		"импорт статей завершён",
-		"found_count", found,
-		"added_count", added,
-		"skipped_count", skipped,
+		"viewed_count", report.Summary.Viewed,
+		"imported_count", report.Summary.Imported,
+		"existing_count", report.Summary.Existing,
+		"invalid_count", report.Summary.Invalid,
+		"empty_count", report.Summary.Empty,
+		"limit_reached", report.Summary.LimitReached,
+		"report_path", reportPath,
 	)
-
-	return nil
+	return errors.Join(importErr, reportErr)
 }

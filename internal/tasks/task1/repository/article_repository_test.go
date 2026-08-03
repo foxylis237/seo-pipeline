@@ -272,6 +272,30 @@ func TestArticleRepositoryIdempotency(t *testing.T) {
 	}
 }
 
+func TestImportNeverUpdatesExistingArticle(t *testing.T) {
+	repository, pool := newTestRepository(t)
+	ctx := context.Background()
+	original := article.Input{
+		ExcelID: 901, Title: "Исходное название", ImageSlug: "original",
+		ReferenceURL: "https://example.test/original", Category: "Исходная категория",
+	}
+	created, wasCreated, err := repository.Import(ctx, original)
+	if err != nil || !wasCreated {
+		t.Fatalf("первичный Import: created=%v err=%v", wasCreated, err)
+	}
+	repeated, wasCreated, err := repository.Import(ctx, article.Input{
+		ExcelID: 901, Title: "Новое название", ImageSlug: "changed",
+		ReferenceURL: "https://example.test/changed", Category: "Новая категория",
+	})
+	if err != nil || wasCreated {
+		t.Fatalf("повторный Import: created=%v err=%v", wasCreated, err)
+	}
+	if repeated.ID != created.ID || repeated.Title != original.Title {
+		t.Fatalf("существующая статья изменилась: %+v", repeated)
+	}
+	assertImportedFields(t, pool, created.ID, original)
+}
+
 func TestGetResultInputMapsStructuredInputFields(t *testing.T) {
 	repository, pool := newTestRepository(t)
 	ctx := context.Background()

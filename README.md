@@ -18,6 +18,7 @@ SEO Pipeline — CLI-приложение на Go для импорта зада
 - `tasks/task_1/prompts/` — промпты генерационных этапов.
 - `tasks/task_1/templates/` — шаблон `result.md`.
 - `tasks/task_1/output/` — создаваемые артефакты статей.
+- `output/task1/import-reports/` — исторические и актуальный JSON-отчёты импорта.
 
 ## Требования и конфигурация
 
@@ -40,16 +41,33 @@ SEO Pipeline — CLI-приложение на Go для импорта зада
 | `LOG_FORMAT` | `text` или `json`. |
 | `ENV_FILE` | Явный путь к env-файлу. |
 
+### Первый локальный запуск
+
+Конфигурация по умолчанию ожидается рядом с каталогом проекта, поэтому из корня свежего клона выполните:
+
+```bash
+cp .env.example ../.env
+```
+
+Для импорта с локальной PostgreSQL достаточно оставленных в примере `DATABASE_URL`, `INPUT_FILE_PATH` и `OUTPUT_DIR`. Перед `prepare` и генерацией заполните соответствующие учётные данные и ключи. Затем:
+
+```bash
+make docker-up
+make import
+```
+
+Для безопасной проверки всего pipeline без внешних сервисов и платных API используйте `make task-1 dry-run`.
+
 ## Makefile
 
-Makefile — короткая оболочка над существующим CLI, командами Go и Docker Compose. Все операции со статьями вызываются через namespace `task-1`: `make task-1 <operation> [argument]`. Например, `make task-1 generate 37`. Команды с обязательным ID завершаются понятной ошибкой, если ID отсутствует или не является положительным целым числом.
+Makefile — короткая оболочка над существующим CLI, командами Go и Docker Compose. Импорт запускается как `make import [limit]`; остальные операции со статьями — через namespace `task-1`: `make task-1 <operation> [argument]`. Например, `make task-1 generate 37`. Команды с обязательным ID завершаются понятной ошибкой, если ID отсутствует или не является положительным целым числом.
 
 ### Команды приложения
 
 | Цель | Что делает | Параметр | Пример | Эквивалент без Makefile |
 |---|---|---|---|---|
 | `help` | Показывает все цели и описания. | Нет. | `make help` | `make -qp` не требуется; список формирует сам Makefile. |
-| `task-1 import` | Импортирует первые две статьи из Excel по умолчанию. | Необязательный путь к другому Excel. | `make task-1 import` или `make task-1 import path/to/input.xlsx` | `go run ./cmd/seo-pipeline task-1 import [excel_path]` |
+| `import` | Импортирует все заполненные строки Excel. | Необязательный положительный лимит строк данных. | `make import` или `make import 10` | `go run ./cmd/seo-pipeline task-1 import [limit]` |
 | `task-1 run` | Без ID атомарно обрабатывает все доступные `pending`-статьи demo-flow; с ID запускает demo-flow явно. | Необязательный ID. | `make task-1 run` или `make task-1 run 37` | `go run ./cmd/seo-pipeline task-1 run [external_id]` |
 | `task-1 dry-run` | Поднимает тестовую БД, запускает тесты, vet и полный локальный pipeline на stub-данных. | Нет. | `make task-1 dry-run` | См. раздел «Dry-run». |
 | `task-1 prepare` | Собирает Keys.so и Arsenkin research для статьи. | Обязательный ID. | `make task-1 prepare 37` | `go run ./cmd/seo-pipeline task-1 prepare 37` |
@@ -62,23 +80,23 @@ Makefile — короткая оболочка над существующим C
 | `task-1 html` | Создаёт и публикует HTML статьи. | Обязательный ID. | `make task-1 html 37` | `go run ./cmd/seo-pipeline task-1 html 37` |
 | `task-1 result` | Собирает `result.md` и после успешной публикации завершает статью. | Обязательный ID. | `make task-1 result 37` | `go run ./cmd/seo-pipeline task-1 result 37` |
 
-Отдельной CLI-операции `structure` сейчас нет: структура создаётся внутри `generate`. Ограничение количества строк для `import` также отсутствует — второй аргумент этой команды является путём, а не числом.
+Отдельной CLI-операции `structure` сейчас нет: структура создаётся внутри `generate`.
 
 ### Docker
 
 | Цель | Что делает | Параметр | Пример | Эквивалент без Makefile |
 |---|---|---|---|---|
-| `docker-up` | Запускает оба PostgreSQL-сервиса. | Нет. | `make docker-up` | `docker compose up -d` |
-| `docker-start` | Запускает ранее остановленные контейнеры без пересоздания. | Нет. | `make docker-start` | `docker compose start` |
+| `docker-up` | Запускает оба PostgreSQL-сервиса и ждёт готовности. | Нет. | `make docker-up` | `docker compose up -d --wait` |
+| `docker-start` | Запускает сервисы и ждёт готовности PostgreSQL. | Нет. | `make docker-start` | `docker compose up -d --wait` |
 | `docker-stop` | Останавливает контейнеры, не удаляя их. | Нет. | `make docker-stop` | `docker compose stop` |
 | `docker-down` | Останавливает и удаляет контейнеры сети проекта, сохраняя volumes. | Нет. | `make docker-down` | `docker compose down` |
-| `docker-restart` | Перезапускает сервисы. | Нет. | `make docker-restart` | `docker compose restart` |
+| `docker-restart` | Перезапускает сервисы и ждёт готовности. | Нет. | `make docker-restart` | `docker compose restart`, затем `docker compose up -d --wait` |
 | `docker-logs` | Показывает последние 100 строк и продолжает следить за логами. | Нет. | `make docker-logs` | `docker compose logs --tail=100 --follow` |
 | `docker-ps` | Показывает состояние сервисов. | Нет. | `make docker-ps` | `docker compose ps` |
 
 Для обычной ежедневной паузы используйте `make docker-stop`, а для продолжения — `make docker-start`: контейнеры при этом сохраняются. `make docker-down` удаляет контейнеры и сеть, но не именованные volumes с данными; следующий `make docker-up` создаст контейнеры заново.
 
-`postgres` доступен на `localhost:5432`, `postgres-dry-run` — на `localhost:5433`. Dry-run-контейнер применяет `migrations/*.up.sql` при первичной инициализации своего volume. Отдельного migration runner и Makefile-цели миграции в проекте нет.
+`postgres` доступен на `localhost:5432`, `postgres-dry-run` — на `localhost:5433`. Оба контейнера применяют `migrations/*.up.sql` при первой инициализации своих volumes. Отдельного migration runner и Makefile-цели миграции в проекте нет; уже существующий volume автоматически повторно не мигрируется.
 
 ### Проверки и сборка
 
@@ -96,7 +114,7 @@ CLI принимает группу `task-1`; совместимая форма 
 
 ```bash
 go run ./cmd/seo-pipeline task-1 import
-go run ./cmd/seo-pipeline task-1 import path/to/input.xlsx
+go run ./cmd/seo-pipeline task-1 import 10
 go run ./cmd/seo-pipeline task-1 run
 go run ./cmd/seo-pipeline task-1 run <external_id>
 go run ./cmd/seo-pipeline task-1 prepare <external_id>
@@ -114,9 +132,30 @@ go run ./cmd/seo-pipeline task-1 result <external_id>
 
 ## Импорт
 
-По умолчанию импорт читается из `input/task_1/input.xlsx`. Используется лист `Лист1`, а если его нет — первый лист книги. Обязательны колонки `id` и `article_name`. Поддерживаются `header`, `image_slug`, `meta_description`, `key_word`, `reference_url`, `category`, `authors`, `links`, `professions` и старая опечатка `referense_url`.
+По умолчанию импорт читается из `input/task_1/input.xlsx`. Используется лист `Лист1`, а если его нет — первый лист книги. Обязательны колонки `id`, `article_name`, `image_slug` и `reference_url`. Поддерживаются `header`, `meta_description`, `key_word`, `category`, `authors`, `links`, `professions` и старая опечатка `referense_url`.
 
-Текущий MVP читает первые две непустые строки. Новый `external_id` создаётся транзакционно; уже существующий ID пропускается без обновления.
+```bash
+make import
+```
+
+Импортирует все заполненные строки Excel.
+
+```bash
+make import 10
+```
+
+Импортирует первые 10 новых валидных статей. Уже существующие `external_id`, пустые и некорректные строки в лимит не входят. Если новых статей меньше, импорт завершается в конце файла. Нулевой, отрицательный или некорректный лимит отклоняется до начала импорта.
+
+Excel всегда просматривается сверху вниз, а источником истины остаётся PostgreSQL. Новый `external_id` создаётся атомарно через `INSERT ... ON CONFLICT DO NOTHING`; уже существующая статья пропускается без обновления её полей, статуса или результатов обработки.
+
+Для прохождения полного task1 обязательны непустые `id`, `article_name`, `image_slug` и `reference_url` (поддерживается старая опечатка `referense_url`). Значение `NULL` без учёта регистра также считается пустым. Ошибки отдельных строк не останавливают остальные строки; дубликаты `external_id` после первой корректной строки Excel отмечаются как ошибки файла.
+
+После каждого запуска создаются два JSON-отчёта:
+
+- `output/task1/import-reports/import-<timestamp>.json` — исторический отчёт запуска;
+- `output/task1/import-reports/latest.json` — полный отчёт последнего запуска.
+
+Отчёт содержит время запуска, входной файл, лимит, количество просмотренных, импортированных, существующих, некорректных и пустых строк, признак достижения лимита, построчные ошибки и фатальную инфраструктурную ошибку при её наличии. Оба файла публикуются атомарно.
 
 ## Pipeline
 
@@ -194,20 +233,20 @@ tasks/task_1/output/37-primer/
   prompts/
     structure_prompt.txt
     article_prompt.txt
-    article_info_prompt.txt
     article_review_prompt.txt
     fix_article_prompt.txt
     article_html_prompt.txt
   generated/
     structure.txt
     article.txt
-    article_info.txt
     review.txt
     fixed_article.txt
     generation_context.json
   article.html
   result.md
 ```
+
+Сокращённый demo-flow дополнительно сохраняет `prompts/article_info_prompt.txt` и `generated/article_info.txt`; полный flow сохраняет эти metadata в PostgreSQL.
 
 Файлы сначала полностью записываются во временные файлы в целевом каталоге, затем публикуются атомарным rename вместе с сохранением состояния stage. При ошибке сохраняется предыдущая опубликованная версия. Пути в PostgreSQL относительны к `OUTPUT_DIR`.
 
@@ -228,7 +267,7 @@ tasks/task_1/output/37-primer/
 ## Текущие ограничения
 
 - Реализован только `task_1`.
-- Импорт ограничен первыми двумя статьями и не обновляет существующие ID.
+- Импорт возобновляемый: существующие ID пропускаются без обновления, а необязательный лимит считается только по новым валидным статьям.
 - `article` и `info` являются двумя именами одной объединённой операции.
 - Отдельной CLI-команды только для `structure` нет.
 - Автоматического retry для `failed` нет; повторный запуск выполняется явно.

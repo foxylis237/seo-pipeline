@@ -14,7 +14,10 @@ func TestParseCommand(t *testing.T) {
 		errorHas string
 	}{
 		{[]string{"seo-pipeline", "task-1", "import"}, taskCommand{Name: "import"}, ""},
-		{[]string{"seo-pipeline", "task_1", "import", "other.xlsx"}, taskCommand{Name: "import", ImportPath: "other.xlsx"}, ""},
+		{[]string{"seo-pipeline", "task_1", "import", "10"}, taskCommand{Name: "import", ImportLimit: 10}, ""},
+		{[]string{"seo-pipeline", "task-1", "import", "0"}, taskCommand{}, "positive integer"},
+		{[]string{"seo-pipeline", "task-1", "import", "-1"}, taskCommand{}, "positive integer"},
+		{[]string{"seo-pipeline", "task-1", "import", "wrong"}, taskCommand{}, "positive integer"},
 		{[]string{"seo-pipeline", "task-1", "prepare", "37"}, taskCommand{Name: "prepare", ExternalID: "37"}, ""},
 		{[]string{"seo-pipeline", "task-1", "generate", "37"}, taskCommand{Name: "generate", ExternalID: "37"}, ""},
 		{[]string{"seo-pipeline", "task-1", "article", "37"}, taskCommand{Name: "article", ExternalID: "37"}, ""},

@@ -9,17 +9,53 @@ import (
 	"github.com/xuri/excelize/v2"
 )
 
-const (
-	// Имя листа, которое ожидаем по умолчанию.
-	defaultSheetName = "Лист1"
+const defaultSheetName = "Лист1"
 
-	// Для MVP читаем только первые две статьи.
-	defaultLimit = 2
-)
+type Row struct {
+	Number     int
+	ExternalID string
+	Title      string
+	Input      article.Input
+	Empty      bool
+	Errors     []string
+}
 
-// ReadArticles открывает Excel-файл, проверяет его структуру
-// и возвращает первые две статьи для дальнейшей обработки.
+// ReadArticles открывает Excel-файл и возвращает все заполненные строки данных.
 func ReadArticles(path string) ([]article.Input, error) {
+	return ReadArticlesWithLimit(path, 0)
+}
+
+// ReadArticlesWithLimit возвращает не больше limit строк данных.
+// Нулевой limit означает отсутствие ограничения.
+func ReadArticlesWithLimit(path string, limit int) ([]article.Input, error) {
+	if limit < 0 {
+		return nil, fmt.Errorf("лимит строк не может быть отрицательным")
+	}
+	rows, err := ReadRows(path)
+	if err != nil {
+		return nil, err
+	}
+	articles := make([]article.Input, 0)
+	for _, row := range rows {
+		if row.Empty {
+			continue
+		}
+		if len(row.Errors) > 0 {
+			return nil, fmt.Errorf("строка %d: %s", row.Number, strings.Join(row.Errors, "; "))
+		}
+		articles = append(articles, row.Input)
+		if limit > 0 && len(articles) >= limit {
+			break
+		}
+	}
+	if len(articles) == 0 {
+		return nil, fmt.Errorf("не найдено ни одной строки со статьями")
+	}
+	return articles, nil
+}
+
+// ReadRows читает все строки данных, сохраняя ошибки отдельных строк в результате.
+func ReadRows(path string) ([]Row, error) {
 	// Открываем Excel-файл.
 	file, err := excelize.OpenFile(path)
 	if err != nil {
@@ -61,82 +97,69 @@ func ReadArticles(path string) ([]article.Input, error) {
 		return nil, err
 	}
 
-	// Заранее выделяем память под две статьи.
-	articles := make([]article.Input, 0, defaultLimit)
-	seenExternalIDs := make(map[int]int, defaultLimit)
+	result := make([]Row, 0, len(rows)-1)
+	seenExternalIDs := make(map[int]int)
 
 	// Начинаем со второй строки, так как первая содержит заголовки.
-	for rowIndex := 1; rowIndex < len(rows) && len(articles) < defaultLimit; rowIndex++ {
+	for rowIndex := 1; rowIndex < len(rows); rowIndex++ {
 		row := rows[rowIndex]
 		if isEmptyRow(row) {
+			result = append(result, Row{Number: rowIndex + 1, Empty: true})
 			continue
 		}
 
-		// ID обязателен для каждой непустой строки.
 		idText := cellValue(row, columnIndexes["id"])
-		if strings.TrimSpace(idText) == "" {
-			return nil, fmt.Errorf("строка %d: обязательная колонка %q пуста", rowIndex+1, "id")
-		}
-
-		// Преобразуем ID из строки в число.
-		id, err := strconv.Atoi(strings.TrimSpace(idText))
-		if err != nil {
-			return nil, fmt.Errorf(
-				"строка %d: некорректный id %q: %w",
-				rowIndex+1,
-				idText,
-				err,
-			)
-		}
-		if previousRow, found := seenExternalIDs[id]; found {
-			return nil, fmt.Errorf(
-				"строка %d: id %d уже использован в строке %d",
-				rowIndex+1,
-				id,
-				previousRow,
-			)
-		}
-		seenExternalIDs[id] = rowIndex + 1
-
-		// Заполняем доменную структуру данными из Excel.
 		title := cellValue(row, columnIndexes["article_name"])
-		if title == "" {
-			return nil, fmt.Errorf("строка %d: обязательная колонка %q пуста", rowIndex+1, "article_name")
+		parsed := Row{Number: rowIndex + 1, ExternalID: idText, Title: title}
+		if isMissingRequired(idText) {
+			parsed.Errors = append(parsed.Errors, `поле "id": отсутствует или пусто`)
+		}
+		id, idErr := strconv.Atoi(strings.TrimSpace(idText))
+		if !isMissingRequired(idText) && (idErr != nil || id <= 0) {
+			parsed.Errors = append(parsed.Errors, `поле "id": должно быть положительным целым числом`)
+		}
+		if isMissingRequired(title) {
+			parsed.Errors = append(parsed.Errors, `поле "article_name": отсутствует или пусто`)
+		}
+		imageSlug := optionalCellValue(row, columnIndexes, "image_slug")
+		if isMissingRequired(imageSlug) {
+			parsed.Errors = append(parsed.Errors, `поле "image_slug": отсутствует или пусто`)
+		}
+		referenceURL := optionalCellValue(row, columnIndexes, "reference_url")
+		if isMissingRequired(referenceURL) {
+			parsed.Errors = append(parsed.Errors, `поле "reference_url": отсутствует или пусто`)
+		}
+		if idErr == nil && id > 0 {
+			if previousRow, found := seenExternalIDs[id]; found {
+				parsed.Errors = append(parsed.Errors, fmt.Sprintf("поле \"id\": дубликат строки %d", previousRow))
+			} else if len(parsed.Errors) == 0 {
+				seenExternalIDs[id] = rowIndex + 1
+			}
 		}
 
-		input := article.Input{
+		parsed.Input = article.Input{
 			ExcelID:         id,
 			Title:           title,
 			Header:          optionalCellValue(row, columnIndexes, "header"),
-			ImageSlug:       optionalCellValue(row, columnIndexes, "image_slug"),
+			ImageSlug:       imageSlug,
 			MetaDescription: optionalCellValue(row, columnIndexes, "meta_description"),
 			Keyword:         optionalCellValue(row, columnIndexes, "key_word"),
-			ReferenceURL:    optionalCellValue(row, columnIndexes, "reference_url"),
+			ReferenceURL:    referenceURL,
 			Category:        optionalCellValue(row, columnIndexes, "category"),
 			Author:          optionalCellValue(row, columnIndexes, "authors"),
 			Links:           optionalCellValue(row, columnIndexes, "links"),
 			Professions:     optionalCellValue(row, columnIndexes, "professions"),
 		}
 
-		// Добавляем статью в результат.
-		articles = append(articles, input)
+		result = append(result, parsed)
 	}
-
-	// Если после обработки не нашли ни одной статьи — возвращаем ошибку.
-	if len(articles) == 0 {
-		return nil, fmt.Errorf("не найдено ни одной строки со статьями")
-	}
-
-	return articles, nil
+	return result, nil
 }
 
 // buildColumnIndexes проверяет наличие всех обязательных колонок
 // и строит карту "имя колонки -> индекс".
 func buildColumnIndexes(headerRow []string) (map[string]int, error) {
-	requiredColumns := []string{
-		"id",
-		"article_name",
-	}
+	requiredColumns := []string{"id", "article_name", "image_slug", "reference_url"}
 
 	// Карта для быстрого поиска индекса колонки по её имени.
 	indexes := make(map[string]int, len(headerRow))
@@ -176,6 +199,11 @@ func buildColumnIndexes(headerRow []string) (map[string]int, error) {
 	}
 
 	return indexes, nil
+}
+
+func isMissingRequired(value string) bool {
+	value = strings.TrimSpace(value)
+	return value == "" || strings.EqualFold(value, "null")
 }
 
 func optionalCellValue(row []string, indexes map[string]int, column string) string {

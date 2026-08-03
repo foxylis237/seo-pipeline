@@ -494,25 +494,50 @@ func (r *ArticleRepository) Create(
 	return created, nil
 }
 
-// Import inserts a new article or refreshes the imported fields of an existing
-// external_id. The boolean reports whether a new article row was added.
+// Import atomically inserts a new article and never updates an existing external_id.
+// The boolean reports whether a new article row was added.
 func (r *ArticleRepository) Import(ctx context.Context, input article.Input) (article.Article, bool, error) {
-	var existing article.Article
+	var selected article.Article
 	err := r.pool.QueryRow(ctx, `
+		WITH created AS (
+			INSERT INTO articles (external_id, title)
+			VALUES ($1, $2)
+			ON CONFLICT (external_id) DO NOTHING
+			RETURNING id, external_id, title, status, current_step, error_message, created_at, updated_at
+		), saved_input AS (
+			INSERT INTO article_inputs (
+				article_id, category, header, image_slug, meta_description,
+				key_word, reference_url, author, links, professions
+			)
+			SELECT id, $3, $4, $5, $6, $7, $8, $9, $10, $11 FROM created
+			RETURNING article_id
+		)
+		SELECT id, external_id, title, status, current_step, error_message, created_at, updated_at
+		FROM created
+		WHERE EXISTS (SELECT 1 FROM saved_input)
+	`, fmt.Sprint(input.ExcelID), input.Title, input.Category, input.Header, input.ImageSlug,
+		input.MetaDescription, input.Keyword, input.ReferenceURL, input.Author, input.Links, input.Professions,
+	).Scan(
+		&selected.ID, &selected.ExternalID, &selected.Title, &selected.Status,
+		&selected.CurrentStep, &selected.ErrorMessage, &selected.CreatedAt, &selected.UpdatedAt,
+	)
+	if err == nil {
+		return selected, true, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return article.Article{}, false, fmt.Errorf("импортировать новую статью: %w", err)
+	}
+	err = r.pool.QueryRow(ctx, `
 		SELECT id, external_id, title, status, current_step, error_message, created_at, updated_at
 		FROM articles WHERE external_id = $1
 	`, fmt.Sprint(input.ExcelID)).Scan(
-		&existing.ID, &existing.ExternalID, &existing.Title, &existing.Status,
-		&existing.CurrentStep, &existing.ErrorMessage, &existing.CreatedAt, &existing.UpdatedAt,
+		&selected.ID, &selected.ExternalID, &selected.Title, &selected.Status,
+		&selected.CurrentStep, &selected.ErrorMessage, &selected.CreatedAt, &selected.UpdatedAt,
 	)
-	if err == nil {
-		return existing, false, nil
+	if err != nil {
+		return article.Article{}, false, fmt.Errorf("получить существующую статью после конфликта: %w", err)
 	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		return article.Article{}, false, fmt.Errorf("проверить импортированную статью: %w", err)
-	}
-	created, err := r.Create(ctx, input)
-	return created, true, err
+	return selected, false, nil
 }
 
 // GetAll возвращает статьи с их URL конкурентов в порядке ID.

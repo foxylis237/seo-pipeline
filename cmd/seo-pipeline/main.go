@@ -50,9 +50,6 @@ func main() {
 		logger.Error("не удалось настроить логирование", "error", err)
 		os.Exit(1)
 	}
-	if command.Name == "import" && command.ImportPath != "" {
-		cfg.InputFilePath = command.ImportPath
-	}
 	if command.DryRun {
 		err = cfg.ValidateDryRun()
 	} else {
@@ -93,7 +90,7 @@ func main() {
 	taskLogger.Info("task started", "stage", "start")
 	switch command.Name {
 	case "import":
-		err = runImport(ctx, articleRepository, cfg.InputFilePath, taskLogger)
+		err = runImport(ctx, articleRepository, cfg.InputFilePath, "output/task1/import-reports", command.ImportLimit, taskLogger)
 
 	case "prepare":
 		writer := articleoutput.NewWriter(cfg.OutputDir)
@@ -257,10 +254,10 @@ func newLogger(levelValue, formatValue string) (*slog.Logger, error) {
 }
 
 type taskCommand struct {
-	Name       string
-	ExternalID string
-	ImportPath string
-	DryRun     bool
+	Name        string
+	ExternalID  string
+	ImportLimit int
+	DryRun      bool
 }
 
 func parseCommand(args []string) (taskCommand, error) {
@@ -296,14 +293,16 @@ func parseTaskCommand(args []string) (taskCommand, error) {
 	switch task {
 	case "import":
 		if len(args) > 4 {
-			return taskCommand{}, fmt.Errorf("usage: seo-pipeline task-1 import [excel_path]")
+			return taskCommand{}, fmt.Errorf("usage: seo-pipeline task-1 import [limit]")
 		}
 		command := taskCommand{Name: task}
 		if len(args) == 4 {
-			command.ImportPath = strings.TrimSpace(args[3])
-			if command.ImportPath == "" {
-				return taskCommand{}, fmt.Errorf("excel_path must not be empty")
+			value := strings.TrimSpace(args[3])
+			limit, err := strconv.Atoi(value)
+			if err != nil || limit <= 0 {
+				return taskCommand{}, fmt.Errorf("import limit must be a positive integer: %q", args[3])
 			}
+			command.ImportLimit = limit
 		}
 		return command, nil
 	case "run":
