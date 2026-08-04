@@ -90,12 +90,8 @@ type ResultInput struct {
 	Professions     string
 	Author          string
 	Keyword         string
-	SEOTitle        string
 	MetaDescription string
 	Header          string
-	ProfessionName  string
-	ImageName       string
-	ImageURL        string
 	ArticlePath     string
 	HTMLPath        string
 }

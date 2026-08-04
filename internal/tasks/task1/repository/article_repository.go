@@ -28,8 +28,7 @@ func (r *ArticleRepository) GetResultInput(ctx context.Context, externalID strin
 			COALESCE(i.category, ''), COALESCE(m.tags, ''), COALESCE(m.tldr, ''), COALESCE(m.faq, ''),
 			COALESCE(m.metadata_text, ''),
 			COALESCE(i.professions, ''), COALESCE(i.author, ''), COALESCE(i.key_word, ''),
-			COALESCE(i.seo_title, ''), COALESCE(i.meta_description, ''), COALESCE(i.header, ''),
-			COALESCE(i.profession_name, ''), COALESCE(i.image_name, ''), COALESCE(i.image_url, ''),
+			COALESCE(i.meta_description, ''), COALESCE(i.header, ''),
 			COALESCE(o.article_path, ''), COALESCE(o.html_path, '')
 		FROM articles AS a
 		LEFT JOIN article_inputs AS i ON i.article_id = a.id
@@ -44,8 +43,7 @@ func (r *ArticleRepository) GetResultInput(ctx context.Context, externalID strin
 		&input.Article.Status, &input.Article.CurrentStep, &input.Article.ErrorMessage,
 		&input.Article.CreatedAt, &input.Article.UpdatedAt,
 		&input.Category, &input.Tags, &input.TLDR, &input.FAQ, &rawMetadata, &input.Professions, &input.Author,
-		&input.Keyword, &input.SEOTitle, &input.MetaDescription, &input.Header,
-		&input.ProfessionName, &input.ImageName, &input.ImageURL,
+		&input.Keyword, &input.MetaDescription, &input.Header,
 		&input.ArticlePath, &input.HTMLPath,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -56,9 +54,6 @@ func (r *ArticleRepository) GetResultInput(ctx context.Context, externalID strin
 	}
 	if parsed, parseErr := article.ParseArticleInfo(rawMetadata); parseErr == nil {
 		input.AdditionalInfo = parsed.AdditionalInfo
-	}
-	if strings.TrimSpace(input.Article.Slug) == "" {
-		return article.ResultInput{}, fmt.Errorf("для статьи external_id %q отсутствует image_slug", externalID)
 	}
 	return input, nil
 }

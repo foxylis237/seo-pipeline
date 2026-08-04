@@ -373,8 +373,8 @@ func TestRecordErrorAppendsHistoryAndSaveErrorKeepsItAfterSuccess(t *testing.T) 
 	}
 }
 
-func TestGetResultInputMapsStructuredInputFields(t *testing.T) {
-	repository, pool := newTestRepository(t)
+func TestGetResultInputMapsImportedResultFields(t *testing.T) {
+	repository, _ := newTestRepository(t)
 	ctx := context.Background()
 	created, err := repository.Create(ctx, article.Input{
 		ExcelID: 21, Title: "старый title", Keyword: "старый key_word",
@@ -383,43 +383,13 @@ func TestGetResultInputMapsStructuredInputFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, `
-		UPDATE article_inputs
-		SET seo_title = 'новый seo_title', profession_name = 'новый profession_name',
-			image_name = 'новый image_name', image_url = 'https://example.test/new-image.jpg'
-		WHERE article_id = $1
-	`, created.ID); err != nil {
-		t.Fatal(err)
-	}
-
 	input, err := repository.GetResultInput(ctx, created.ExternalID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if input.SEOTitle != "новый seo_title" || input.ProfessionName != "новый profession_name" ||
-		input.ImageName != "новый image_name" || input.ImageURL != "https://example.test/new-image.jpg" {
-		t.Fatalf("structured result mapping = SEO %q, profession %q, image %q, URL %q",
-			input.SEOTitle, input.ProfessionName, input.ImageName, input.ImageURL)
-	}
-	if input.SEOTitle == "старый title" || input.ProfessionName == "старый key_word" ||
-		input.ImageName == "старый header" || input.ImageURL == "старый-image-slug" {
-		t.Fatalf("structured fields were replaced by legacy values: %+v", input)
-	}
-
-	if _, err := pool.Exec(ctx, `
-		UPDATE article_inputs
-		SET seo_title = NULL, profession_name = NULL, image_name = NULL, image_url = NULL
-		WHERE article_id = $1
-	`, created.ID); err != nil {
-		t.Fatal(err)
-	}
-	nullInput, err := repository.GetResultInput(ctx, created.ExternalID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if nullInput.SEOTitle != "" || nullInput.ProfessionName != "" || nullInput.ImageName != "" || nullInput.ImageURL != "" {
-		t.Fatalf("NULL structured mapping = SEO %q, profession %q, image %q, URL %q",
-			nullInput.SEOTitle, nullInput.ProfessionName, nullInput.ImageName, nullInput.ImageURL)
+	if input.Article.Title != "старый title" || input.Keyword != "старый key_word" || input.Article.Slug != "старый-image-slug" {
+		t.Fatalf("imported result fields = title %q, keyword %q, image slug %q",
+			input.Article.Title, input.Keyword, input.Article.Slug)
 	}
 }
 

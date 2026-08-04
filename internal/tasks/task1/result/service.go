@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"text/template"
 
@@ -55,6 +56,10 @@ func ReadingTimeMinutes(text string) int {
 type templateData struct {
 	article.ResultInput
 	Title              string
+	SEOTitle           string
+	ProfessionName     string
+	ImageName          string
+	ImageURL           string
 	ReadingTimeMinutes int
 	FAQItems           []FAQItem
 }
@@ -141,6 +146,7 @@ func (s *Service) BuildStaged(ctx context.Context, externalID string) (*articleo
 	if input.HTMLPath != "" && !s.writer.Exists(input.HTMLPath) {
 		input.HTMLPath = ""
 	}
+	s.warnMissingResultFields(input)
 	faqItems, err := ParseFAQItems(input.FAQ)
 	if err != nil {
 		return nil, fmt.Errorf("parse FAQ for result: %w", err)
@@ -156,13 +162,44 @@ func (s *Service) BuildStaged(ctx context.Context, externalID string) (*articleo
 		return nil, fmt.Errorf("parse result template %q: %w", s.templatePath, err)
 	}
 	var rendered bytes.Buffer
-	if err := tmpl.Execute(&rendered, templateData{ResultInput: input, Title: input.Article.Title, ReadingTimeMinutes: ReadingTimeMinutes(articleText), FAQItems: faqItems}); err != nil {
+	if err := tmpl.Execute(&rendered, templateData{
+		ResultInput:        input,
+		Title:              input.Article.Title,
+		SEOTitle:           input.Article.Title,
+		ProfessionName:     input.Keyword,
+		ImageName:          input.Article.Title,
+		ImageURL:           input.Article.Slug,
+		ReadingTimeMinutes: ReadingTimeMinutes(articleText),
+		FAQItems:           faqItems,
+	}); err != nil {
 		return nil, fmt.Errorf("render result template: %w", err)
 	}
-	pending, err := s.writer.StageResult(input.Article.ExternalID, input.Article.Slug, rendered.String())
+	outputSlug := input.Article.Slug
+	if strings.TrimSpace(outputSlug) == "" {
+		articleDirectory := strings.Split(strings.Trim(filepath.ToSlash(input.ArticlePath), "/"), "/")[0]
+		outputSlug = strings.TrimPrefix(articleDirectory, input.Article.ExternalID+"-")
+	}
+	pending, err := s.writer.StageResult(input.Article.ExternalID, outputSlug, rendered.String())
 	if err != nil {
 		return nil, err
 	}
 	s.logger.Info("result staged", "article_id", input.Article.ID, "external_id", externalID, "stage", "result_generation", "result_path", pending.Paths.ResultPath)
 	return pending, nil
+}
+
+func (s *Service) warnMissingResultFields(input article.ResultInput) {
+	fields := []struct {
+		name  string
+		value string
+	}{
+		{"SEO-заголовок", input.Article.Title},
+		{"Название профессии", input.Keyword},
+		{"Название картинки", input.Article.Title},
+		{"URL картинки", input.Article.Slug},
+	}
+	for _, field := range fields {
+		if strings.TrimSpace(field.value) == "" {
+			s.logger.Warn("result field is empty", "article_id", input.Article.ID, "external_id", input.Article.ExternalID, "field", field.name)
+		}
+	}
 }
