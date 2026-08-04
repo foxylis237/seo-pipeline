@@ -21,6 +21,14 @@
 ```text
 {{.TLDR}}
 ```
+{{if .AdditionalInfo}}
+
+## Допинфо
+
+```text
+{{.AdditionalInfo}}
+```
+{{end}}
 {{range $index, $item := .FAQItems}}
 
 ## Вопрос {{add $index 1}}

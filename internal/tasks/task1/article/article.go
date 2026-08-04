@@ -86,6 +86,7 @@ type ResultInput struct {
 	Tags            string
 	TLDR            string
 	FAQ             string
+	AdditionalInfo  string
 	Professions     string
 	Author          string
 	Keyword         string

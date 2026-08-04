@@ -26,6 +26,7 @@ func (r *ArticleRepository) GetResultInput(ctx context.Context, externalID strin
 		SELECT a.id, a.external_id, a.title, COALESCE(i.image_slug, ''),
 			a.status, a.current_step, a.error_message, a.created_at, a.updated_at,
 			COALESCE(i.category, ''), COALESCE(m.tags, ''), COALESCE(m.tldr, ''), COALESCE(m.faq, ''),
+			COALESCE(m.metadata_text, ''),
 			COALESCE(i.professions, ''), COALESCE(i.author, ''), COALESCE(i.key_word, ''),
 			COALESCE(i.seo_title, ''), COALESCE(i.meta_description, ''), COALESCE(i.header, ''),
 			COALESCE(i.profession_name, ''), COALESCE(i.image_name, ''), COALESCE(i.image_url, ''),
@@ -37,11 +38,12 @@ func (r *ArticleRepository) GetResultInput(ctx context.Context, externalID strin
 		WHERE a.external_id = $1
 	`
 	var input article.ResultInput
+	var rawMetadata string
 	err := r.pool.QueryRow(ctx, query, externalID).Scan(
 		&input.Article.ID, &input.Article.ExternalID, &input.Article.Title, &input.Article.Slug,
 		&input.Article.Status, &input.Article.CurrentStep, &input.Article.ErrorMessage,
 		&input.Article.CreatedAt, &input.Article.UpdatedAt,
-		&input.Category, &input.Tags, &input.TLDR, &input.FAQ, &input.Professions, &input.Author,
+		&input.Category, &input.Tags, &input.TLDR, &input.FAQ, &rawMetadata, &input.Professions, &input.Author,
 		&input.Keyword, &input.SEOTitle, &input.MetaDescription, &input.Header,
 		&input.ProfessionName, &input.ImageName, &input.ImageURL,
 		&input.ArticlePath, &input.HTMLPath,
@@ -51,6 +53,9 @@ func (r *ArticleRepository) GetResultInput(ctx context.Context, externalID strin
 	}
 	if err != nil {
 		return article.ResultInput{}, fmt.Errorf("загрузить данные result для external_id %q: %w", externalID, err)
+	}
+	if parsed, parseErr := article.ParseArticleInfo(rawMetadata); parseErr == nil {
+		input.AdditionalInfo = parsed.AdditionalInfo
 	}
 	if strings.TrimSpace(input.Article.Slug) == "" {
 		return article.ResultInput{}, fmt.Errorf("для статьи external_id %q отсутствует image_slug", externalID)

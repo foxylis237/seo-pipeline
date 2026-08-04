@@ -42,9 +42,52 @@ func TestParseArticleInfo(t *testing.T) {
 			text: "Метки: Метки\nTLDR: Итог.\nFAQ:\nВопрос: Что означает FAQ?\nОтвет: Термин.\nFAQ: эта строка является частью ответа.",
 			want: ArticleInfo{Tags: "Метки", TLDR: "Итог.", FAQ: "Вопрос: Что означает FAQ?\nОтвет: Термин.\nFAQ: эта строка является частью ответа."},
 		},
-		{name: "missing section", text: "Метки: Метки\nTLDR:\nИтог.", errText: "must contain the sections"},
-		{name: "empty section", text: "Метки: \nTLDR:\nИтог.\nFAQ:\nВопрос: Что?", errText: "Метки is empty"},
-		{name: "wrong order", text: "TLDR:\nИтог.\nМетки: Метки\nFAQ:\nВопрос: Что?", errText: "in this order"},
+		{
+			name: "TL semicolon DR",
+			text: "Метки: Метки\nTL;DR:\nИтог.\nFAQ:\nВопрос: Что?\nОтвет: Это.",
+			want: ArticleInfo{Tags: "Метки", TLDR: "Итог.", FAQ: "Вопрос: Что?\nОтвет: Это.", FallbackUsed: true},
+		},
+		{
+			name: "different order",
+			text: "FAQ:\nВопрос: Что?\nОтвет: Это.\nМетки: Метки\nTLDR:\nИтог.",
+			want: ArticleInfo{Tags: "Метки", TLDR: "Итог.", FAQ: "Вопрос: Что?\nОтвет: Это.", FallbackUsed: true},
+		},
+		{
+			name: "markdown headings and case",
+			text: "### faq:\nВопрос: Что?\nОтвет: Это.\n## метки:\nСписок меток\n# tl;dr:\nИтог.",
+			want: ArticleInfo{Tags: "Список меток", TLDR: "Итог.", FAQ: "Вопрос: Что?\nОтвет: Это.", FallbackUsed: true},
+		},
+		{
+			name: "missing tags",
+			text: "Вступление.\nTLDR:\nИтог.\nFAQ:\nВопрос: Что?\nОтвет: Это.",
+			want: ArticleInfo{TLDR: "Итог.", FAQ: "Вопрос: Что?\nОтвет: Это.", AdditionalInfo: "Вступление.", FallbackUsed: true},
+		},
+		{
+			name: "missing FAQ",
+			text: "Метки: Метки\nTLDR:\nИтог.",
+			want: ArticleInfo{Tags: "Метки", TLDR: "Итог.", FallbackUsed: true},
+		},
+		{
+			name: "missing TLDR",
+			text: "Метки: Метки\nFAQ:\nВопрос: Что?\nОтвет: Это.",
+			want: ArticleInfo{Tags: "Метки", FAQ: "Вопрос: Что?\nОтвет: Это.", FallbackUsed: true},
+		},
+		{
+			name: "one known section",
+			text: "Пояснение.\n## FAQ\nВопрос: Что?\nОтвет: Это.",
+			want: ArticleInfo{FAQ: "Вопрос: Что?\nОтвет: Это.", AdditionalInfo: "Пояснение.", FallbackUsed: true},
+		},
+		{
+			name: "nothing recognized",
+			text: "Модель вернула полезный текст.\nЗдесь есть рекомендации.",
+			want: ArticleInfo{AdditionalInfo: "Модель вернула полезный текст.\nЗдесь есть рекомендации.", FallbackUsed: true},
+		},
+		{
+			name: "additional markdown section",
+			text: "Метки: Метки\nTLDR:\nИтог.\n## Рекомендации\nСохранить этот текст.\nFAQ:\nВопрос: Что?\nОтвет: Это.",
+			want: ArticleInfo{Tags: "Метки", TLDR: "Итог.", FAQ: "Вопрос: Что?\nОтвет: Это.", AdditionalInfo: "## Рекомендации\nСохранить этот текст.", FallbackUsed: true},
+		},
+		{name: "empty", text: " \n\t", errText: "empty response"},
 	}
 
 	for _, test := range tests {

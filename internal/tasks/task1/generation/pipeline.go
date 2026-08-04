@@ -336,7 +336,13 @@ func (p *Pipeline) runArticleAndInfo(ctx context.Context, input article.Generati
 	if err != nil {
 		return articleStageOutput{}, p.fail(ctx, logger, input, "metadata_parsing", err)
 	}
-	logger.Info("article info parsed", "stage", "info")
+	if parsedInfo.FallbackUsed {
+		logger.Warn("metadata parsing incomplete, recognized and raw response content saved", "stage", "info",
+			"has_tags", parsedInfo.Tags != "", "has_tldr", parsedInfo.TLDR != "", "has_faq", parsedInfo.FAQ != "",
+			"has_additional_info", parsedInfo.AdditionalInfo != "")
+	} else {
+		logger.Info("article info parsed", "stage", "info")
+	}
 	if atomicDemo {
 		infoPending, stageErr := p.writer.StageArticleInfo(input.Article.ExternalID, input.Article.Slug, infoCall.Prompt, articleInfo)
 		err = stageErr

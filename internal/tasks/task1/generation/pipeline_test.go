@@ -328,7 +328,7 @@ func TestDemoResultErrorDoesNotCompleteFlow(t *testing.T) {
 	}
 }
 
-func TestDemoInfoFailureDoesNotPersistAtomicState(t *testing.T) {
+func TestDemoUnrecognizedInfoIsSavedAndDoesNotFail(t *testing.T) {
 	input := article.GenerationInput{Article: article.Article{ID: 7, ExternalID: "37", Title: "Тема", Slug: "tema"}}
 	repository := &fakePipelineRepository{input: input}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -336,8 +336,8 @@ func TestDemoInfoFailureDoesNotPersistAtomicState(t *testing.T) {
 	pipeline := NewPipeline(repository, testGenerationRouter(successfulPipelineClient(), logger), chatFactory, articleoutput.NewWriter(t.TempDir()), logger, newFakeResultBuilder(t, nil))
 
 	_, err := pipeline.RunDemoByExternalID(context.Background(), "37")
-	if err == nil || repository.demoStateSaved || repository.demoCompleted || repository.savedError == nil {
-		t.Fatalf("err=%v state_saved=%t completed=%t saved_error=%v", err, repository.demoStateSaved, repository.demoCompleted, repository.savedError)
+	if err != nil || !repository.demoCompleted || repository.savedError != nil || repository.articleInfo != "неверный info" {
+		t.Fatalf("err=%v completed=%t saved_info=%q saved_error=%v", err, repository.demoCompleted, repository.articleInfo, repository.savedError)
 	}
 }
 

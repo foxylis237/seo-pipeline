@@ -7,13 +7,31 @@ import (
 
 // ArticleInfo is publication metadata parsed from the LLM response.
 type ArticleInfo struct {
-	Tags string
-	TLDR string
-	FAQ  string
+	Tags           string
+	TLDR           string
+	FAQ            string
+	AdditionalInfo string
+	FallbackUsed   bool
 }
 
-// ParseArticleInfo parses the strict, section-based article info format.
+// ParseArticleInfo preserves the legacy strict format and falls back to a
+// tolerant, heading-based parser for non-empty model responses.
 func ParseArticleInfo(text string) (ArticleInfo, error) {
+	if strings.TrimSpace(text) == "" {
+		return ArticleInfo{}, fmt.Errorf("article info returned an empty response")
+	}
+	if info, err := parseStrictArticleInfo(text); err == nil {
+		tolerant := parseTolerantArticleInfo(text)
+		if tolerant.AdditionalInfo == "" && tolerant.Tags == info.Tags && tolerant.TLDR == info.TLDR && tolerant.FAQ == info.FAQ {
+			return info, nil
+		}
+	}
+	info := parseTolerantArticleInfo(text)
+	info.FallbackUsed = true
+	return info, nil
+}
+
+func parseStrictArticleInfo(text string) (ArticleInfo, error) {
 	normalized := strings.ReplaceAll(text, "\r\n", "\n")
 	lines := strings.Split(normalized, "\n")
 	type section struct {
@@ -57,4 +75,78 @@ func ParseArticleInfo(text string) (ArticleInfo, error) {
 	}
 
 	return ArticleInfo{Tags: values[0], TLDR: values[1], FAQ: values[2]}, nil
+}
+
+type infoSection int
+
+const (
+	sectionUnknown infoSection = iota
+	sectionTags
+	sectionTLDR
+	sectionFAQ
+)
+
+func parseTolerantArticleInfo(text string) ArticleInfo {
+	normalized := strings.ReplaceAll(text, "\r\n", "\n")
+	lines := strings.Split(normalized, "\n")
+	values := map[infoSection][]string{}
+	var additional []string
+	current := sectionUnknown
+
+	for _, line := range lines {
+		if section, inline, recognized := parseInfoHeading(line); recognized {
+			if section == current && inline != "" {
+				values[current] = append(values[current], line)
+				continue
+			}
+			current = section
+			if inline != "" {
+				values[current] = append(values[current], inline)
+			}
+			continue
+		}
+		if isMarkdownHeading(line) {
+			current = sectionUnknown
+		}
+		if current == sectionUnknown {
+			additional = append(additional, line)
+		} else {
+			values[current] = append(values[current], line)
+		}
+	}
+
+	return ArticleInfo{
+		Tags:           strings.TrimSpace(strings.Join(values[sectionTags], "\n")),
+		TLDR:           strings.TrimSpace(strings.Join(values[sectionTLDR], "\n")),
+		FAQ:            strings.TrimSpace(strings.Join(values[sectionFAQ], "\n")),
+		AdditionalInfo: strings.TrimSpace(strings.Join(additional, "\n")),
+	}
+}
+
+func parseInfoHeading(line string) (infoSection, string, bool) {
+	trimmed := strings.TrimSpace(line)
+	for strings.HasPrefix(trimmed, "#") {
+		trimmed = strings.TrimSpace(strings.TrimPrefix(trimmed, "#"))
+	}
+	name, inline, hasColon := strings.Cut(trimmed, ":")
+	if !hasColon {
+		name = trimmed
+		inline = ""
+	}
+	normalizedName := strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(name), ";", ""))
+	switch normalizedName {
+	case "МЕТКИ":
+		return sectionTags, strings.TrimSpace(inline), true
+	case "TLDR":
+		return sectionTLDR, strings.TrimSpace(inline), true
+	case "FAQ":
+		return sectionFAQ, strings.TrimSpace(inline), true
+	default:
+		return sectionUnknown, "", false
+	}
+}
+
+func isMarkdownHeading(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	return strings.HasPrefix(trimmed, "#") && strings.TrimSpace(strings.TrimLeft(trimmed, "#")) != ""
 }

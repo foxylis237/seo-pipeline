@@ -45,7 +45,7 @@ func TestBuildUsesStructuredMetadataOrderEmptyHTMLAndOverwrites(t *testing.T) {
 	writer := articleoutput.NewWriter(root)
 	input := article.ResultInput{
 		Article:  article.Article{ID: 7, ExternalID: "37", Title: "Название", Slug: "tema"},
-		Category: "Рубрика", Tags: "ОТДЕЛЬНЫЕ МЕТКИ", TLDR: "ОТДЕЛЬНЫЙ TLDR",
+		Category: "Рубрика", Tags: "ОТДЕЛЬНЫЕ МЕТКИ", TLDR: "ОТДЕЛЬНЫЙ TLDR", AdditionalInfo: "НЕРАСПОЗНАННЫЙ ТЕКСТ",
 		SEOTitle: "Название", ProfessionName: "Профессия", ImageName: "Заголовок картинки", ImageURL: "image-slug",
 		FAQ:         "Вопрос: Первый вопрос?\nОтвет: Первый ответ.\n\nВопрос: Второй вопрос?\nОтвет: Второй ответ.",
 		ArticlePath: "37-tema/generated/article.txt", HTMLPath: "37-tema/missing.html",
@@ -68,7 +68,7 @@ func TestBuildUsesStructuredMetadataOrderEmptyHTMLAndOverwrites(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(first)
-	labels := []string{"## Название", "## Рубрика", "## Метки", "## TL;DR", "## Вопрос 1", "## Вопрос 2", "## Похожие профессии", "## HTML"}
+	labels := []string{"## Название", "## Рубрика", "## Метки", "## TL;DR", "## Допинфо", "## Вопрос 1", "## Вопрос 2", "## Похожие профессии", "## HTML"}
 	last := -1
 	for _, label := range labels {
 		index := strings.Index(text, label)
@@ -77,7 +77,7 @@ func TestBuildUsesStructuredMetadataOrderEmptyHTMLAndOverwrites(t *testing.T) {
 		}
 		last = index
 	}
-	for _, value := range []string{"ОТДЕЛЬНЫЕ МЕТКИ", "ОТДЕЛЬНЫЙ TLDR", "Первый вопрос?", "Первый ответ.", "Второй вопрос?", "Второй ответ."} {
+	for _, value := range []string{"ОТДЕЛЬНЫЕ МЕТКИ", "ОТДЕЛЬНЫЙ TLDR", "НЕРАСПОЗНАННЫЙ ТЕКСТ", "Первый вопрос?", "Первый ответ.", "Второй вопрос?", "Второй ответ."} {
 		if !strings.Contains(text, value) {
 			t.Fatalf("result does not contain %q", value)
 		}
@@ -94,6 +94,7 @@ func TestBuildUsesStructuredMetadataOrderEmptyHTMLAndOverwrites(t *testing.T) {
 		t.Fatalf("empty values rendered incorrectly: %q", text)
 	}
 	input.Article.Title = "Новое название"
+	input.AdditionalInfo = ""
 	service.repository = fakeRepository{input}
 	if _, err := service.Build(context.Background(), "37"); err != nil {
 		t.Fatal(err)
@@ -104,6 +105,9 @@ func TestBuildUsesStructuredMetadataOrderEmptyHTMLAndOverwrites(t *testing.T) {
 	}
 	if !strings.Contains(string(second), "Новое название") || string(second) == string(first) {
 		t.Fatal("result.md was not overwritten")
+	}
+	if strings.Contains(string(second), "## Допинфо") {
+		t.Fatal("empty additional info section was rendered")
 	}
 }
 
