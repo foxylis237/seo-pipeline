@@ -53,32 +53,36 @@ cp .env.example ../.env
 
 ```bash
 make docker-up
-make import
+make task-1 import
 ```
 
 Для безопасной проверки всего pipeline без внешних сервисов и платных API используйте `make task-1 dry-run`.
 
 ## Makefile
 
-Makefile — короткая оболочка над существующим CLI, командами Go и Docker Compose. Импорт запускается как `make import [limit]`; остальные операции со статьями — через namespace `task-1`: `make task-1 <operation> [argument]`. Например, `make task-1 generate 37`. Команды с обязательным ID завершаются понятной ошибкой, если ID отсутствует или не является положительным целым числом.
+Makefile — короткая оболочка над существующим CLI, командами Go и Docker Compose. Все операции первой задачи запускаются через единый namespace: `make task-1 <operation> [аргумент]`.
+
+Для `prepare`, `generate`, `article`, `info`, `review`, `fix`, `html` и `result` действует общее правило: без ID команда последовательно обрабатывает по внутреннему `articles.id` все статьи, которым по состоянию PostgreSQL нужен этот этап; с ID — только указанную статью, сохраняя прежнее точечное поведение. Нулевой, отрицательный и некорректный ID отклоняется до запуска. Ошибка одной статьи в batch фиксируется в её статусе и логах, остальные статьи продолжают обрабатываться, а итоговый код остаётся ненулевым.
 
 ### Команды приложения
 
 | Цель | Что делает | Параметр | Пример | Эквивалент без Makefile |
 |---|---|---|---|---|
 | `help` | Показывает все цели и описания. | Нет. | `make help` | `make -qp` не требуется; список формирует сам Makefile. |
-| `import` | Импортирует все заполненные строки Excel. | Необязательный положительный лимит строк данных. | `make import` или `make import 10` | `go run ./cmd/seo-pipeline task-1 import [limit]` |
+| `task-1 import` | Импортирует все заполненные строки Excel. | Необязательный положительный лимит строк данных. | `make task-1 import` или `make task-1 import 10` | `go run ./cmd/seo-pipeline task-1 import [limit]` |
+| `task-1 errors` | Показывает статьи с текущей сохранённой ошибкой. | Необязательный `external_id` из Excel. | `make task-1 errors` или `make task-1 errors 57` | `go run ./cmd/seo-pipeline task-1 errors [external_id]` |
+| `task-1 retry` | Последовательно повторяет ошибочные статьи через сокращённый demo-flow. | Необязательный `external_id` из Excel. | `make task-1 retry` или `make task-1 retry 57` | `go run ./cmd/seo-pipeline task-1 retry [external_id]` |
 | `task-1 run` | Без ID атомарно обрабатывает все доступные `pending`-статьи demo-flow; с ID запускает demo-flow явно. | Необязательный ID. | `make task-1 run` или `make task-1 run 37` | `go run ./cmd/seo-pipeline task-1 run [external_id]` |
 | `task-1 dry-run` | Поднимает тестовую БД, запускает тесты, vet и полный локальный pipeline на stub-данных. | Нет. | `make task-1 dry-run` | См. раздел «Dry-run». |
-| `task-1 prepare` | Собирает Keys.so и Arsenkin research для статьи. | Обязательный ID. | `make task-1 prepare 37` | `go run ./cmd/seo-pipeline task-1 prepare 37` |
-| `task-1 generate` | Запускает полный flow `structure → article/info → review → fix → html → result`. | Обязательный ID. | `make task-1 generate 37` | `go run ./cmd/seo-pipeline task-1 generate 37` |
-| `task-1 demo-generate` | Запускает demo-flow `article → info → result`. | Обязательный ID. | `make task-1 demo-generate 37` | `go run ./cmd/seo-pipeline task-1 demo-generate 37` |
-| `task-1 article` | Генерирует статью, затем metadata `info` в общем чате. | Обязательный ID. | `make task-1 article 37` | `go run ./cmd/seo-pipeline task-1 article 37` |
-| `task-1 info` | Выполняет ту же объединённую операцию `article + info`. | Обязательный ID. | `make task-1 info 37` | `go run ./cmd/seo-pipeline task-1 info 37` |
-| `task-1 review` | Проверяет уже сгенерированную статью. | Обязательный ID. | `make task-1 review 37` | `go run ./cmd/seo-pipeline task-1 review 37` |
-| `task-1 fix` | Исправляет статью с использованием сохранённого review. | Обязательный ID. | `make task-1 fix 37` | `go run ./cmd/seo-pipeline task-1 fix 37` |
-| `task-1 html` | Создаёт и публикует HTML статьи. | Обязательный ID. | `make task-1 html 37` | `go run ./cmd/seo-pipeline task-1 html 37` |
-| `task-1 result` | Собирает `result.md` и после успешной публикации завершает статью. | Обязательный ID. | `make task-1 result 37` | `go run ./cmd/seo-pipeline task-1 result 37` |
+| `task-1 prepare` | Собирает отсутствующий Keys.so и Arsenkin research. | Необязательный ID. | `make task-1 prepare` или `make task-1 prepare 37` | `go run ./cmd/seo-pipeline task-1 prepare [external_id]` |
+| `task-1 generate` | Запускает требуемый полный flow `structure → article/info → review → fix → html → result`. | Необязательный ID. | `make task-1 generate` или `make task-1 generate 37` | `go run ./cmd/seo-pipeline task-1 generate [external_id]` |
+| `task-1 demo-generate` | Возобновляет demo-flow `prepare → structure → article/info → result`, не запуская review, fix и HTML. | Необязательный ID. | `make task-1 demo-generate` или `make task-1 demo-generate 37` | `go run ./cmd/seo-pipeline task-1 demo-generate [external_id]` |
+| `task-1 article` | Генерирует требуемые article и metadata `info` в общем чате. | Необязательный ID. | `make task-1 article` или `make task-1 article 37` | `go run ./cmd/seo-pipeline task-1 article [external_id]` |
+| `task-1 info` | Выполняет ту же объединённую операцию `article + info`. | Необязательный ID. | `make task-1 info` или `make task-1 info 37` | `go run ./cmd/seo-pipeline task-1 info [external_id]` |
+| `task-1 review` | Проверяет статьи с готовыми article и metadata без review. | Необязательный ID. | `make task-1 review` или `make task-1 review 37` | `go run ./cmd/seo-pipeline task-1 review [external_id]` |
+| `task-1 fix` | Исправляет статьи с готовым review без fixed article. | Необязательный ID. | `make task-1 fix` или `make task-1 fix 37` | `go run ./cmd/seo-pipeline task-1 fix [external_id]` |
+| `task-1 html` | Создаёт отсутствующий HTML из готовой fixed article. | Необязательный ID. | `make task-1 html` или `make task-1 html 37` | `go run ./cmd/seo-pipeline task-1 html [external_id]` |
+| `task-1 result` | Собирает отсутствующий `result.md` и завершает статью. | Необязательный ID. | `make task-1 result` или `make task-1 result 37` | `go run ./cmd/seo-pipeline task-1 result [external_id]` |
 
 Отдельной CLI-операции `structure` сейчас нет: структура создаётся внутри `generate`.
 
@@ -117,15 +121,24 @@ go run ./cmd/seo-pipeline task-1 import
 go run ./cmd/seo-pipeline task-1 import 10
 go run ./cmd/seo-pipeline task-1 run
 go run ./cmd/seo-pipeline task-1 run <external_id>
+go run ./cmd/seo-pipeline task-1 prepare
 go run ./cmd/seo-pipeline task-1 prepare <external_id>
+go run ./cmd/seo-pipeline task-1 generate
 go run ./cmd/seo-pipeline task-1 generate <external_id>
 go run ./cmd/seo-pipeline task-1 demo-generate <external_id>
+go run ./cmd/seo-pipeline task-1 demo-generate
 go run ./cmd/seo-pipeline task-1 article <external_id>
+go run ./cmd/seo-pipeline task-1 article
 go run ./cmd/seo-pipeline task-1 info <external_id>
+go run ./cmd/seo-pipeline task-1 info
 go run ./cmd/seo-pipeline task-1 review <external_id>
+go run ./cmd/seo-pipeline task-1 review
 go run ./cmd/seo-pipeline task-1 fix <external_id>
+go run ./cmd/seo-pipeline task-1 fix
 go run ./cmd/seo-pipeline task-1 html <external_id>
+go run ./cmd/seo-pipeline task-1 html
 go run ./cmd/seo-pipeline task-1 result <external_id>
+go run ./cmd/seo-pipeline task-1 result
 ```
 
 При `Ctrl+C`, `SIGINT` или `SIGTERM` общий контекст отменяется, текущие операции прекращаются, а созданные ресурсы закрываются.
@@ -135,13 +148,13 @@ go run ./cmd/seo-pipeline task-1 result <external_id>
 По умолчанию импорт читается из `input/task_1/input.xlsx`. Используется лист `Лист1`, а если его нет — первый лист книги. Обязательны колонки `id`, `article_name`, `image_slug` и `reference_url`. Поддерживаются `header`, `meta_description`, `key_word`, `category`, `authors`, `links`, `professions` и старая опечатка `referense_url`.
 
 ```bash
-make import
+make task-1 import
 ```
 
 Импортирует все заполненные строки Excel.
 
 ```bash
-make import 10
+make task-1 import 10
 ```
 
 Импортирует первые 10 новых валидных статей. Уже существующие `external_id`, пустые и некорректные строки в лимит не входят. Если новых статей меньше, импорт завершается в конце файла. Нулевой, отрицательный или некорректный лимит отклоняется до начала импорта.
@@ -157,15 +170,56 @@ Excel всегда просматривается сверху вниз, а ис
 
 Отчёт содержит время запуска, входной файл, лимит, количество просмотренных, импортированных, существующих, некорректных и пустых строк, признак достижения лимита, построчные ошибки и фатальную инфраструктурную ошибку при её наличии. Оба файла публикуются атомарно.
 
+## История ошибок обработки
+
+Ошибки Prepare и генерационных этапов сохраняются в PostgreSQL: последняя ошибка остаётся в `articles.error_message`, а неизменяемая история — в `article_errors`. Успешный повторный запуск очищает актуальную ошибку по существующим правилам, но историю не удаляет.
+
+```bash
+make task-1 errors
+make task-1 errors 124
+```
+
+Первая команда показывает последние 50 ошибок всех статей, вторая — историю конкретного `external_id` от новых записей к старым.
+
+```sql
+SELECT
+    ae.created_at,
+    ae.external_id,
+    a.title,
+    ae.step,
+    ae.operation,
+    ae.retryable,
+    ae.error_message
+FROM article_errors ae
+JOIN articles a ON a.id = ae.article_id
+ORDER BY ae.created_at DESC;
+```
+
+```sql
+SELECT
+    created_at,
+    step,
+    operation,
+    retryable,
+    error_message
+FROM article_errors
+WHERE external_id = '124'
+ORDER BY created_at DESC;
+```
+
+Ошибки строк Excel по-прежнему находятся отдельно в `output/task1/import-reports/latest.json` и timestamped-отчётах; в `article_errors` они не переносятся.
+
 ## Pipeline
 
 ### Подготовка research
 
-`prepare <external_id>` переводит статью в `processing`, не удаляя прежний успешный research и артефакты. Затем полностью собирает данные Keys.so и Arsenkin в памяти. Только после успеха всех обязательных внешних операций research атомарно заменяется через PostgreSQL upsert, старые metadata/output очищаются и `current_step` становится `structure_generation`. При ошибке интеграции прежние research, metadata и output сохраняются.
+`prepare [external_id]` переводит выбранную статью в `processing`, не удаляя прежний успешный research и артефакты. Без ID выбираются только незавершённые статьи на research-этапе без полного `competitor_structure`. Затем полностью собираются данные Keys.so и Arsenkin в памяти. Только после успеха всех обязательных внешних операций research атомарно заменяется через PostgreSQL upsert, старые metadata/output очищаются и `current_step` становится `structure_generation`. При ошибке интеграции прежние research, metadata и output сохраняются.
+
+При ошибках Playwright интеграция Keys.so различает `no_data`, `maintenance`, `navigation_error`, `timeout` и `unexpected_page`. Текущая причина хранится в `articles.error_message`, история — в `article_errors`. Диагностика каждой неудачной попытки сохраняется в `output/task1/debug/keysso/article-<id>/<timestamp>-attempt-<n>/`: полноэкранный `screenshot.png`, текущий DOM `page.html` и безопасный `info.json` без cookies и заголовков авторизации. `no_data` является окончательным ответом и не повторяется; технические и навигационные ошибки используют ограниченный retry.
 
 ### Полная генерация
 
-`generate <external_id>` выполняет:
+`generate [external_id]` выполняет:
 
 1. `structure` — структура статьи.
 2. `article` и `info` — текст и metadata в одном Gemini-чате.
@@ -180,7 +234,27 @@ Excel всегда просматривается сверху вниз, а ис
 
 `run` без ID атомарно резервирует по возрастанию внутреннего ID только статьи со статусом `pending`, используя PostgreSQL `FOR UPDATE SKIP LOCKED`. Конкурентные процессы не получают одну статью. `failed`, `processing` и `completed` автоматически не выбираются. На ошибке текущей статьи запуск останавливается.
 
-`run <external_id>` и `demo-generate <external_id>` явно запускают сокращённый flow `article → info → result` для выбранной статьи. Это остаётся способом точечного повторного запуска.
+`run <external_id>` сохраняет прежний быстрый flow `article → info → result` для выбранной статьи.
+
+`make task-1 demo-generate [ID]` использует возобновляемый текстовый flow `prepare → structure → article/info → result`. Без ID выбираются по внутреннему `articles.id` все статьи, у которых `status <> 'completed'` и нет непустого `error_message`; с ID обрабатывается только указанный `external_id` из Excel. Статьи с уже сохранённой ошибкой команда `demo-generate` пропускает. Для повторной обработки ошибку необходимо отдельно сбросить вручную. Полный research, сохранённые `structure_path` и `article_path` повторно не создаются. Статус `completed` служит текущим признаком успешно опубликованного `result.md`. Review, fix и HTML в этом flow не вызываются, поэтому `review.txt` и `article.html` не создаются.
+
+Для просмотра и ручного повтора сохранённых ошибок используются:
+
+```bash
+# Показать все статьи с сохранёнными ошибками
+make task-1 errors
+
+# Показать ошибку статьи по Excel ID
+make task-1 errors 57
+
+# Повторить все неуспешные статьи
+make task-1 retry
+
+# Повторить одну статью по Excel ID
+make task-1 retry 57
+```
+
+Число — это `external_id` из Excel. `retry` обрабатывает статьи последовательно тем же сокращённым flow, что и `demo-generate`: `prepare → structure → article/info → result`, без Review, Fix и HTML. Существующие research и файлы Structure/Article/Result не удаляются. Ошибка очищается только непосредственно перед повтором конкретной статьи; при новом сбое новая ошибка снова сохраняется штатной логикой пайплайна, а batch продолжает следующие статьи. Записи без текущей ошибки не затрагиваются.
 
 ## Dry-run
 
@@ -252,7 +326,7 @@ tasks/task_1/output/37-primer/
 
 ## PostgreSQL и миграции
 
-Схема состоит из таблиц `articles`, `article_inputs`, `article_research`, `article_metadata` и `article_outputs`. Приложение проверяет ожидаемую схему перед выполнением команд, но не запускает миграции основной БД автоматически.
+Схема состоит из таблиц `articles`, `article_inputs`, `article_research`, `article_metadata`, `article_outputs` и `article_errors`. Приложение проверяет ожидаемую схему перед выполнением команд, но не запускает миграции основной БД автоматически.
 
 Миграции применяются по номеру:
 
@@ -263,6 +337,7 @@ tasks/task_1/output/37-primer/
 5. `000005_add_article_review_stage`;
 6. `000006_add_structured_article_metadata`;
 7. `000007_add_result_input_fields`.
+8. `000008_add_article_errors`.
 
 ## Текущие ограничения
 

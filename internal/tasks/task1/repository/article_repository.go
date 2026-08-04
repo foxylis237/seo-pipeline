@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
+	"net"
 	"strings"
 
 	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/article"
@@ -14,7 +16,8 @@ import (
 
 // ArticleRepository работает со статьями в PostgreSQL.
 type ArticleRepository struct {
-	pool *pgxpool.Pool
+	pool   *pgxpool.Pool
+	logger *slog.Logger
 }
 
 // GetResultInput loads article, inputs, structured metadata and output paths.
@@ -264,11 +267,32 @@ func (r *ArticleRepository) GetGenerationInput(ctx context.Context, externalID s
 	return input, nil
 }
 
-// NewArticleRepository создаёт репозиторий статей.
-func NewArticleRepository(pool *pgxpool.Pool) *ArticleRepository {
-	return &ArticleRepository{
-		pool: pool,
+// HasPreparedResearch reports whether prepare has persisted the research needed
+// by structure and article generation.
+func (r *ArticleRepository) HasPreparedResearch(ctx context.Context, externalID string) (bool, error) {
+	var prepared bool
+	err := r.pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM articles AS a
+			JOIN article_research AS r ON r.article_id = a.id
+			WHERE a.external_id = $1
+			  AND NULLIF(BTRIM(COALESCE(r.competitor_structure, '')), '') IS NOT NULL
+		)
+	`, externalID).Scan(&prepared)
+	if err != nil {
+		return false, fmt.Errorf("проверить research для external_id %q: %w", externalID, err)
 	}
+	return prepared, nil
+}
+
+// NewArticleRepository создаёт репозиторий статей.
+func NewArticleRepository(pool *pgxpool.Pool, logger ...*slog.Logger) *ArticleRepository {
+	repository := &ArticleRepository{pool: pool}
+	if len(logger) > 0 {
+		repository.logger = logger[0]
+	}
+	return repository
 }
 
 // BeginGeneration atomically makes completed, failed, or processing articles ready for a fresh generation run.
@@ -587,6 +611,116 @@ func (r *ArticleRepository) GetAll(
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("получить статьи: %w", err)
+	}
+	return articles, nil
+}
+
+// GetArticleByExternalID loads the article state without requiring generation inputs or artifacts.
+func (r *ArticleRepository) GetArticleByExternalID(ctx context.Context, externalID string) (article.Article, error) {
+	var selected article.Article
+	err := r.pool.QueryRow(ctx, `
+		SELECT id, external_id, title, status, current_step, error_message, created_at, updated_at
+		FROM articles
+		WHERE external_id = $1
+	`, externalID).Scan(
+		&selected.ID, &selected.ExternalID, &selected.Title, &selected.Status,
+		&selected.CurrentStep, &selected.ErrorMessage, &selected.CreatedAt, &selected.UpdatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return article.Article{}, fmt.Errorf("статья с external_id %q не найдена", externalID)
+	}
+	if err != nil {
+		return article.Article{}, fmt.Errorf("получить статью с external_id %q: %w", externalID, err)
+	}
+	return selected, nil
+}
+
+// GetPendingForOperation returns articles whose persisted state requires the
+// requested task_1 operation. Results are stable and sequential by articles.id.
+func (r *ArticleRepository) GetPendingForOperation(ctx context.Context, operation string) ([]article.Article, error) {
+	var predicate string
+	switch operation {
+	case "prepare":
+		predicate = `
+			a.status <> 'completed'
+			AND a.current_step IN ('arsenkin_collection', 'arsenkin_cleanup')
+			AND NULLIF(BTRIM(COALESCE(r.competitor_structure, '')), '') IS NULL`
+	case "generate":
+		predicate = `
+			a.status <> 'completed'
+			AND NULLIF(BTRIM(COALESCE(r.competitor_structure, '')), '') IS NOT NULL`
+	case "demo-generate":
+		predicate = `
+			a.status <> 'completed'
+			AND (a.error_message IS NULL OR BTRIM(a.error_message) = '')`
+	case "article", "info":
+		predicate = `
+			a.status <> 'completed'
+			AND a.current_step IN ('article_generation', 'metadata_generation', 'article_review')
+			AND NULLIF(BTRIM(COALESCE(r.competitor_structure, '')), '') IS NOT NULL
+			AND NULLIF(BTRIM(COALESCE(o.structure_path, '')), '') IS NOT NULL
+			AND NULLIF(BTRIM(COALESCE(m.metadata_text, '')), '') IS NULL`
+	case "review":
+		predicate = `
+			a.status <> 'completed'
+			AND a.current_step = 'article_review'
+			AND NULLIF(BTRIM(COALESCE(o.article_path, '')), '') IS NOT NULL
+			AND NULLIF(BTRIM(COALESCE(m.metadata_text, '')), '') IS NOT NULL
+			AND NULLIF(BTRIM(COALESCE(o.metadata_path, '')), '') IS NULL`
+	case "fix":
+		predicate = `
+			a.status <> 'completed'
+			AND a.current_step = 'article_review'
+			AND NULLIF(BTRIM(COALESCE(o.article_path, '')), '') IS NOT NULL
+			AND NULLIF(BTRIM(COALESCE(o.metadata_path, '')), '') IS NOT NULL
+			AND NULLIF(BTRIM(COALESCE(o.final_path, '')), '') IS NULL`
+	case "html":
+		predicate = `
+			a.status <> 'completed'
+			AND a.current_step = 'html_generation'
+			AND NULLIF(BTRIM(COALESCE(o.final_path, '')), '') IS NOT NULL
+			AND NULLIF(BTRIM(COALESCE(o.html_path, '')), '') IS NULL`
+	case "result":
+		predicate = `
+			a.status <> 'completed'
+			AND a.current_step = 'final_file_assembly'
+			AND NULLIF(BTRIM(COALESCE(o.article_path, '')), '') IS NOT NULL`
+	default:
+		return nil, fmt.Errorf("неподдерживаемая batch-операция %q", operation)
+	}
+
+	query := `
+		SELECT a.id, a.external_id, a.title,
+			COALESCE(i.image_slug, ''), COALESCE(i.reference_url, ''),
+			a.status, a.current_step, a.error_message, a.created_at, a.updated_at
+		FROM articles AS a
+		LEFT JOIN article_inputs AS i ON i.article_id = a.id
+		LEFT JOIN article_research AS r ON r.article_id = a.id
+		LEFT JOIN article_metadata AS m ON m.article_id = a.id
+		LEFT JOIN article_outputs AS o ON o.article_id = a.id
+		WHERE ` + predicate + `
+		ORDER BY a.id ASC`
+	rows, err := r.pool.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("выбрать статьи для операции %s: %w", operation, err)
+	}
+	defer rows.Close()
+
+	var articles []article.Article
+	for rows.Next() {
+		var selected article.Article
+		if err := rows.Scan(
+			&selected.ID, &selected.ExternalID, &selected.Title,
+			&selected.Slug, &selected.ReferenceURL, &selected.Status,
+			&selected.CurrentStep, &selected.ErrorMessage,
+			&selected.CreatedAt, &selected.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("прочитать статью для операции %s: %w", operation, err)
+		}
+		articles = append(articles, selected)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("выбрать статьи для операции %s: %w", operation, err)
 	}
 	return articles, nil
 }
@@ -928,9 +1062,223 @@ func (r *ArticleRepository) SaveError(ctx context.Context, articleID int64, proc
 		UPDATE articles
 		SET status = 'failed', error_message = $2, updated_at = NOW()
 		WHERE id = $1
+		RETURNING external_id, current_step
 	`
-	if _, err := r.pool.Exec(ctx, query, articleID, processingErr.Error()); err != nil {
+	message := safeErrorMessage(processingErr)
+	var externalID string
+	var step *string
+	if err := r.pool.QueryRow(ctx, query, articleID, message).Scan(&externalID, &step); err != nil {
 		return fmt.Errorf("сохранить ошибку статьи: %w", err)
 	}
+	operation := classifyErrorOperation(step, processingErr)
+	retryable := isRetryableError(processingErr)
+	if r.logger != nil {
+		r.logger.Error("article processing failed",
+			"article_id", articleID, "external_id", externalID, "step", optionalString(step),
+			"operation", optionalString(operation), "retryable", retryable, "error", processingErr,
+		)
+	}
+	if err := r.RecordError(ctx, article.ErrorRecord{
+		ArticleID: articleID, ExternalID: externalID, Step: step, Operation: operation,
+		ErrorMessage: message, Retryable: retryable,
+	}); err != nil {
+		if r.logger != nil {
+			r.logger.Error("failed to record article error history", "article_id", articleID, "external_id", externalID, "error", err)
+		}
+		return fmt.Errorf("сохранить историю ошибки статьи %d: %w", articleID, err)
+	}
 	return nil
+}
+
+func optionalString(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+
+// RecordError appends an immutable article processing error.
+func (r *ArticleRepository) RecordError(ctx context.Context, record article.ErrorRecord) error {
+	if strings.TrimSpace(record.ErrorMessage) == "" {
+		return fmt.Errorf("error message is required")
+	}
+	return r.pool.QueryRow(ctx, `
+		INSERT INTO article_errors (
+			article_id, external_id, step, operation, error_message, retryable
+		) VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING id, created_at
+	`, record.ArticleID, record.ExternalID, record.Step, record.Operation, record.ErrorMessage, record.Retryable).Scan(
+		&record.ID, &record.CreatedAt,
+	)
+}
+
+// ListErrors returns newest processing errors, optionally filtered by external_id.
+func (r *ArticleRepository) ListErrors(ctx context.Context, externalID string, limit int) ([]article.ErrorRecord, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT ae.id, ae.article_id, ae.external_id, a.title, ae.step, ae.operation,
+			ae.error_message, ae.retryable, ae.created_at
+		FROM article_errors AS ae
+		JOIN articles AS a ON a.id = ae.article_id
+		WHERE $1 = '' OR ae.external_id = $1
+		ORDER BY ae.created_at DESC, ae.id DESC
+		LIMIT $2
+	`, externalID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("получить историю ошибок: %w", err)
+	}
+	defer rows.Close()
+	var records []article.ErrorRecord
+	for rows.Next() {
+		var record article.ErrorRecord
+		if err := rows.Scan(
+			&record.ID, &record.ArticleID, &record.ExternalID, &record.ArticleTitle,
+			&record.Step, &record.Operation, &record.ErrorMessage, &record.Retryable, &record.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("прочитать историю ошибок: %w", err)
+		}
+		records = append(records, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("получить историю ошибок: %w", err)
+	}
+	return records, nil
+}
+
+// ListArticlesWithErrors returns every article with a current non-empty error in stable ID order.
+func (r *ArticleRepository) ListArticlesWithErrors(ctx context.Context) ([]article.ArticleError, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT a.id, a.external_id, a.title, a.status, a.current_step, a.error_message,
+			a.created_at, a.updated_at, latest.operation, latest.retryable, latest.created_at
+		FROM articles AS a
+		LEFT JOIN LATERAL (
+			SELECT ae.operation, ae.retryable, ae.created_at
+			FROM article_errors AS ae
+			WHERE ae.article_id = a.id
+			ORDER BY ae.created_at DESC, ae.id DESC
+			LIMIT 1
+		) AS latest ON TRUE
+		WHERE a.error_message IS NOT NULL AND BTRIM(a.error_message) <> ''
+		ORDER BY a.id ASC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("получить статьи с ошибками: %w", err)
+	}
+	defer rows.Close()
+	var selected []article.ArticleError
+	for rows.Next() {
+		var item article.ArticleError
+		if err := rows.Scan(
+			&item.ID, &item.ExternalID, &item.Title, &item.Status, &item.CurrentStep,
+			&item.ErrorMessage, &item.CreatedAt, &item.UpdatedAt,
+			&item.Operation, &item.Retryable, &item.ErrorTime,
+		); err != nil {
+			return nil, fmt.Errorf("прочитать статью с ошибкой: %w", err)
+		}
+		selected = append(selected, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("получить статьи с ошибками: %w", err)
+	}
+	return selected, nil
+}
+
+// ClearArticleErrorForRetry clears only the current blocking error. A failed article
+// is returned to the existing processing state without changing its current step.
+func (r *ArticleRepository) ClearArticleErrorForRetry(ctx context.Context, articleID int64) (bool, error) {
+	result, err := r.pool.Exec(ctx, `
+		UPDATE articles
+		SET error_message = NULL,
+			status = CASE WHEN status = 'failed' THEN 'processing' ELSE status END,
+			updated_at = NOW()
+		WHERE id = $1
+			AND error_message IS NOT NULL
+			AND BTRIM(error_message) <> ''
+	`, articleID)
+	if err != nil {
+		return false, fmt.Errorf("очистить ошибку статьи %d перед повтором: %w", articleID, err)
+	}
+	return result.RowsAffected() == 1, nil
+}
+
+func safeErrorMessage(err error) string {
+	message := strings.TrimSpace(err.Error())
+	lower := strings.ToLower(message)
+	if strings.Contains(lower, "authorization:") || strings.Contains(lower, "bearer ") || strings.Contains(lower, "api_key=") {
+		return "sensitive error details redacted"
+	}
+	const maxRunes = 2000
+	runes := []rune(message)
+	if len(runes) > maxRunes {
+		message = string(runes[:maxRunes]) + "…"
+	}
+	return message
+}
+
+func classifyErrorOperation(step *string, err error) *string {
+	message := strings.ToLower(err.Error())
+	operation := ""
+	switch {
+	case strings.Contains(message, "keys.so"):
+		operation = "keysso_collect_keywords"
+	case strings.Contains(message, "arsenkin"):
+		operation = "arsenkin_request"
+	case strings.Contains(message, "save_structure") || strings.Contains(message, "сохранить структуру"):
+		operation = "write_structure_file"
+	case strings.Contains(message, "save_article") || strings.Contains(message, "сохранить статью"):
+		operation = "write_article_file"
+	case strings.Contains(message, "result_generation") || strings.Contains(message, "result.md"):
+		operation = "write_result_file"
+	case strings.Contains(message, "stage=structure_generation"):
+		operation = "gemini_structure_generation"
+	case strings.Contains(message, "stage=article_generation"):
+		operation = "gemini_article_generation"
+	case strings.Contains(message, "stage=metadata_generation") || strings.Contains(message, "stage=metadata_parsing"):
+		operation = "gemini_metadata_generation"
+	case strings.Contains(message, "stage=article_review"):
+		operation = "gemini_article_review"
+	case strings.Contains(message, "stage=article_fix"):
+		operation = "gemini_article_fix"
+	case strings.Contains(message, "stage=html_generation") || strings.Contains(message, "stage=validate_html"):
+		operation = "gemini_html_generation"
+	case step != nil:
+		switch *step {
+		case "structure_generation":
+			operation = "gemini_structure_generation"
+		case "article_generation":
+			operation = "gemini_article_generation"
+		case "metadata_generation", "article_review":
+			operation = "gemini_metadata_generation"
+		case "html_generation":
+			operation = "gemini_html_generation"
+		case "final_file_assembly":
+			operation = "write_result_file"
+		}
+	}
+	if operation == "" {
+		return nil
+	}
+	return &operation
+}
+
+func isRetryableError(err error) bool {
+	var networkErr net.Error
+	if errors.As(err, &networkErr) && (networkErr.Timeout() || networkErr.Temporary()) {
+		return true
+	}
+	message := strings.ToLower(err.Error())
+	for _, marker := range []string{
+		"timeout", "deadline exceeded", "temporary", "temporarily", "connection reset",
+		"maintenance page", "navigation failed",
+		"connection refused", "service unavailable", "status 429", "http 429",
+		"status 500", "http 500", "status 502", "http 502", "status 503", "http 503",
+		"status 504", "http 504", "rate limit",
+	} {
+		if strings.Contains(message, marker) {
+			return true
+		}
+	}
+	return false
 }

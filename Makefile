@@ -13,10 +13,10 @@ DRY_RUN_DATABASE_URL ?= postgres://seo:seo@localhost:5433/seo_dry_run?sslmode=di
 TASK_OPERATION := $(word 2,$(MAKECMDGOALS))
 TASK_ARG := $(word 3,$(MAKECMDGOALS))
 TASK_EXTRA_ARGS := $(wordlist 4,$(words $(MAKECMDGOALS)),$(MAKECMDGOALS))
-TASK_OPERATIONS := import run dry-run prepare generate demo-generate article info review fix html result
-REQUIRED_ID_OPERATIONS := prepare generate demo-generate article info review fix html result
+TASK_OPERATIONS := import errors retry run dry-run prepare generate demo-generate article info review fix html result
+OPTIONAL_ARGUMENT_OPERATIONS := errors retry run prepare generate demo-generate article info review fix html result
 
-.PHONY: help import task-1 docker-up docker-start docker-stop docker-down docker-restart docker-logs docker-ps
+.PHONY: help task-1 docker-up docker-start docker-stop docker-down docker-restart docker-logs docker-ps
 .PHONY: test test-race fmt vet build
 
 # ----------------------------------------------------
@@ -26,42 +26,26 @@ REQUIRED_ID_OPERATIONS := prepare generate demo-generate article info review fix
 help: ## Show all available commands
 	@printf 'SEO Pipeline commands\n\n'
 	@printf 'task_1 operations:\n'
-	@printf '  %-32s %s\n' 'make import [limit]' 'Import articles from Excel'
+	@printf '  %-32s %s\n' 'make task-1 import [limit]' 'Import articles from Excel'
+	@printf '  %-32s %s\n' 'make task-1 errors [EXTERNAL_ID]' 'Show articles with recorded errors'
+	@printf '  %-32s %s\n' 'make task-1 retry [EXTERNAL_ID]' 'Retry failed articles through the demo flow'
 	@printf '  %-32s %s\n' 'make task-1 run [ID]' 'Run pending articles or one article'
 	@printf '  %-32s %s\n' 'make task-1 dry-run' 'Run the isolated local pipeline'
-	@printf '  %-32s %s\n' 'make task-1 prepare ID' 'Collect article research'
-	@printf '  %-32s %s\n' 'make task-1 generate ID' 'Run the full generation flow'
-	@printf '  %-32s %s\n' 'make task-1 demo-generate ID' 'Run the demo generation flow'
-	@printf '  %-32s %s\n' 'make task-1 article ID' 'Generate article text and metadata'
-	@printf '  %-32s %s\n' 'make task-1 info ID' 'Generate article text and metadata'
-	@printf '  %-32s %s\n' 'make task-1 review ID' 'Review a generated article'
-	@printf '  %-32s %s\n' 'make task-1 fix ID' 'Fix a reviewed article'
-	@printf '  %-32s %s\n' 'make task-1 html ID' 'Generate article HTML'
-	@printf '  %-32s %s\n' 'make task-1 result ID' 'Build result.md and complete the article'
+	@printf '  %-32s %s\n' 'make task-1 prepare [ID]' 'Collect pending research or process one article'
+	@printf '  %-32s %s\n' 'make task-1 generate [ID]' 'Run pending full flows or process one article'
+	@printf '  %-32s %s\n' 'make task-1 demo-generate [ID]' 'Resume the demo generation flow'
+	@printf '  %-32s %s\n' 'make task-1 article [ID]' 'Generate pending article text/metadata or one article'
+	@printf '  %-32s %s\n' 'make task-1 info [ID]' 'Generate pending article text/metadata or one article'
+	@printf '  %-32s %s\n' 'make task-1 review [ID]' 'Review pending generated articles or one article'
+	@printf '  %-32s %s\n' 'make task-1 fix [ID]' 'Fix pending reviewed articles or one article'
+	@printf '  %-32s %s\n' 'make task-1 html [ID]' 'Generate pending HTML or process one article'
+	@printf '  %-32s %s\n' 'make task-1 result [ID]' 'Build pending results or process one article'
 	@printf '\nProject commands:\n'
 	@awk 'BEGIN {FS = ":.*## "} /^(docker|test|fmt|vet|build)[a-zA-Z0-9_-]*:.*## / {printf "  make %-27s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 # ----------------------------------------------------
 # task_1
 # ----------------------------------------------------
-
-IMPORT_ARG := $(word 2,$(MAKECMDGOALS))
-IMPORT_EXTRA_ARGS := $(wordlist 3,$(words $(MAKECMDGOALS)),$(MAKECMDGOALS))
-
-import: ## Import all articles or at most the given number
-	@if [ -n "$(strip $(IMPORT_EXTRA_ARGS))" ]; then \
-		printf 'Too many arguments.\n\nExample:\n\nmake import 10\n'; \
-		exit 1; \
-	fi
-	@if [ -n "$(IMPORT_ARG)" ] && ! printf '%s' "$(IMPORT_ARG)" | grep -Eq '^[1-9][0-9]*$$'; then \
-		printf 'Import limit must be a positive integer.\n\nExample:\n\nmake import 10\n'; \
-		exit 1; \
-	fi
-	@if [ -n "$(IMPORT_ARG)" ]; then \
-		$(CLI) import "$(IMPORT_ARG)"; \
-	else \
-		$(CLI) import; \
-	fi
 
 task-1: ## Run a task_1 operation
 	@if [ -z "$(TASK_OPERATION)" ]; then \
@@ -76,18 +60,14 @@ task-1: ## Run a task_1 operation
 		printf 'Too many arguments.\n\nExample:\n\nmake task-1 $(TASK_OPERATION) $(TASK_ARG)\n'; \
 		exit 1; \
 	fi
-	@if printf ' %s ' "$(REQUIRED_ID_OPERATIONS)" | grep -Fq " $(TASK_OPERATION) "; then \
-		if [ -z "$(TASK_ARG)" ]; then \
-			printf 'ID is required.\n\nExample:\n\nmake task-1 $(TASK_OPERATION) 37\n'; \
-			exit 1; \
-		fi; \
-		if ! printf '%s' "$(TASK_ARG)" | grep -Eq '^[1-9][0-9]*$$'; then \
-			printf 'ID must be a positive integer.\n\nExample:\n\nmake task-1 $(TASK_OPERATION) 37\n'; \
-			exit 1; \
-		fi; \
+	@if [ "$(TASK_OPERATION)" = 'import' ] && [ -n "$(TASK_ARG)" ] && \
+		! printf '%s' "$(TASK_ARG)" | grep -Eq '^[1-9][0-9]*$$'; then \
+		printf 'Import limit must be a positive integer.\n\nExample:\n\nmake task-1 import 10\n'; \
+		exit 1; \
 	fi
-	@if [ "$(TASK_OPERATION)" = 'run' ] && [ -n "$(TASK_ARG)" ] && ! printf '%s' "$(TASK_ARG)" | grep -Eq '^[1-9][0-9]*$$'; then \
-		printf 'ID must be a positive integer.\n\nExample:\n\nmake task-1 run 37\n'; \
+	@if printf ' %s ' "$(OPTIONAL_ARGUMENT_OPERATIONS)" | grep -Fq " $(TASK_OPERATION) " && \
+		[ -n "$(TASK_ARG)" ] && ! printf '%s' "$(TASK_ARG)" | grep -Eq '^[1-9][0-9]*$$'; then \
+		printf 'ID must be a positive integer.\n\nExample:\n\nmake task-1 $(TASK_OPERATION) 37\n'; \
 		exit 1; \
 	fi
 	@if [ "$(TASK_OPERATION)" = 'dry-run' ] && [ -n "$(TASK_ARG)" ]; then \
@@ -159,8 +139,6 @@ build: ## Build the CLI binary
 %:
 	@if [ "$(firstword $(MAKECMDGOALS))" = 'task-1' ] && \
 		{ [ "$@" = "$(TASK_OPERATION)" ] || [ "$@" = "$(TASK_ARG)" ]; }; then \
-		:; \
-	elif [ "$(firstword $(MAKECMDGOALS))" = 'import' ] && [ "$@" = "$(IMPORT_ARG)" ]; then \
 		:; \
 	else \
 		printf 'Unknown command: %s\n\nRun make help to see available commands.\n' "$@"; \

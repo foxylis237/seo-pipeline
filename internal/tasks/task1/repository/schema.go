@@ -62,6 +62,14 @@ var expectedSchema = []schemaColumn{
 	{"article_outputs", "final_path", "text", true},
 	{"article_outputs", "word_count", "integer", true},
 	{"article_outputs", "updated_at", "timestamp with time zone", false},
+	{"article_errors", "id", "bigint", false},
+	{"article_errors", "article_id", "bigint", false},
+	{"article_errors", "external_id", "text", false},
+	{"article_errors", "step", "text", true},
+	{"article_errors", "operation", "text", true},
+	{"article_errors", "error_message", "text", false},
+	{"article_errors", "retryable", "boolean", false},
+	{"article_errors", "created_at", "timestamp with time zone", false},
 }
 
 // ValidateSchema проверяет фактические колонки, PK и каскадные внешние ключи до запуска интеграций.
@@ -71,7 +79,7 @@ func ValidateSchema(ctx context.Context, pool *pgxpool.Pool) error {
 		FROM information_schema.columns
 		WHERE table_schema = current_schema()
 		  AND table_name = ANY($1)
-	`, []string{"articles", "article_inputs", "article_research", "article_metadata", "article_outputs"})
+	`, []string{"articles", "article_inputs", "article_research", "article_metadata", "article_outputs", "article_errors"})
 	if err != nil {
 		return fmt.Errorf("read database schema: %w", err)
 	}
@@ -109,7 +117,7 @@ func ValidateSchema(ctx context.Context, pool *pgxpool.Pool) error {
 		}
 	}
 
-	for _, table := range []string{"article_inputs", "article_research", "article_metadata", "article_outputs"} {
+	for _, table := range []string{"article_inputs", "article_research", "article_metadata", "article_outputs", "article_errors"} {
 		var valid bool
 		err := pool.QueryRow(ctx, `
 			SELECT EXISTS (

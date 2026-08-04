@@ -17,6 +17,27 @@ type Article struct {
 	UpdatedAt    time.Time
 }
 
+// ErrorRecord is one immutable processing failure stored for an article.
+type ErrorRecord struct {
+	ID           int64
+	ArticleID    int64
+	ExternalID   string
+	ArticleTitle string
+	Step         *string
+	Operation    *string
+	ErrorMessage string
+	Retryable    bool
+	CreatedAt    time.Time
+}
+
+// ArticleError describes the current blocking error and, when available, its latest history entry.
+type ArticleError struct {
+	Article
+	Operation *string
+	Retryable *bool
+	ErrorTime *time.Time
+}
+
 type Input struct {
 	ExcelID         int
 	Title           string

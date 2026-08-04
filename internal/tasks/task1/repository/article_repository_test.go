@@ -296,6 +296,83 @@ func TestImportNeverUpdatesExistingArticle(t *testing.T) {
 	assertImportedFields(t, pool, created.ID, original)
 }
 
+func TestRecordErrorAppendsHistoryAndSaveErrorKeepsItAfterSuccess(t *testing.T) {
+	repository, pool := newTestRepository(t)
+	ctx := context.Background()
+	created, err := repository.Create(ctx, article.Input{ExcelID: 920, Title: "История ошибок", ImageSlug: "errors"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	step := "article_generation"
+	operation := "gemini_article_generation"
+	if err := repository.RecordError(ctx, article.ErrorRecord{
+		ArticleID: created.ID, ExternalID: created.ExternalID, Step: &step, Operation: &operation,
+		ErrorMessage: "first timeout", Retryable: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.RecordError(ctx, article.ErrorRecord{
+		ArticleID: created.ID, ExternalID: created.ExternalID, Step: &step,
+		ErrorMessage: "invalid response", Retryable: false,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	other, err := repository.Create(ctx, article.Input{ExcelID: 921, Title: "Другая статья", ImageSlug: "other"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.RecordError(ctx, article.ErrorRecord{
+		ArticleID: other.ID, ExternalID: other.ExternalID, ErrorMessage: "other article error",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	records, err := repository.ListErrors(ctx, created.ExternalID, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 2 || records[0].ErrorMessage != "invalid response" || records[1].ErrorMessage != "first timeout" {
+		t.Fatalf("error history = %+v", records)
+	}
+	if records[1].ArticleID != created.ID || records[1].ExternalID != created.ExternalID ||
+		records[1].Step == nil || *records[1].Step != step || records[1].Operation == nil ||
+		*records[1].Operation != operation || !records[1].Retryable {
+		t.Fatalf("first error fields = %+v", records[1])
+	}
+
+	if _, err := pool.Exec(ctx, `UPDATE articles SET current_step = 'article_generation' WHERE id = $1`, created.ID); err != nil {
+		t.Fatal(err)
+	}
+	processingErr := errors.New("request timeout")
+	if err := repository.SaveError(ctx, created.ID, processingErr); err != nil {
+		t.Fatal(err)
+	}
+	var status, currentStep, message string
+	if err := pool.QueryRow(ctx, `SELECT status, current_step, error_message FROM articles WHERE id = $1`, created.ID).Scan(&status, &currentStep, &message); err != nil {
+		t.Fatal(err)
+	}
+	if status != "failed" || currentStep != "article_generation" || message != processingErr.Error() {
+		t.Fatalf("failed state = %q %q %q", status, currentStep, message)
+	}
+	records, err = repository.ListErrors(ctx, created.ExternalID, 50)
+	if err != nil || len(records) != 3 || !records[0].Retryable || records[0].Operation == nil || *records[0].Operation != "gemini_article_generation" {
+		t.Fatalf("SaveError history = %+v, %v", records, err)
+	}
+	if err := repository.BeginGeneration(ctx, created.ID); err != nil {
+		t.Fatal(err)
+	}
+	var clearedMessage *string
+	if err := pool.QueryRow(ctx, `SELECT error_message FROM articles WHERE id = $1`, created.ID).Scan(&clearedMessage); err != nil {
+		t.Fatal(err)
+	}
+	if clearedMessage != nil {
+		t.Fatalf("current error was not cleared after restart: %q", *clearedMessage)
+	}
+	records, err = repository.ListErrors(ctx, created.ExternalID, 50)
+	if err != nil || len(records) != 3 {
+		t.Fatalf("history after successful restart = %+v, %v", records, err)
+	}
+}
+
 func TestGetResultInputMapsStructuredInputFields(t *testing.T) {
 	repository, pool := newTestRepository(t)
 	ctx := context.Background()
@@ -508,6 +585,182 @@ func TestClaimNextIncompleteReturnsNoCandidateForFailedArticle(t *testing.T) {
 	}
 	if found {
 		t.Fatalf("claim = %+v, found = true; failed article %d must not be claimed automatically", claimed, failed.ID)
+	}
+}
+
+func TestGetPendingForOperationUsesPersistedPrerequisites(t *testing.T) {
+	repository, pool := newTestRepository(t)
+	ctx := context.Background()
+
+	prepareReady, _ := repository.Create(ctx, article.Input{ExcelID: 1001, Title: "prepare ready", ImageSlug: "prepare-ready"})
+	prepareDone, _ := repository.Create(ctx, article.Input{ExcelID: 1002, Title: "prepare done", ImageSlug: "prepare-done"})
+	generateReady, _ := repository.Create(ctx, article.Input{ExcelID: 1003, Title: "generate ready", ImageSlug: "generate-ready"})
+	articleReady, _ := repository.Create(ctx, article.Input{ExcelID: 1004, Title: "article ready", ImageSlug: "article-ready"})
+	reviewReady, _ := repository.Create(ctx, article.Input{ExcelID: 1005, Title: "review ready", ImageSlug: "review-ready"})
+	fixReady, _ := repository.Create(ctx, article.Input{ExcelID: 1006, Title: "fix ready", ImageSlug: "fix-ready"})
+	htmlReady, _ := repository.Create(ctx, article.Input{ExcelID: 1007, Title: "html ready", ImageSlug: "html-ready"})
+	htmlBlocked, _ := repository.Create(ctx, article.Input{ExcelID: 1008, Title: "html blocked", ImageSlug: "html-blocked"})
+	resultReady, _ := repository.Create(ctx, article.Input{ExcelID: 1009, Title: "result ready", ImageSlug: "result-ready"})
+	completed, _ := repository.Create(ctx, article.Input{ExcelID: 1010, Title: "completed", ImageSlug: "completed"})
+
+	for _, id := range []int64{prepareDone.ID, generateReady.ID, articleReady.ID} {
+		if _, err := pool.Exec(ctx, `INSERT INTO article_research (article_id, competitor_structure) VALUES ($1, 'H1 Structure')`, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO article_outputs (article_id, structure_path, article_path, metadata_path, final_path, html_path) VALUES
+			($1, 'structure.txt', 'article.txt', NULL, NULL, NULL),
+			($2, 'structure.txt', 'article.txt', NULL, NULL, NULL),
+			($3, 'structure.txt', 'article.txt', 'review.txt', NULL, NULL),
+			($4, 'structure.txt', 'article.txt', 'review.txt', 'fixed.txt', NULL),
+			($5, 'structure.txt', 'article.txt', 'review.txt', NULL, NULL),
+			($6, 'structure.txt', 'article.txt', 'review.txt', 'fixed.txt', 'article.html'),
+			($7, 'structure.txt', 'article.txt', 'review.txt', 'fixed.txt', 'article.html')
+	`, articleReady.ID, reviewReady.ID, fixReady.ID, htmlReady.ID, htmlBlocked.ID, resultReady.ID, completed.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO article_metadata (article_id, metadata_text) VALUES ($1, 'metadata'), ($2, 'metadata')`, reviewReady.ID, fixReady.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+		UPDATE articles SET status = 'processing', current_step = CASE id
+			WHEN $1 THEN 'structure_generation'
+			WHEN $2 THEN 'article_review'
+			WHEN $3 THEN 'article_review'
+			WHEN $4 THEN 'article_review'
+			WHEN $5 THEN 'html_generation'
+			WHEN $6 THEN 'html_generation'
+			WHEN $7 THEN 'final_file_assembly'
+			ELSE current_step END
+		WHERE id = ANY($8)
+	`, generateReady.ID, articleReady.ID, reviewReady.ID, fixReady.ID, htmlReady.ID, htmlBlocked.ID, resultReady.ID,
+		[]int64{generateReady.ID, articleReady.ID, reviewReady.ID, fixReady.ID, htmlReady.ID, htmlBlocked.ID, resultReady.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE articles SET status = 'completed', current_step = NULL WHERE id = $1`, completed.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	assertPendingIDs(t, repository, "prepare", prepareReady.ID)
+	assertPendingIDs(t, repository, "generate", prepareDone.ID, generateReady.ID, articleReady.ID)
+	assertPendingIDs(t, repository, "article", articleReady.ID)
+	assertPendingIDs(t, repository, "info", articleReady.ID)
+	assertPendingIDs(t, repository, "review", reviewReady.ID)
+	assertPendingIDs(t, repository, "fix", fixReady.ID)
+	assertPendingIDs(t, repository, "html", htmlReady.ID)
+	assertPendingIDs(t, repository, "result", resultReady.ID)
+	assertPendingIDs(t, repository, "demo-generate",
+		prepareReady.ID, prepareDone.ID, generateReady.ID, articleReady.ID,
+		reviewReady.ID, fixReady.ID, htmlReady.ID, htmlBlocked.ID, resultReady.ID,
+	)
+	prepared, err := repository.HasPreparedResearch(ctx, generateReady.ExternalID)
+	if err != nil || !prepared {
+		t.Fatalf("HasPreparedResearch(prepared) = %t, %v", prepared, err)
+	}
+	prepared, err = repository.HasPreparedResearch(ctx, prepareReady.ExternalID)
+	if err != nil || prepared {
+		t.Fatalf("HasPreparedResearch(unprepared) = %t, %v", prepared, err)
+	}
+	if _, err := repository.GetPendingForOperation(ctx, "unknown"); err == nil {
+		t.Fatal("unknown operation must fail")
+	}
+}
+
+func assertPendingIDs(t *testing.T, repository *ArticleRepository, operation string, want ...int64) {
+	t.Helper()
+	selected, err := repository.GetPendingForOperation(context.Background(), operation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make([]int64, len(selected))
+	for index := range selected {
+		got[index] = selected[index].ID
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("%s pending IDs = %v, want %v", operation, got, want)
+	}
+}
+
+func TestDemoGenerateSelectionExcludesOnlyNonEmptyRecordedErrors(t *testing.T) {
+	repository, pool := newTestRepository(t)
+	ctx := context.Background()
+	nullError, _ := repository.Create(ctx, article.Input{ExcelID: 1101, Title: "null error", ImageSlug: "null-error"})
+	emptyError, _ := repository.Create(ctx, article.Input{ExcelID: 1102, Title: "empty error", ImageSlug: "empty-error"})
+	spaceError, _ := repository.Create(ctx, article.Input{ExcelID: 1103, Title: "space error", ImageSlug: "space-error"})
+	recordedError, _ := repository.Create(ctx, article.Input{ExcelID: 1104, Title: "recorded error", ImageSlug: "recorded-error"})
+	if _, err := pool.Exec(ctx, `
+		UPDATE articles
+		SET error_message = CASE id
+			WHEN $1 THEN ''
+			WHEN $2 THEN '   '
+			WHEN $3 THEN 'Keys.so timeout'
+			ELSE error_message
+		END
+		WHERE id = ANY($4)
+	`, emptyError.ID, spaceError.ID, recordedError.ID, []int64{emptyError.ID, spaceError.ID, recordedError.ID}); err != nil {
+		t.Fatal(err)
+	}
+
+	assertPendingIDs(t, repository, "demo-generate", nullError.ID, emptyError.ID, spaceError.ID)
+}
+
+func TestListArticlesWithErrorsAndClearOneForRetry(t *testing.T) {
+	repository, pool := newTestRepository(t)
+	ctx := context.Background()
+	first, _ := repository.Create(ctx, article.Input{ExcelID: 1201, Title: "first", ImageSlug: "first"})
+	nullError, _ := repository.Create(ctx, article.Input{ExcelID: 1202, Title: "null", ImageSlug: "null"})
+	emptyError, _ := repository.Create(ctx, article.Input{ExcelID: 1203, Title: "empty", ImageSlug: "empty"})
+	spaceError, _ := repository.Create(ctx, article.Input{ExcelID: 1204, Title: "space", ImageSlug: "space"})
+	second, _ := repository.Create(ctx, article.Input{ExcelID: 1205, Title: "second", ImageSlug: "second"})
+	if _, err := pool.Exec(ctx, `
+		UPDATE articles SET status = 'failed', current_step = 'article_generation', error_message = CASE id
+			WHEN $1 THEN 'first failure' WHEN $2 THEN '' WHEN $3 THEN '   ' WHEN $4 THEN 'second failure'
+			ELSE error_message END
+		WHERE id = ANY($5)
+	`, first.ID, emptyError.ID, spaceError.ID, second.ID, []int64{first.ID, emptyError.ID, spaceError.ID, second.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO article_outputs (article_id, structure_path, article_path) VALUES ($1, 'structure.txt', 'article.txt')`, first.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	selected, err := repository.ListArticlesWithErrors(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := []int64{selected[0].ID, selected[1].ID}; !reflect.DeepEqual(got, []int64{first.ID, second.ID}) {
+		t.Fatalf("error IDs = %v", got)
+	}
+	if nullError.ID == 0 {
+		t.Fatal("null-error fixture was not created")
+	}
+
+	cleared, err := repository.ClearArticleErrorForRetry(ctx, first.ID)
+	if err != nil || !cleared {
+		t.Fatalf("clear = %v, %v", cleared, err)
+	}
+	var status string
+	var step, message *string
+	var structurePath, articlePath string
+	if err := pool.QueryRow(ctx, `
+		SELECT a.status, a.current_step, a.error_message, o.structure_path, o.article_path
+		FROM articles a JOIN article_outputs o ON o.article_id = a.id WHERE a.id = $1
+	`, first.ID).Scan(&status, &step, &message, &structurePath, &articlePath); err != nil {
+		t.Fatal(err)
+	}
+	if status != "processing" || step == nil || *step != "article_generation" || message != nil {
+		t.Fatalf("state after clear: status=%q step=%v error=%v", status, step, message)
+	}
+	if structurePath != "structure.txt" || articlePath != "article.txt" {
+		t.Fatalf("artifacts changed: %q %q", structurePath, articlePath)
+	}
+	if cleared, err := repository.ClearArticleErrorForRetry(ctx, first.ID); err != nil || cleared {
+		t.Fatalf("second clear = %v, %v", cleared, err)
+	}
+	remaining, err := repository.ListArticlesWithErrors(ctx)
+	if err != nil || len(remaining) != 1 || remaining[0].ID != second.ID {
+		t.Fatalf("remaining=%+v err=%v", remaining, err)
 	}
 }
 
@@ -733,6 +986,7 @@ func newTestRepository(t *testing.T) (*ArticleRepository, *pgxpool.Pool) {
 		"000005_add_article_review_stage.up.sql",
 		"000006_add_structured_article_metadata.up.sql",
 		"000007_add_result_input_fields.up.sql",
+		"000008_add_article_errors.up.sql",
 	} {
 		migration, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "migrations", name))
 		if err != nil {

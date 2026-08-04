@@ -81,14 +81,17 @@ func main() {
 		os.Exit(1)
 	}
 
-	articleRepository := repository.NewArticleRepository(pool)
 	taskLogger := logger.With("task", "task_1", "operation", command.Name)
+	articleRepository := repository.NewArticleRepository(pool, taskLogger)
 	writer := articleoutput.NewWriter(cfg.OutputDir)
 	resultService := resultassembly.NewService(articleRepository, writer, taskLogger)
 
 	taskStarted := time.Now()
 	taskLogger.Info("task started", "stage", "start")
 	switch command.Name {
+	case "errors":
+		err = runErrors(ctx, articleRepository, command.ExternalID, os.Stdout)
+
 	case "import":
 		err = runImport(ctx, articleRepository, cfg.InputFilePath, "output/task1/import-reports", command.ImportLimit, taskLogger)
 
@@ -97,17 +100,36 @@ func main() {
 		err = runPrepare(ctx, articleRepository, cfg, taskLogger, writer, command.ExternalID)
 
 	case "result":
-		_, err = resultService.Build(ctx, command.ExternalID)
-		if err == nil {
-			resultInput, loadErr := articleRepository.GetResultInput(ctx, command.ExternalID)
-			if loadErr != nil {
-				err = loadErr
-			} else {
-				err = articleRepository.CompleteGeneration(ctx, resultInput.Article.ID)
+		runResult := func(ctx context.Context, externalID string) error {
+			if _, buildErr := resultService.Build(ctx, externalID); buildErr != nil {
+				return buildErr
 			}
+			resultInput, loadErr := articleRepository.GetResultInput(ctx, externalID)
+			if loadErr != nil {
+				return loadErr
+			}
+			return articleRepository.CompleteGeneration(ctx, resultInput.Article.ID)
+		}
+		if command.ExternalID == "" {
+			err = runBatchOperation(ctx, articleRepository, "result", func(ctx context.Context, externalID string) error {
+				runErr := runResult(ctx, externalID)
+				if runErr == nil || isGracefulCancellation(ctx, runErr) {
+					return runErr
+				}
+				resultInput, loadErr := articleRepository.GetResultInput(ctx, externalID)
+				if loadErr != nil {
+					return errors.Join(runErr, loadErr)
+				}
+				if saveErr := articleRepository.SaveError(ctx, resultInput.Article.ID, runErr); saveErr != nil {
+					return errors.Join(runErr, saveErr)
+				}
+				return runErr
+			}, taskLogger)
+		} else {
+			err = runResult(ctx, command.ExternalID)
 		}
 
-	case "run", "generate", "demo-generate", "article", "info", "review", "fix", "html":
+	case "run", "generate", "demo-generate", "retry", "article", "info", "review", "fix", "html":
 		if command.DryRun {
 			err = runDryRun(ctx, articleRepository, cfg, taskLogger, writer, resultService)
 			break
@@ -154,27 +176,87 @@ func main() {
 		}
 		router := llm.NewRouter(llmConfig, clients, taskLogger)
 		generationPipeline := generation.NewPipeline(articleRepository, router, geminiClient, writer, taskLogger, resultService)
+		runPreparedDemo := func(ctx context.Context, externalID string) error {
+			saved, loadErr := articleRepository.GetSavedGenerationInput(ctx, externalID)
+			if loadErr != nil {
+				return loadErr
+			}
+			return runDemoWithoutRecordedError(saved.Article, taskLogger, func() error {
+				if saved.Article.Status == "completed" {
+					return runDemoGenerate(ctx, generationPipeline, externalID)
+				}
+				prepared, researchErr := articleRepository.HasPreparedResearch(ctx, externalID)
+				if researchErr != nil {
+					return researchErr
+				}
+				if !prepared {
+					if validateErr := cfg.ValidatePrepare(); validateErr != nil {
+						return validateErr
+					}
+					if prepareErr := runPrepare(ctx, articleRepository, cfg, taskLogger, writer, externalID); prepareErr != nil {
+						return prepareErr
+					}
+				}
+				return runDemoGenerate(ctx, generationPipeline, externalID)
+			})
+		}
 		switch command.Name {
 		case "generate":
-			err = runGenerate(ctx, generationPipeline, command.ExternalID)
+			if command.ExternalID == "" {
+				err = runBatchOperation(ctx, articleRepository, "generate", func(ctx context.Context, externalID string) error {
+					return runGenerate(ctx, generationPipeline, externalID)
+				}, taskLogger)
+			} else {
+				err = runGenerate(ctx, generationPipeline, command.ExternalID)
+			}
 		case "run":
 			if command.ExternalID == "" {
 				err = runAllDemo(ctx, articleRepository, func(ctx context.Context, externalID string) error {
-					return runDemoGenerate(ctx, generationPipeline, externalID)
+					return runQuickDemoGenerate(ctx, generationPipeline, externalID)
 				}, taskLogger)
 			} else {
-				err = runDemoGenerate(ctx, generationPipeline, command.ExternalID)
+				err = runQuickDemoGenerate(ctx, generationPipeline, command.ExternalID)
 			}
 		case "demo-generate":
-			err = runDemoGenerate(ctx, generationPipeline, command.ExternalID)
+			if command.ExternalID == "" {
+				err = runBatchOperation(ctx, articleRepository, "demo-generate", runPreparedDemo, taskLogger)
+			} else {
+				err = runPreparedDemo(ctx, command.ExternalID)
+			}
+		case "retry":
+			err = runRetry(ctx, articleRepository, command.ExternalID, runPreparedDemo, taskLogger)
 		case "article", "info":
-			err = runArticle(ctx, generationPipeline, command.ExternalID)
+			if command.ExternalID == "" {
+				err = runBatchOperation(ctx, articleRepository, command.Name, func(ctx context.Context, externalID string) error {
+					return runArticle(ctx, generationPipeline, externalID)
+				}, taskLogger)
+			} else {
+				err = runArticle(ctx, generationPipeline, command.ExternalID)
+			}
 		case "review":
-			err = runReview(ctx, generationPipeline, command.ExternalID)
+			if command.ExternalID == "" {
+				err = runBatchOperation(ctx, articleRepository, "review", func(ctx context.Context, externalID string) error {
+					return runReview(ctx, generationPipeline, externalID)
+				}, taskLogger)
+			} else {
+				err = runReview(ctx, generationPipeline, command.ExternalID)
+			}
 		case "fix":
-			err = runFix(ctx, generationPipeline, command.ExternalID)
+			if command.ExternalID == "" {
+				err = runBatchOperation(ctx, articleRepository, "fix", func(ctx context.Context, externalID string) error {
+					return runFix(ctx, generationPipeline, externalID)
+				}, taskLogger)
+			} else {
+				err = runFix(ctx, generationPipeline, command.ExternalID)
+			}
 		case "html":
-			err = runHTML(ctx, generationPipeline, command.ExternalID)
+			if command.ExternalID == "" {
+				err = runBatchOperation(ctx, articleRepository, "html", func(ctx context.Context, externalID string) error {
+					return runHTML(ctx, generationPipeline, externalID)
+				}, taskLogger)
+			} else {
+				err = runHTML(ctx, generationPipeline, command.ExternalID)
+			}
 		}
 		if closeErr := geminiClient.Close(); closeErr != nil {
 			err = errors.Join(err, fmt.Errorf("закрыть Gemini client: %w", closeErr))
@@ -285,7 +367,7 @@ func parseCommand(args []string) (taskCommand, error) {
 }
 
 func parseTaskCommand(args []string) (taskCommand, error) {
-	const available = "available task-1 operations: import, run, demo-generate, prepare, generate, article, info, review, fix, html, result"
+	const available = "available task-1 operations: import, errors, retry, run, demo-generate, prepare, generate, article, info, review, fix, html, result"
 	if len(args) < 3 || (args[1] != "task-1" && args[1] != "task_1") {
 		return taskCommand{}, fmt.Errorf("usage: seo-pipeline task-1 <operation> [arguments]; %s", available)
 	}
@@ -313,9 +395,12 @@ func parseTaskCommand(args []string) (taskCommand, error) {
 			return taskCommand{}, fmt.Errorf("usage: seo-pipeline task-1 run [external_id]")
 		}
 		return parseExternalIDCommand(task, args[3])
-	case "prepare", "generate", "review", "fix", "info", "html", "result", "article", "demo-generate":
+	case "errors", "retry", "prepare", "generate", "demo-generate", "review", "fix", "info", "html", "result", "article":
+		if len(args) == 3 {
+			return taskCommand{Name: task}, nil
+		}
 		if len(args) != 4 {
-			return taskCommand{}, fmt.Errorf("usage: seo-pipeline task-1 %s <external_id>", task)
+			return taskCommand{}, fmt.Errorf("usage: seo-pipeline task-1 %s [external_id]", task)
 		}
 		return parseExternalIDCommand(task, args[3])
 	default:
@@ -352,9 +437,11 @@ func validateConfig(command string, cfg config.Config) error {
 		return cfg.ValidateImport()
 	case "prepare":
 		return cfg.ValidatePrepare()
-	case "run", "generate", "demo-generate", "article", "info", "review", "fix", "html":
+	case "run", "generate", "demo-generate", "retry", "article", "info", "review", "fix", "html":
 		return cfg.ValidateGenerate()
 	case "result":
+		return cfg.ValidateReset()
+	case "errors":
 		return cfg.ValidateReset()
 	default:
 		return fmt.Errorf("unknown task %q", command)

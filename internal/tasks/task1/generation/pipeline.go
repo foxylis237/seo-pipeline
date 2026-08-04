@@ -150,8 +150,64 @@ func (p *Pipeline) Run(ctx context.Context, input article.GenerationInput) (Pipe
 	return PipelineOutput{Paths: paths}, nil
 }
 
-// RunDemoByExternalID generates only article, info and result using one Gemini chat.
+// RunDemoByExternalID resumes structure, article/info and result without review,
+// fix or HTML. Persisted stages are never regenerated.
 func (p *Pipeline) RunDemoByExternalID(ctx context.Context, externalID string) (PipelineOutput, error) {
+	saved, err := p.repository.GetSavedGenerationInput(ctx, externalID)
+	if err != nil {
+		return PipelineOutput{}, &StageError{ExternalID: externalID, Stage: "load_demo_data", Err: err}
+	}
+	input := article.GenerationInput{Article: saved.Article, Professions: saved.Professions, Links: saved.Links}
+	logger := p.stageLogger(input)
+	if input.Article.Status == "completed" {
+		logger.Info("demo generation skipped: result already exists", "stage", "demo_complete")
+		return PipelineOutput{}, nil
+	}
+
+	paths := articleoutput.ArticlePaths{}
+	if strings.TrimSpace(saved.StructurePath) == "" {
+		generationInput, loadErr := p.repository.GetGenerationInput(ctx, externalID)
+		if loadErr != nil {
+			return PipelineOutput{}, p.fail(ctx, logger, input, "load_structure_data", loadErr)
+		}
+		structureOutput, structureErr := p.structureService.Generate(ctx, generationInput)
+		if structureErr != nil {
+			return PipelineOutput{}, p.fail(ctx, logger, generationInput, "structure_generation", structureErr)
+		}
+		paths = structureOutput.Paths
+		saved, err = p.repository.GetSavedGenerationInput(ctx, externalID)
+		if err != nil {
+			return PipelineOutput{}, p.fail(ctx, logger, input, "reload_structure_data", err)
+		}
+	}
+
+	if strings.TrimSpace(saved.ArticlePath) == "" {
+		articleOutput, articleErr := p.RunArticleByExternalID(ctx, externalID)
+		if articleErr != nil {
+			return PipelineOutput{}, articleErr
+		}
+		paths = articleOutput.Paths
+	}
+	if p.resultBuilder == nil {
+		return PipelineOutput{}, p.fail(ctx, logger, input, "result_generation", fmt.Errorf("result builder is not configured"))
+	}
+	resultPending, err := p.resultBuilder.BuildStaged(ctx, externalID)
+	if err != nil {
+		return PipelineOutput{}, p.fail(ctx, logger, input, "result_generation", err)
+	}
+	defer resultPending.Abort()
+	if err := articleoutput.Commit(func() error {
+		return p.repository.CompleteGeneration(ctx, input.Article.ID)
+	}, resultPending); err != nil {
+		return PipelineOutput{}, p.fail(ctx, logger, input, "complete_demo_generation", err)
+	}
+	paths.ResultPath = resultPending.Paths.ResultPath
+	return PipelineOutput{Paths: paths}, nil
+}
+
+// RunQuickDemoByExternalID preserves the original run command flow: article,
+// info and result without prepared research or a generated structure.
+func (p *Pipeline) RunQuickDemoByExternalID(ctx context.Context, externalID string) (PipelineOutput, error) {
 	input, err := p.repository.GetDemoGenerationInput(ctx, externalID)
 	if err != nil {
 		return PipelineOutput{}, &StageError{ExternalID: externalID, Stage: "load_demo_data", Err: err}

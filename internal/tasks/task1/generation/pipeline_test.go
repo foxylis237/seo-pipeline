@@ -168,7 +168,13 @@ func (r *fakePipelineRepository) BeginGenerationStage(_ context.Context, _ int64
 }
 
 func (r *fakePipelineRepository) GetSavedGenerationInput(_ context.Context, _ string) (article.SavedGenerationInput, error) {
-	return r.savedInput, nil
+	saved := r.savedInput
+	if saved.Article.ID == 0 {
+		saved.Article = r.input.Article
+		saved.Professions = r.input.Professions
+		saved.Links = r.input.Links
+	}
+	return saved, nil
 }
 
 func (r *fakePipelineRepository) SaveReviewPath(_ context.Context, _ int64, path string) error {
@@ -210,6 +216,7 @@ func (r *fakePipelineRepository) GetGenerationInput(_ context.Context, _ string)
 func (r *fakePipelineRepository) SaveStructurePath(_ context.Context, articleID int64, path string) error {
 	r.structureArticleID = articleID
 	r.structurePath = path
+	r.savedInput.StructurePath = path
 	return nil
 }
 
@@ -217,6 +224,8 @@ func (r *fakePipelineRepository) SaveGenerationPaths(_ context.Context, articleI
 	r.articleArticleID = articleID
 	r.structurePath = structurePath
 	r.articlePath = articlePath
+	r.savedInput.StructurePath = structurePath
+	r.savedInput.ArticlePath = articlePath
 	return nil
 }
 
@@ -256,15 +265,54 @@ func TestDemoGenerateUsesOneChatSkipsHTMLAndKeepsMetadataStage(t *testing.T) {
 	if chatFactory.chats != 1 || len(chatFactory.prompts) != 2 {
 		t.Fatalf("chats=%d prompts=%d, want one chat and two prompts", chatFactory.chats, len(chatFactory.prompts))
 	}
-	if len(client.calls) != 0 || repository.htmlPath != "" {
-		t.Fatalf("demo invoked routed/HTML stages: calls=%v html=%q", client.calls, repository.htmlPath)
+	if len(client.calls) != 1 || client.calls[0] != "structure" || repository.reviewPath != "" || repository.htmlPath != "" {
+		t.Fatalf("demo stages: calls=%v review=%q html=%q", client.calls, repository.reviewPath, repository.htmlPath)
 	}
-	if !repository.demoCompleted || repository.completionCalls != 1 || !repository.demoStateSaved || builder.calls != 1 || output.Paths.ResultPath == "" {
+	if !repository.demoCompleted || repository.completionCalls != 1 || repository.articleInfo == "" || builder.calls != 1 || output.Paths.ResultPath == "" {
 		t.Fatalf("demo completion: completed=%t completion_calls=%d result_calls=%d paths=%+v", repository.demoCompleted, repository.completionCalls, builder.calls, output.Paths)
 	}
 	if len(repository.begunStages) != 1 || repository.begunStages[0] != "article" {
 		t.Fatalf("demo begun stages = %v", repository.begunStages)
 	}
+}
+
+func TestDemoGenerateResumesPersistedStages(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	input := article.GenerationInput{Article: article.Article{ID: 7, ExternalID: "37", Title: "Тема", Slug: "tema", Status: "processing"}}
+
+	t.Run("article exists builds only result", func(t *testing.T) {
+		repository := &fakePipelineRepository{input: input, savedInput: article.SavedGenerationInput{
+			Article: input.Article, StructurePath: "37-tema/generated/structure.txt", ArticlePath: "37-tema/generated/article.txt",
+		}}
+		client := successfulPipelineClient()
+		chatFactory := successfulChatFactory()
+		builder := newFakeResultBuilder(t, nil)
+		pipeline := NewPipeline(repository, testGenerationRouter(client, logger), chatFactory, articleoutput.NewWriter(t.TempDir()), logger, builder)
+
+		if _, err := pipeline.RunDemoByExternalID(context.Background(), "37"); err != nil {
+			t.Fatal(err)
+		}
+		if len(client.calls) != 0 || chatFactory.chats != 0 || builder.calls != 1 || repository.completionCalls != 1 {
+			t.Fatalf("calls=%v chats=%d result=%d complete=%d", client.calls, chatFactory.chats, builder.calls, repository.completionCalls)
+		}
+	})
+
+	t.Run("completed skips every stage", func(t *testing.T) {
+		completed := input
+		completed.Article.Status = "completed"
+		repository := &fakePipelineRepository{input: completed, savedInput: article.SavedGenerationInput{Article: completed.Article}}
+		client := successfulPipelineClient()
+		chatFactory := successfulChatFactory()
+		builder := newFakeResultBuilder(t, nil)
+		pipeline := NewPipeline(repository, testGenerationRouter(client, logger), chatFactory, articleoutput.NewWriter(t.TempDir()), logger, builder)
+
+		if _, err := pipeline.RunDemoByExternalID(context.Background(), "37"); err != nil {
+			t.Fatal(err)
+		}
+		if len(client.calls) != 0 || chatFactory.chats != 0 || builder.calls != 0 || repository.completionCalls != 0 {
+			t.Fatalf("calls=%v chats=%d result=%d complete=%d", client.calls, chatFactory.chats, builder.calls, repository.completionCalls)
+		}
+	})
 }
 
 func TestDemoResultErrorDoesNotCompleteFlow(t *testing.T) {

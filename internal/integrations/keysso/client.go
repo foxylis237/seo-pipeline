@@ -3,10 +3,12 @@ package keysso
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -24,18 +26,23 @@ const (
 	searchSelector                   = `input[placeholder="Введите адрес сайта или запрос"]`
 	pageSizeSelector                 = `select.per-page-dropdown`
 	keywordsTableSelector            = `table:has(th#_word)`
+	keywordsEmptySelector            = `table:has(th#_word) tbody tr.p-datatable-emptymessage`
+	keywordsLoaderSelector           = `.p-datatable-loading-overlay, .p-datatable-loading-icon`
 	cleanupInputSelector             = `textarea.p-inputtextarea`
 	resultFieldSelector              = `div.field`
 	operationTimeoutMilliseconds     = 30_000
 	longOperationTimeoutMilliseconds = 60_000
+	keywordsTableMaxAttempts         = 3
+	debugArtifactsRoot               = "output/task1/debug/keysso"
 )
 
 // Config содержит настройки интеграции с Keys.so.
 type Config struct {
-	ArticleID int64
-	Email     string
-	Password  string
-	Headless  bool
+	ArticleID  int64
+	ExternalID string
+	Email      string
+	Password   string
+	Headless   bool
 }
 
 // CollectResult содержит данные, полученные на этапе Keys.so.
@@ -71,11 +78,82 @@ type Service struct {
 	startedAt      time.Time
 	collectedCount int
 	cleanedCount   int
+	referenceURL   string
+	requestedURL   string
+	resultsURL     string
+
+	waitKeywordsResultsHook    func(context.Context) error
+	refreshKeywordsResultsHook func(context.Context) error
+	saveDebugArtifactsHook     func(string, int, int, error)
 }
+
+type debugInfo struct {
+	ArticleID    int64     `json:"article_id"`
+	ExternalID   string    `json:"external_id"`
+	Attempt      int       `json:"attempt"`
+	MaxAttempts  int       `json:"max_attempts"`
+	Stage        string    `json:"stage"`
+	Operation    string    `json:"operation"`
+	URL          string    `json:"url"`
+	Title        string    `json:"title"`
+	ReadyState   string    `json:"ready_state"`
+	Timestamp    time.Time `json:"timestamp"`
+	Error        string    `json:"error"`
+	ReferenceURL string    `json:"reference_url,omitempty"`
+	RequestedURL string    `json:"requested_url,omitempty"`
+	Result       string    `json:"result,omitempty"`
+	Retryable    bool      `json:"retryable"`
+}
+
+type resultKind string
+
+const (
+	resultSuccess         resultKind = "success"
+	resultNoData          resultKind = "no_data"
+	resultMaintenance     resultKind = "maintenance"
+	resultNavigationError resultKind = "navigation_error"
+	resultTimeout         resultKind = "timeout"
+	resultUnexpectedPage  resultKind = "unexpected_page"
+)
+
+type resultError struct {
+	Kind      resultKind
+	Retryable bool
+	Err       error
+}
+
+func (e *resultError) Error() string { return e.Err.Error() }
+func (e *resultError) Unwrap() error { return e.Err }
+
+type debugCapturedError struct{ err error }
+
+func (e *debugCapturedError) Error() string { return e.err.Error() }
+func (e *debugCapturedError) Unwrap() error { return e.err }
+
+type keywordsTableWaitError struct {
+	Attempts         int
+	URL              string
+	Selector         string
+	AttemptDurations []time.Duration
+	Err              error
+}
+
+func (e *keywordsTableWaitError) Error() string {
+	durations := make([]string, len(e.AttemptDurations))
+	for index, duration := range e.AttemptDurations {
+		durations[index] = duration.String()
+	}
+	return fmt.Sprintf(
+		"keywords table did not load after %d attempts: url=%q selector=%q attempt_durations=[%s]: %v",
+		e.Attempts, e.URL, e.Selector, strings.Join(durations, ", "), e.Err,
+	)
+}
+
+func (e *keywordsTableWaitError) Unwrap() error { return e.Err }
 
 // New создаёт интеграцию с Keys.so.
 func New(cfg Config, logger *slog.Logger) *Service {
-	return &Service{cfg: cfg, logger: logger.With("article_id", cfg.ArticleID, "integration", "keysso")}
+	return &Service{cfg: cfg, logger: logger.With("article_id", cfg.ArticleID, "external_id", cfg.ExternalID, "integration", "keysso")}
 }
 
 // CollectCleanKeywords получает запросы конкурента и очищает неявные дубли.
@@ -83,6 +161,9 @@ func (s *Service) CollectCleanKeywords(ctx context.Context, referenceURL string)
 	s.startedAt = time.Now()
 	s.collectedCount = 0
 	s.cleanedCount = 0
+	s.referenceURL = strings.TrimSpace(referenceURL)
+	s.requestedURL = ""
+	s.resultsURL = ""
 	if strings.TrimSpace(referenceURL) == "" {
 		return CollectResult{}, s.stageError("validate_reference_url", fmt.Errorf("reference URL is empty"))
 	}
@@ -94,18 +175,30 @@ func (s *Service) CollectCleanKeywords(ctx context.Context, referenceURL string)
 	}
 	defer func() { _ = s.Close() }()
 
-	if err := s.ensureAuthenticated(ctx); err != nil {
-		return CollectResult{}, s.stageError("check_authorization", err)
+	var authenticationErr error
+	for attempt := 1; attempt <= keywordsTableMaxAttempts; attempt++ {
+		authenticationErr = s.ensureAuthenticated(ctx)
+		if authenticationErr == nil {
+			break
+		}
+		var classified *resultError
+		if !errors.As(authenticationErr, &classified) || !classified.Retryable {
+			return CollectResult{}, s.stageError("check_authorization", s.captureError("check_authorization", attempt, keywordsTableMaxAttempts, authenticationErr))
+		}
+		authenticationErr = s.captureError("check_authorization", attempt, keywordsTableMaxAttempts, authenticationErr)
+		if attempt == keywordsTableMaxAttempts {
+			return CollectResult{}, s.stageError("check_authorization", authenticationErr)
+		}
 	}
 	queries, err := s.collectCompetitorQueries(ctx, referenceURL)
 	if err != nil {
-		return CollectResult{}, s.stageError("collect_competitor_queries", err)
+		return CollectResult{}, s.stageError("collect_competitor_queries", s.captureError("collect_competitor_queries", 1, 1, err))
 	}
 	s.collectedCount = len(queries)
 
 	cleaned, err := s.cleanDuplicates(ctx, queries)
 	if err != nil {
-		return CollectResult{}, s.stageError("clean_duplicates", err)
+		return CollectResult{}, s.stageError("clean_duplicates", s.captureError("clean_duplicates", 1, 1, err))
 	}
 	s.cleanedCount = len(cleaned)
 	return CollectResult{
@@ -168,6 +261,9 @@ func (s *Service) ensureAuthenticated(ctx context.Context) error {
 		return err
 	}
 	if err := s.detectAccessRestriction("check_authorization"); err != nil {
+		return err
+	}
+	if err := s.detectMaintenancePage(); err != nil {
 		return err
 	}
 	searchInput := s.page.Locator(searchSelector)
@@ -280,52 +376,29 @@ func (s *Service) ensureAuthenticated(ctx context.Context) error {
 
 func (s *Service) collectCompetitorQueries(ctx context.Context, referenceURL string) ([]string, error) {
 	s.log(slog.LevelDebug, "начало поиска конкурента", "collect_competitor_queries")
-	if err := s.open(ctx, homeURL, "open Keys.so search page"); err != nil {
-		return nil, err
-	}
-	if err := s.ensureBusinessSession("open_search_page"); err != nil {
-		return nil, err
-	}
-	searchInput := s.page.Locator(searchSelector)
-	searchButton := s.page.GetByRole("button", playwright.PageGetByRoleOptions{
-		Name:  "Поиск",
-		Exact: playwright.Bool(true),
-	})
-	if err := s.requireUnique(searchInput, searchSelector, "поле поиска конкурента"); err != nil {
-		return nil, fmt.Errorf("search field not found: %w", err)
-	}
-	if err := s.requireUnique(searchButton, `getByRole(button, name="Поиск")`, "кнопка поиска конкурента"); err != nil {
-		return nil, err
-	}
-	if err := searchInput.Fill(referenceURL); err != nil {
-		return nil, fmt.Errorf("fill competitor URL: %w", err)
-	}
-	if err := searchButton.Click(); err != nil {
-		return nil, fmt.Errorf("start competitor search: %w", err)
-	}
-	s.log(slog.LevelDebug, "поиск конкурента отправлен, ожидание результатов", "collect_competitor_queries")
-	if err := s.page.WaitForURL("**/ru/keysbypage**", playwright.PageWaitForURLOptions{
-		WaitUntil: playwright.WaitUntilStateCommit,
-		Timeout:   playwright.Float(longOperationTimeoutMilliseconds),
-	}); err != nil {
-		if restrictionErr := s.detectAccessRestriction("wait_search_results_url"); restrictionErr != nil {
-			return nil, restrictionErr
+	var navigationErr error
+	for attempt := 1; attempt <= keywordsTableMaxAttempts; attempt++ {
+		navigationErr = s.submitCompetitorSearch(ctx, referenceURL)
+		if navigationErr == nil {
+			break
 		}
-		return nil, fmt.Errorf("wait for competitor results URL: current URL %q: %w", s.currentURL(), err)
+		navigationErr = s.captureError("navigate_search_results", attempt, keywordsTableMaxAttempts, navigationErr)
+		if !isRetryableResultError(navigationErr) || attempt == keywordsTableMaxAttempts {
+			return nil, navigationErr
+		}
+		result, retryable := resultErrorFields(navigationErr)
+		s.log(slog.LevelWarn, "Keys.so search navigation retry", "navigate_search_results", "attempt", attempt+1, "max_attempts", keywordsTableMaxAttempts, "reference_url", referenceURL, "result", result, "retryable", retryable, "error", navigationErr)
 	}
 
-	pageSize := s.page.Locator(pageSizeSelector)
-	if _, err := s.page.WaitForFunction(
-		`selector => document.querySelectorAll(selector).length > 0`,
-		pageSizeSelector,
-		playwright.PageWaitForFunctionOptions{Timeout: playwright.Float(longOperationTimeoutMilliseconds)},
-	); err != nil {
+	if err := s.waitKeywordsResults(ctx); err != nil {
+		pageSize := s.page.Locator(pageSizeSelector)
 		s.logLocatorDiagnostic(pageSize, pageSizeSelector, "видимый select количества строк таблицы")
 		if restrictionErr := s.detectAccessRestriction("wait_search_results"); restrictionErr != nil {
 			return nil, restrictionErr
 		}
-		return nil, fmt.Errorf("keywords table did not load: %w", err)
+		return nil, err
 	}
+	pageSize := s.page.Locator(pageSizeSelector)
 	pageSizeMatches, err := pageSize.All()
 	if err != nil {
 		return nil, fmt.Errorf("get result page size selectors: %w", err)
@@ -413,6 +486,185 @@ func (s *Service) collectCompetitorQueries(ctx context.Context, referenceURL str
 	s.collectedCount = len(queries)
 	s.log(slog.LevelInfo, "запросы конкурента получены", "collect_competitor_queries")
 	return queries, nil
+}
+
+func (s *Service) submitCompetitorSearch(ctx context.Context, referenceURL string) error {
+	if err := s.open(ctx, homeURL, "open Keys.so search page"); err != nil {
+		return err
+	}
+	if err := s.ensureBusinessSession("open_search_page"); err != nil {
+		return err
+	}
+	searchInput := s.page.Locator(searchSelector)
+	searchButton := s.page.GetByRole("button", playwright.PageGetByRoleOptions{Name: "Поиск", Exact: playwright.Bool(true)})
+	if err := s.requireUnique(searchInput, searchSelector, "поле поиска конкурента"); err != nil {
+		return fmt.Errorf("search field not found: %w", err)
+	}
+	if err := s.requireUnique(searchButton, `getByRole(button, name="Поиск")`, "кнопка поиска конкурента"); err != nil {
+		return err
+	}
+	if err := searchInput.Fill(referenceURL); err != nil {
+		return fmt.Errorf("fill competitor URL: %w", err)
+	}
+	response, err := s.page.ExpectNavigation(func() error { return searchButton.Click() }, playwright.PageExpectNavigationOptions{
+		URL: "**/ru/keysbypage**", WaitUntil: playwright.WaitUntilStateDomcontentloaded,
+		Timeout: playwright.Float(longOperationTimeoutMilliseconds),
+	})
+	if err != nil {
+		if restrictionErr := s.detectAccessRestriction("wait_search_results_url"); restrictionErr != nil {
+			return restrictionErr
+		}
+		return &resultError{Kind: resultNavigationError, Retryable: true, Err: fmt.Errorf("Keys.so navigation failed: %w", err)}
+	}
+	if response != nil {
+		s.resultsURL = response.URL()
+	}
+	if s.resultsURL == "" {
+		s.resultsURL = s.currentURL()
+	}
+	s.requestedURL = s.resultsURL
+	s.log(slog.LevelDebug, "поиск конкурента отправлен, ожидание результатов", "collect_competitor_queries", "requested_url", s.requestedURL)
+	return nil
+}
+
+func (s *Service) waitKeywordsResults(ctx context.Context) error {
+	durations := make([]time.Duration, 0, keywordsTableMaxAttempts)
+	var lastErr error
+	for attempt := 1; attempt <= keywordsTableMaxAttempts; attempt++ {
+		if err := checkContext(ctx, "wait keywords table"); err != nil {
+			return err
+		}
+		if attempt > 1 {
+			s.log(slog.LevelInfo, "Keys.so: refreshing results page", "wait_search_results", "attempt", attempt, "max_attempts", keywordsTableMaxAttempts)
+			if err := s.refreshKeywordsResults(ctx); err != nil {
+				return fmt.Errorf("refresh Keys.so results before attempt %d/%d: %w", attempt, keywordsTableMaxAttempts, errors.Join(lastErr, err))
+			}
+		}
+
+		s.log(slog.LevelInfo, "Keys.so: waiting keywords table", "wait_search_results", "attempt", attempt, "max_attempts", keywordsTableMaxAttempts, "locator", keywordsTableSelector)
+		started := time.Now()
+		lastErr = s.waitKeywordsResultsOnce(ctx)
+		duration := time.Since(started)
+		durations = append(durations, duration)
+		if lastErr == nil {
+			s.log(slog.LevelInfo, "Keys.so: keywords table loaded", "wait_search_results", "attempt", attempt, "max_attempts", keywordsTableMaxAttempts, "attempt_duration_ms", duration.Milliseconds(), "locator", keywordsTableSelector)
+			return nil
+		}
+		result, retryable := resultErrorFields(lastErr)
+		s.log(slog.LevelWarn, "Keys.so: keywords table attempt failed", "wait_search_results", "attempt", attempt, "max_attempts", keywordsTableMaxAttempts, "attempt_duration_ms", duration.Milliseconds(), "locator", keywordsTableSelector, "reference_url", s.referenceURL, "requested_url", s.requestedURL, "result", result, "retryable", retryable, "error", lastErr)
+		lastErr = s.captureError("wait_search_results", attempt, keywordsTableMaxAttempts, lastErr)
+		if !isRetryableResultError(lastErr) {
+			return lastErr
+		}
+		if errors.Is(lastErr, context.Canceled) || errors.Is(lastErr, context.DeadlineExceeded) {
+			return lastErr
+		}
+		if s.waitKeywordsResultsHook == nil {
+			if restrictionErr := s.detectAccessRestriction("wait_search_results"); restrictionErr != nil {
+				return restrictionErr
+			}
+		}
+	}
+	result, retryable := resultErrorFields(lastErr)
+	s.log(slog.LevelError, "Keys.so failed after 3 attempts", "wait_search_results", "attempts", keywordsTableMaxAttempts, "locator", keywordsTableSelector, "reference_url", s.referenceURL, "requested_url", s.requestedURL, "result", result, "retryable", retryable, "error", lastErr)
+	return &keywordsTableWaitError{
+		Attempts: keywordsTableMaxAttempts, URL: s.currentURL(), Selector: keywordsTableSelector,
+		AttemptDurations: durations, Err: lastErr,
+	}
+}
+
+func (s *Service) waitKeywordsResultsOnce(ctx context.Context) error {
+	if s.waitKeywordsResultsHook != nil {
+		return s.waitKeywordsResultsHook(ctx)
+	}
+	if err := checkContext(ctx, "wait keywords table"); err != nil {
+		return err
+	}
+	if err := s.validateResultsPage(); err != nil {
+		return err
+	}
+	handle, err := s.page.WaitForFunction(
+		`selectors => {
+			if (location.protocol === 'chrome-error:') return 'navigation_error';
+			if ((document.title || '').trim() === selectors.maintenance ||
+				(document.body?.innerText || '').trim() === selectors.maintenance) return 'maintenance';
+			const loaders = Array.from(document.querySelectorAll(selectors.loader));
+			const loading = loaders.some(element => {
+				const style = window.getComputedStyle(element);
+				return style.visibility !== 'hidden' && style.display !== 'none' && element.getClientRects().length > 0;
+			});
+			if (loading) return false;
+			const table = document.querySelector(selectors.table);
+			if (!table) return false;
+			const empty = document.querySelector(selectors.empty);
+			if (empty && (empty.textContent || '').trim() === selectors.noData) return 'no_data';
+			const rows = table.querySelectorAll('tbody tr:not(.p-datatable-emptymessage)');
+			if (rows.length > 0 && document.querySelector(selectors.pageSize)) return 'success';
+			return false;
+		}`,
+		map[string]any{
+			"table": keywordsTableSelector, "empty": keywordsEmptySelector,
+			"pageSize": pageSizeSelector, "loader": keywordsLoaderSelector,
+			"noData": "Нет данных", "maintenance": "Технические работы на сайте",
+		},
+		playwright.PageWaitForFunctionOptions{Timeout: playwright.Float(longOperationTimeoutMilliseconds)},
+	)
+	if err != nil {
+		return &resultError{Kind: resultTimeout, Retryable: true, Err: fmt.Errorf("Keys.so timed out waiting for keywords results: %w", err)}
+	}
+	value, err := handle.JSONValue()
+	if err != nil {
+		return fmt.Errorf("read Keys.so result state: %w", err)
+	}
+	state, _ := value.(string)
+	switch resultKind(state) {
+	case resultSuccess:
+		return nil
+	case resultNoData:
+		return &resultError{Kind: resultNoData, Retryable: false, Err: fmt.Errorf("Keys.so returned no data for reference URL: %s", s.referenceURL)}
+	case resultMaintenance:
+		return &resultError{Kind: resultMaintenance, Retryable: true, Err: fmt.Errorf("Keys.so is unavailable: maintenance page detected")}
+	case resultNavigationError:
+		return &resultError{Kind: resultNavigationError, Retryable: true, Err: fmt.Errorf("Keys.so navigation failed: current URL %q", s.currentURL())}
+	default:
+		return &resultError{Kind: resultUnexpectedPage, Retryable: false, Err: fmt.Errorf("unexpected Keys.so result state %q", state)}
+	}
+}
+
+func (s *Service) refreshKeywordsResults(ctx context.Context) error {
+	if s.refreshKeywordsResultsHook != nil {
+		return s.refreshKeywordsResultsHook(ctx)
+	}
+	if err := checkContext(ctx, "before refreshing keywords results"); err != nil {
+		return err
+	}
+	if !isExpectedKeysSOPage(s.currentURL(), "/ru/keysbypage") {
+		if s.resultsURL == "" {
+			return &resultError{Kind: resultNavigationError, Retryable: true, Err: fmt.Errorf("Keys.so navigation failed: results URL is unavailable; current URL %q", s.currentURL())}
+		}
+		if _, err := s.page.Goto(s.resultsURL, playwright.PageGotoOptions{
+			WaitUntil: playwright.WaitUntilStateLoad, Timeout: playwright.Float(longOperationTimeoutMilliseconds),
+		}); err != nil {
+			return &resultError{Kind: resultNavigationError, Retryable: true, Err: fmt.Errorf("reopen Keys.so results page: %w", err)}
+		}
+		return nil
+	}
+	if err := s.page.WaitForLoadState(playwright.PageWaitForLoadStateOptions{
+		State: playwright.LoadStateLoad, Timeout: playwright.Float(longOperationTimeoutMilliseconds),
+	}); err != nil {
+		return fmt.Errorf("wait for current Keys.so navigation before refresh: %w", err)
+	}
+	if _, err := s.page.Reload(playwright.PageReloadOptions{
+		WaitUntil: playwright.WaitUntilStateLoad, Timeout: playwright.Float(longOperationTimeoutMilliseconds),
+	}); err != nil {
+		return fmt.Errorf("refresh Keys.so keywords page: %w", err)
+	}
+	if err := s.page.WaitForLoadState(playwright.PageWaitForLoadStateOptions{
+		State: playwright.LoadStateLoad, Timeout: playwright.Float(longOperationTimeoutMilliseconds),
+	}); err != nil {
+		return fmt.Errorf("wait for refreshed Keys.so page: %w", err)
+	}
+	return checkContext(ctx, "after refreshing keywords results")
 }
 
 func (s *Service) cleanDuplicates(ctx context.Context, queries []string) ([]string, error) {
@@ -599,7 +851,7 @@ func (s *Service) open(ctx context.Context, url, stage string) error {
 		WaitUntil: playwright.WaitUntilStateDomcontentloaded,
 	}); err != nil {
 		if !samePage(s.currentURL(), url) {
-			return fmt.Errorf("%s: %w", stage, err)
+			return &resultError{Kind: resultNavigationError, Retryable: true, Err: fmt.Errorf("Keys.so navigation failed during %s: %w", stage, err)}
 		}
 		s.log(slog.LevelWarn,
 			"навигационное событие Keys.so не завершилось, но целевой URL достигнут",
@@ -613,8 +865,162 @@ func (s *Service) open(ctx context.Context, url, stage string) error {
 	if err := s.detectAccessRestriction(stage); err != nil {
 		return err
 	}
+	if err := s.detectMaintenancePage(); err != nil {
+		return err
+	}
+	title, err := s.page.Title()
+	if err != nil {
+		s.log(slog.LevelWarn, "не удалось получить title страницы Keys.so", stage, "error", err)
+	} else {
+		s.log(slog.LevelInfo, "страница Keys.so загружена", stage, "page_title", title, "page_url", s.currentURL())
+	}
 	s.log(slog.LevelDebug, "страница Keys.so открыта", stage)
 	return nil
+}
+
+func (s *Service) detectMaintenancePage() error {
+	title, err := s.page.Title()
+	if err != nil {
+		return fmt.Errorf("read Keys.so page title: %w", err)
+	}
+	if strings.EqualFold(strings.TrimSpace(title), "Технические работы на сайте") {
+		s.log(slog.LevelWarn, "Keys.so maintenance page detected", "maintenance", "page_title", title, "retryable", true, "reference_url", s.referenceURL)
+		return &resultError{Kind: resultMaintenance, Retryable: true, Err: fmt.Errorf("Keys.so is unavailable: maintenance page detected")}
+	}
+	return nil
+}
+
+func (s *Service) validateResultsPage() error {
+	current := s.currentURL()
+	if strings.HasPrefix(current, "chrome-error://") {
+		return &resultError{Kind: resultNavigationError, Retryable: true, Err: fmt.Errorf("Keys.so navigation failed: current URL %q", current)}
+	}
+	if isExpectedKeysSOPage(current, "/ru/keysbypage") {
+		return nil
+	}
+	title, _ := s.page.Title()
+	return &resultError{Kind: resultUnexpectedPage, Retryable: false, Err: fmt.Errorf("unexpected Keys.so page: url=%q title=%q", current, title)}
+}
+
+func isExpectedKeysSOPage(rawURL, pathPrefix string) bool {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	return parsed.Scheme == "https" && strings.EqualFold(parsed.Hostname(), "www.keys.so") && strings.HasPrefix(parsed.Path, pathPrefix)
+}
+
+func isRetryableResultError(err error) bool {
+	var classified *resultError
+	if errors.As(err, &classified) {
+		return classified.Retryable
+	}
+	return true
+}
+
+func resultErrorFields(err error) (string, bool) {
+	var classified *resultError
+	if errors.As(err, &classified) {
+		return string(classified.Kind), classified.Retryable
+	}
+	return string(resultTimeout), true
+}
+
+func (s *Service) captureError(stage string, attempt, maxAttempts int, err error) error {
+	if err == nil {
+		return nil
+	}
+	var captured *debugCapturedError
+	if errors.As(err, &captured) {
+		return err
+	}
+	if s.saveDebugArtifactsHook != nil {
+		s.saveDebugArtifactsHook(stage, attempt, maxAttempts, err)
+	} else {
+		s.saveDebugArtifacts(stage, attempt, maxAttempts, err)
+	}
+	return &debugCapturedError{err: err}
+}
+
+func (s *Service) saveDebugArtifacts(stage string, attempt, maxAttempts int, processingErr error) {
+	if s.page == nil {
+		s.log(slog.LevelWarn, "Keys.so debug artifacts were not saved: page is unavailable", stage, "attempt", attempt)
+		return
+	}
+	timestamp := time.Now()
+	directory := filepath.Join(
+		debugArtifactsRoot,
+		fmt.Sprintf("article-%d", s.cfg.ArticleID),
+		fmt.Sprintf("%s-attempt-%d", timestamp.Format("20060102-150405.000000000"), attempt),
+	)
+	if err := os.MkdirAll(directory, 0o750); err != nil {
+		s.log(slog.LevelWarn, "не удалось создать каталог Keys.so debug", stage, "attempt", attempt, "debug_path", directory, "error", err)
+		return
+	}
+
+	screenshotPath := filepath.Join(directory, "screenshot.png")
+	sensitiveFields := s.page.Locator(`input[type="password"], input[name="email"], input[type="hidden"]`)
+	if _, err := s.page.Screenshot(playwright.PageScreenshotOptions{
+		Path: playwright.String(screenshotPath), FullPage: playwright.Bool(true), Mask: []playwright.Locator{sensitiveFields},
+	}); err != nil {
+		s.log(slog.LevelWarn, "не удалось сохранить screenshot Keys.so", stage, "attempt", attempt, "debug_path", screenshotPath, "error", err)
+	}
+
+	html, htmlErr := s.page.Content()
+	if htmlErr != nil {
+		s.log(slog.LevelWarn, "не удалось получить HTML Keys.so", stage, "attempt", attempt, "debug_path", directory, "error", htmlErr)
+	} else if err := os.WriteFile(filepath.Join(directory, "page.html"), []byte(redactDiagnosticHTML(html, s.cfg.Email, s.cfg.Password)), 0o600); err != nil {
+		s.log(slog.LevelWarn, "не удалось сохранить HTML Keys.so", stage, "attempt", attempt, "debug_path", directory, "error", err)
+	}
+
+	title, titleErr := s.page.Title()
+	if titleErr != nil {
+		s.log(slog.LevelWarn, "не удалось получить title для Keys.so debug", stage, "attempt", attempt, "error", titleErr)
+	}
+	readyState := "<unavailable>"
+	if value, evaluateErr := s.page.Evaluate(`() => document.readyState`); evaluateErr != nil {
+		s.log(slog.LevelWarn, "не удалось получить readyState для Keys.so debug", stage, "attempt", attempt, "error", evaluateErr)
+	} else if state, ok := value.(string); ok {
+		readyState = state
+	}
+	result, retryable := resultErrorFields(processingErr)
+	info := debugInfo{
+		ArticleID: s.cfg.ArticleID, ExternalID: s.cfg.ExternalID,
+		Attempt: attempt, MaxAttempts: maxAttempts, Stage: stage, Operation: "prepare",
+		URL: s.currentURL(), Title: title, ReadyState: readyState,
+		Timestamp: timestamp, Error: safeDiagnosticError(processingErr),
+		ReferenceURL: s.referenceURL, RequestedURL: s.requestedURL, Result: result, Retryable: retryable,
+	}
+	encoded, encodeErr := json.MarshalIndent(info, "", "  ")
+	if encodeErr != nil {
+		s.log(slog.LevelWarn, "не удалось сформировать Keys.so info.json", stage, "attempt", attempt, "error", encodeErr)
+	} else if err := os.WriteFile(filepath.Join(directory, "info.json"), encoded, 0o600); err != nil {
+		s.log(slog.LevelWarn, "не удалось сохранить Keys.so info.json", stage, "attempt", attempt, "debug_path", directory, "error", err)
+	}
+	s.log(slog.LevelInfo, "Keys.so debug artifacts saved", stage, "attempt", attempt, "debug_path", directory)
+}
+
+func safeDiagnosticError(err error) string {
+	message := strings.TrimSpace(err.Error())
+	lower := strings.ToLower(message)
+	if strings.Contains(lower, "authorization:") || strings.Contains(lower, "bearer ") || strings.Contains(lower, "api_key=") {
+		return "sensitive error details redacted"
+	}
+	const maxRunes = 2000
+	runes := []rune(message)
+	if len(runes) > maxRunes {
+		return string(runes[:maxRunes]) + "…"
+	}
+	return message
+}
+
+func redactDiagnosticHTML(html string, secrets ...string) string {
+	for _, secret := range secrets {
+		if strings.TrimSpace(secret) != "" {
+			html = strings.ReplaceAll(html, secret, "[REDACTED]")
+		}
+	}
+	return html
 }
 
 func samePage(actualURL, expectedURL string) bool {

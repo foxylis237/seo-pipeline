@@ -53,6 +53,19 @@ func runPrepare(
 	writer *articleoutput.Writer,
 	targetExternalID string,
 ) error {
+	if targetExternalID == "" {
+		selectedArticles, err := articleRepository.GetPendingForOperation(ctx, "prepare")
+		if err != nil {
+			return err
+		}
+		byExternalID := make(map[string]article.Article, len(selectedArticles))
+		for _, selected := range selectedArticles {
+			byExternalID[selected.ExternalID] = selected
+		}
+		return runSelectedArticles(ctx, selectedArticles, "prepare", func(ctx context.Context, externalID string) error {
+			return prepareArticle(ctx, articleRepository, cfg, logger, writer, byExternalID[externalID])
+		}, logger)
+	}
 	selectedArticles, err := articleRepository.GetAll(ctx)
 	if err != nil {
 		return err
@@ -91,10 +104,11 @@ func prepareArticle(
 		logger,
 		selected,
 		keysso.New(keysso.Config{
-			ArticleID: selected.ID,
-			Email:     cfg.KeysSOEmail,
-			Password:  cfg.KeysSOPassword,
-			Headless:  true,
+			ArticleID:  selected.ID,
+			ExternalID: selected.ExternalID,
+			Email:      cfg.KeysSOEmail,
+			Password:   cfg.KeysSOPassword,
+			Headless:   true,
 		}, logger),
 		arsenkin.New(arsenkin.Config{
 			ArticleID: selected.ID,
