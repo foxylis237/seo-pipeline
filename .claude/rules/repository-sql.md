@@ -1,7 +1,8 @@
 ---
 paths:
-  - "internal/tasks/task1/repository/**"
+  - "**/repository/**"
   - "migrations/**"
+  - "internal/tasks/task1/repository/**"
 ---
 
 # Репозиторий и схема PostgreSQL

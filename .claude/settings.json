@@ -71,7 +71,60 @@
 
   "enabledMcpjsonServers": ["gopls", "chrome-devtools"],
 
+  "skillOverrides": {
+    "grilling-core": "user-invocable-only"
+  },
+
   "includeCoAuthoredBy": false,
 
-  "cleanupPeriodDays": 60
+  "cleanupPeriodDays": 60,
+
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-paths.sh\"",
+            "timeout": 10,
+            "statusMessage": "Проверка защищённых каталогов"
+          }
+        ]
+      }
+    ],
+
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/go-check.sh\"",
+            "timeout": 60,
+            "statusMessage": "gofmt и go vet"
+          },
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/migration-warn.sh\"",
+            "timeout": 15,
+            "statusMessage": "Проверка синхронности схемы"
+          }
+        ]
+      }
+    ],
+
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/session-context.sh\"",
+            "timeout": 20,
+            "statusMessage": "Сбор контекста проекта"
+          }
+        ]
+      }
+    ]
+  }
 }

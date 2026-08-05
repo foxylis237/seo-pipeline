@@ -1,5 +1,7 @@
 ---
 paths:
+  - "**/integrations/**"
+  - "**/deepseekweb/**"
   - "internal/integrations/**"
   - "internal/llm/deepseekweb/**"
 ---

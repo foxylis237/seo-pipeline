@@ -1,7 +1,9 @@
 ---
 paths:
-  - "internal/llm/**"
+  - "**/llm/**"
+  - "**/prompts/**"
   - "config/config.yaml"
+  - "internal/llm/**"
   - "tasks/task_1/prompts/**"
 ---
 
