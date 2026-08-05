@@ -658,6 +658,48 @@ func (r *ArticleRepository) GetArticleTrace(ctx context.Context, articleID int64
 	return trace, nil
 }
 
+// ListImportedArticles loads every article together with its imported Excel row.
+// Только чтение: сверка переноса Excel → PostgreSQL ничего не меняет.
+func (r *ArticleRepository) ListImportedArticles(ctx context.Context) ([]article.ImportedArticle, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT a.id, a.external_id, a.title, a.status, a.current_step, a.error_message,
+			a.created_at, a.updated_at,
+			i.article_id IS NOT NULL,
+			COALESCE(i.header, ''), COALESCE(i.image_slug, ''), COALESCE(i.meta_description, ''),
+			COALESCE(i.key_word, ''), COALESCE(i.reference_url, ''), COALESCE(i.category, ''),
+			COALESCE(i.author, ''), COALESCE(i.links, ''), COALESCE(i.professions, '')
+		FROM articles AS a
+		LEFT JOIN article_inputs AS i ON i.article_id = a.id
+		ORDER BY a.id
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("получить импортированные статьи: %w", err)
+	}
+	defer rows.Close()
+
+	imported := make([]article.ImportedArticle, 0)
+	for rows.Next() {
+		var item article.ImportedArticle
+		if err := rows.Scan(
+			&item.Article.ID, &item.Article.ExternalID, &item.Article.Title, &item.Article.Status,
+			&item.Article.CurrentStep, &item.Article.ErrorMessage,
+			&item.Article.CreatedAt, &item.Article.UpdatedAt, &item.HasInput,
+			&item.Input.Header, &item.Input.ImageSlug, &item.Input.MetaDescription,
+			&item.Input.Keyword, &item.Input.ReferenceURL, &item.Input.Category,
+			&item.Input.Author, &item.Input.Links, &item.Input.Professions,
+		); err != nil {
+			return nil, fmt.Errorf("прочитать импортированную статью: %w", err)
+		}
+		item.Article.Slug = item.Input.ImageSlug
+		item.Input.Title = item.Article.Title
+		imported = append(imported, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("получить импортированные статьи: %w", err)
+	}
+	return imported, nil
+}
+
 // GetArticleInput loads the imported Excel row of one article. It is used by prepare
 // diagnostics to record what the run started from.
 func (r *ArticleRepository) GetArticleInput(ctx context.Context, articleID int64) (article.Input, error) {
@@ -1101,6 +1143,40 @@ func (r *ArticleRepository) SavePreparedResearch(
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("завершить сохранение Arsenkin: %w", err)
+	}
+	return nil
+}
+
+// ResetGenerationState returns one article to the state right after import: пути к
+// сгенерированным файлам и метаданные удаляются, статус и этап сбрасываются.
+//
+// Импортированная строка article_inputs и собранный research не трогаются: пересоздаётся
+// только то, что произвела генерация.
+func (r *ArticleRepository) ResetGenerationState(ctx context.Context, articleID int64) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("начать сброс состояния статьи %d: %w", articleID, err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	for _, table := range []string{"article_outputs", "article_metadata"} {
+		if _, err := tx.Exec(ctx, "DELETE FROM "+table+" WHERE article_id = $1", articleID); err != nil {
+			return fmt.Errorf("очистить %s статьи %d: %w", table, articleID, err)
+		}
+	}
+	result, err := tx.Exec(ctx, `
+		UPDATE articles
+		SET status = 'pending', current_step = NULL, error_message = NULL, updated_at = NOW()
+		WHERE id = $1
+	`, articleID)
+	if err != nil {
+		return fmt.Errorf("сбросить состояние статьи %d: %w", articleID, err)
+	}
+	if result.RowsAffected() != 1 {
+		return fmt.Errorf("статья %d не найдена при сбросе состояния", articleID)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("завершить сброс состояния статьи %d: %w", articleID, err)
 	}
 	return nil
 }

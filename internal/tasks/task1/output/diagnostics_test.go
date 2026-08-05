@@ -209,3 +209,63 @@ func TestResetDiagnosticsRejectsPathEscapes(t *testing.T) {
 		t.Fatal("пустой slug принят")
 	}
 }
+
+func TestResetGeneratedArtifactsKeepsPrepareAndLogs(t *testing.T) {
+	root := t.TempDir()
+	writer := NewWriter(root)
+	if _, err := writer.SaveStructure("38", "tema", "промпт структуры", "структура"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writer.SaveArticle("38", "tema", "промпт статьи", "статья", "model"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writer.SaveHTML("38", "tema", "промпт html", "<h1>Тема</h1><p>Текст</p>"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writer.SaveResult("38", "tema", "итог"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writer.SaveDiagnostics("38", "tema", PrepareSubdirectory, "arsenkin.json", map[string]any{"lsi": 3}); err != nil {
+		t.Fatal(err)
+	}
+	logFile, _, err := writer.OpenArticleLog("38", "tema", "prepare.log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := logFile.WriteString("история прогона\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := logFile.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	removed, err := writer.ResetGeneratedArtifacts("38", "tema")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(removed) != 4 {
+		t.Fatalf("удалено %v, ожидались generated, prompts, article.html, result.md", removed)
+	}
+	for _, gone := range []string{"generated", "prompts", "article.html", "result.md"} {
+		if _, err := os.Stat(filepath.Join(root, "38-tema", gone)); !os.IsNotExist(err) {
+			t.Errorf("%s не удалён: %v", gone, err)
+		}
+	}
+	for _, kept := range []string{
+		filepath.Join("38-tema", PrepareSubdirectory, "arsenkin.json"),
+		filepath.Join("38-tema", LogsSubdirectory, "prepare.log"),
+	} {
+		if _, err := os.Stat(filepath.Join(root, kept)); err != nil {
+			t.Errorf("сброс задел %s: %v", kept, err)
+		}
+	}
+
+	// Повторный сброс и сброс статьи без сгенерированных файлов ошибкой не считаются.
+	second, err := writer.ResetGeneratedArtifacts("38", "tema")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(second) != 0 {
+		t.Fatalf("повторный сброс удалил %v", second)
+	}
+}

@@ -1155,3 +1155,112 @@ func TestClassifyErrorOperationIsProviderNeutral(t *testing.T) {
 		t.Fatal("неизвестная ошибка должна оставаться без операции")
 	}
 }
+
+func TestListImportedArticlesReturnsExcelRowWithArticle(t *testing.T) {
+	repository, pool := newTestRepository(t)
+	ctx := context.Background()
+	created, _, err := repository.Import(ctx, article.Input{
+		ExcelID: 61, Title: "Как стать логопедом", Header: "Заголовок H1",
+		ImageSlug: "kak-stat-logopedom", MetaDescription: "описание", Keyword: "логопед",
+		ReferenceURL: "https://example.test/logoped", Category: "Педагогика",
+		Author: "Иванова", Links: "/professions/logoped", Professions: "Логопед",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := repository.Import(ctx, article.Input{
+		ExcelID: 62, Title: "Без строки ввода", ImageSlug: "bez-vvoda", ReferenceURL: "https://example.test/x",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Статья без article_inputs: так выглядит потерянная при импорте связь.
+	if _, err := pool.Exec(ctx, "DELETE FROM article_inputs WHERE article_id <> $1", created.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	imported, err := repository.ListImportedArticles(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(imported) != 2 {
+		t.Fatalf("получено %d статей, ожидалось 2", len(imported))
+	}
+	first := imported[0]
+	if !first.HasInput {
+		t.Fatal("строка article_inputs не найдена для импортированной статьи")
+	}
+	if first.Article.ExternalID != "61" || first.Article.Title != "Как стать логопедом" {
+		t.Fatalf("статья = %+v", first.Article)
+	}
+	want := article.Input{
+		Title: "Как стать логопедом", Header: "Заголовок H1", ImageSlug: "kak-stat-logopedom",
+		MetaDescription: "описание", Keyword: "логопед", ReferenceURL: "https://example.test/logoped",
+		Category: "Педагогика", Author: "Иванова", Links: "/professions/logoped", Professions: "Логопед",
+	}
+	if first.Input != want {
+		t.Fatalf("поля ввода = %+v, ожидались %+v", first.Input, want)
+	}
+	if imported[1].HasInput {
+		t.Fatal("статья без article_inputs помечена как имеющая строку ввода")
+	}
+}
+
+func TestResetGenerationStateKeepsInputsAndResearch(t *testing.T) {
+	repository, pool := newTestRepository(t)
+	ctx := context.Background()
+	created, err := repository.Create(ctx, article.Input{
+		ExcelID: 71, Title: "Как стать логопедом", ImageSlug: "kak-stat-logopedom",
+		Keyword: "логопед", ReferenceURL: "https://example.test/logoped", Category: "Педагогика",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.SavePreparedResearch(ctx, created.ID,
+		[]string{"практика логопеда"}, []article.KeywordFrequency{{Query: "практика логопеда", Frequency: 100}},
+		[]string{"речь"}, "H1 Логопед"); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.SaveStructurePath(ctx, created.ID, "71-kak-stat-logopedom/generated/structure.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.SaveArticleInfo(ctx, created.ID, "сырой ответ", article.ArticleInfo{Tags: "Метки"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := repository.ResetGenerationState(ctx, created.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	selected, err := repository.GetArticleByExternalID(ctx, "71")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selected.Status != "pending" || selected.CurrentStep != nil || selected.ErrorMessage != nil {
+		t.Fatalf("состояние статьи = %+v", selected)
+	}
+	var outputs, metadata int
+	if err := pool.QueryRow(ctx, `
+		SELECT (SELECT count(*) FROM article_outputs WHERE article_id = $1),
+			(SELECT count(*) FROM article_metadata WHERE article_id = $1)
+	`, created.ID).Scan(&outputs, &metadata); err != nil {
+		t.Fatal(err)
+	}
+	if outputs != 0 || metadata != 0 {
+		t.Fatalf("после сброса остались outputs=%d metadata=%d", outputs, metadata)
+	}
+	// Импортированная строка и research должны пережить сброс.
+	input, err := repository.GetArticleInput(ctx, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if input.Keyword != "логопед" || input.ReferenceURL != "https://example.test/logoped" || input.Category != "Педагогика" {
+		t.Fatalf("данные импорта изменились: %+v", input)
+	}
+	prepared, err := repository.HasPreparedResearch(ctx, "71")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !prepared {
+		t.Fatal("research Keys.so/Arsenkin удалён при сбросе")
+	}
+}
