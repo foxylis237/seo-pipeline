@@ -754,3 +754,41 @@ func pipelineTestInput() article.GenerationInput {
 		LSIWords: []string{"слово"}, Professions: "Профессия логопеда", Links: "/professions/logoped",
 	}
 }
+
+func TestRunStructureByExternalIDCallsOnlyStructure(t *testing.T) {
+	root := t.TempDir()
+	writer := articleoutput.NewWriter(root)
+	repository := &fakePipelineRepository{input: pipelineTestInput()}
+	client := successfulPipelineClient()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	pipeline := NewPipeline(repository, testGenerationRouter(client, logger), successfulChatFactory(), writer, logger)
+
+	output, err := pipeline.RunStructureByExternalID(context.Background(), "37")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(client.calls, ",") != "structure" {
+		t.Fatalf("LLM calls = %v, want only structure", client.calls)
+	}
+	if !repository.generationBegun {
+		t.Fatal("статья не переведена в состояние генерации")
+	}
+	if output.Paths.StructurePath == "" || repository.structurePath != output.Paths.StructurePath {
+		t.Fatalf("structure path = %q, saved = %q", output.Paths.StructurePath, repository.structurePath)
+	}
+	if repository.articlePath != "" || repository.reviewPath != "" || repository.htmlPath != "" {
+		t.Fatalf("выполнены лишние стадии: article=%q review=%q html=%q",
+			repository.articlePath, repository.reviewPath, repository.htmlPath)
+	}
+}
+
+func TestRunStructureByExternalIDStopsWhenArticleIsAnotherOne(t *testing.T) {
+	repository := &fakePipelineRepository{input: pipelineTestInput()}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	pipeline := NewPipeline(repository, testGenerationRouter(successfulPipelineClient(), logger),
+		successfulChatFactory(), articleoutput.NewWriter(t.TempDir()), logger)
+
+	if _, err := pipeline.RunStructureByExternalID(context.Background(), "38"); err == nil {
+		t.Fatal("загружена чужая статья, но ошибки нет")
+	}
+}

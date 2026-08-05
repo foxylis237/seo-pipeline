@@ -19,6 +19,7 @@ import (
 	"github.com/foxylis237/seo-pipeline/internal/llm/deepseekweb"
 	llmgemini "github.com/foxylis237/seo-pipeline/internal/llm/gemini"
 	"github.com/foxylis237/seo-pipeline/internal/storage"
+	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/article"
 	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/diagnostics"
 	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/generation"
 	articleoutput "github.com/foxylis237/seo-pipeline/internal/tasks/task1/output"
@@ -263,12 +264,54 @@ func main() {
 				err = runGenerate(ctx, generationPipeline, command.ExternalID)
 			}
 		case "run":
+			if command.Plan {
+				err = runPipelinePlan(ctx, articleRepository, os.Stdout, command.ExternalID)
+				break
+			}
+			// Полный пайплайн с возобновлением: этапы выполняются существующими сервисами,
+			// раннер лишь выбирает, с какого продолжить.
+			execute := func(ctx context.Context, stage pipelineStage, externalID string) error {
+				switch stage {
+				case stagePrepare:
+					if validateErr := cfg.ValidatePrepare(); validateErr != nil {
+						return validateErr
+					}
+					return runPrepare(ctx, articleRepository, cfg, taskLogger, writer, logRouter, externalID)
+				case stageStructure:
+					_, stageErr := generationPipeline.RunStructureByExternalID(ctx, externalID)
+					return stageErr
+				case stageArticle:
+					return runArticle(ctx, generationPipeline, externalID)
+				case stageReview:
+					return runReview(ctx, generationPipeline, externalID)
+				case stageFix:
+					return runFix(ctx, generationPipeline, externalID)
+				case stageHTML:
+					return runHTML(ctx, generationPipeline, externalID)
+				case stageResult:
+					if _, buildErr := resultService.Build(ctx, externalID); buildErr != nil {
+						return buildErr
+					}
+					resultInput, loadErr := articleRepository.GetResultInput(ctx, externalID)
+					if loadErr != nil {
+						return loadErr
+					}
+					return articleRepository.CompleteGeneration(ctx, resultInput.Article.ID)
+				default:
+					return fmt.Errorf("неизвестный этап пайплайна %q", stage)
+				}
+			}
+			runOne := func(ctx context.Context, externalID string) error {
+				return runFullPipeline(ctx, articleRepository, execute, taskLogger, externalID)
+			}
 			if command.ExternalID == "" {
-				err = runAllDemo(ctx, articleRepository, func(ctx context.Context, externalID string) error {
-					return runQuickDemoGenerate(ctx, generationPipeline, externalID)
-				}, taskLogger)
+				var pending []article.Article
+				if pending, err = incompleteArticles(ctx, articleRepository); err != nil {
+					break
+				}
+				err = runSelectedArticles(ctx, pending, "run", runOne, taskLogger)
 			} else {
-				err = runQuickDemoGenerate(ctx, generationPipeline, command.ExternalID)
+				err = runOne(ctx, command.ExternalID)
 			}
 		case "demo-generate":
 			if command.ExternalID == "" {
@@ -415,10 +458,14 @@ type taskCommand struct {
 	ExternalID  string
 	ImportLimit int
 	DryRun      bool
+	// Plan печатает план возобновления, ничего не выполняя. Не путать с DryRun: тот
+	// прогоняет офлайн-пайплайн на отдельной базе.
+	Plan bool
 }
 
 func parseCommand(args []string) (taskCommand, error) {
 	dryRun := false
+	plan := false
 	filtered := make([]string, 0, len(args))
 	for index, arg := range args {
 		if index > 0 && arg == "--dry-run" {
@@ -426,6 +473,13 @@ func parseCommand(args []string) (taskCommand, error) {
 				return taskCommand{}, fmt.Errorf("--dry-run may be specified only once")
 			}
 			dryRun = true
+			continue
+		}
+		if index > 0 && arg == "--plan" {
+			if plan {
+				return taskCommand{}, fmt.Errorf("--plan may be specified only once")
+			}
+			plan = true
 			continue
 		}
 		filtered = append(filtered, arg)
@@ -437,7 +491,14 @@ func parseCommand(args []string) (taskCommand, error) {
 	if dryRun && (command.Name != "run" || command.ExternalID != "") {
 		return taskCommand{}, fmt.Errorf("--dry-run is supported only for task-1 run without external_id")
 	}
+	if plan && command.Name != "run" {
+		return taskCommand{}, fmt.Errorf("--plan is supported only for task-1 run")
+	}
+	if plan && dryRun {
+		return taskCommand{}, fmt.Errorf("--plan and --dry-run cannot be combined")
+	}
 	command.DryRun = dryRun
+	command.Plan = plan
 	return command, nil
 }
 

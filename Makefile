@@ -41,6 +41,7 @@ help: ## Show all available commands
 	@printf '  %-32s %s\n' 'make task-1 fix [ID]' 'Fix pending reviewed articles or one article'
 	@printf '  %-32s %s\n' 'make task-1 html [ID]' 'Generate pending HTML or process one article'
 	@printf '  %-32s %s\n' 'make task-1 result [ID]' 'Build pending results or process one article'
+	@printf '  %-32s %s\n' 'make task-1 run plan [ID]' 'Show where the pipeline would resume, without running it'
 	@printf '  %-32s %s\n' 'make task-1 deepseek-login' 'Open Chromium for manual DeepSeek login'
 	@printf '\nProject commands:\n'
 	@awk 'BEGIN {FS = ":.*## "} /^(docker|test|fmt|vet|lint|build)[a-zA-Z0-9_-]*:.*## / {printf "  make %-27s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -58,7 +59,8 @@ task-1: ## Run a task_1 operation
 		printf 'Unknown task_1 operation: %s\n\nRun make help to see all task_1 operations.\n' "$(TASK_OPERATION)"; \
 		exit 1; \
 	fi
-	@if [ -n "$(strip $(TASK_EXTRA_ARGS))" ]; then \
+	@if [ -n "$(strip $(TASK_EXTRA_ARGS))" ] && \
+		! { [ "$(TASK_OPERATION)" = 'run' ] && [ "$(TASK_ARG)" = 'plan' ] && [ $(words $(TASK_EXTRA_ARGS)) -eq 1 ]; }; then \
 		printf 'Too many arguments.\n\nExample:\n\nmake task-1 $(TASK_OPERATION) $(TASK_ARG)\n'; \
 		exit 1; \
 	fi
@@ -68,7 +70,8 @@ task-1: ## Run a task_1 operation
 		exit 1; \
 	fi
 	@if printf ' %s ' "$(OPTIONAL_ARGUMENT_OPERATIONS)" | grep -Fq " $(TASK_OPERATION) " && \
-		[ -n "$(TASK_ARG)" ] && ! printf '%s' "$(TASK_ARG)" | grep -Eq '^[1-9][0-9]*$$'; then \
+		[ -n "$(TASK_ARG)" ] && [ "$(TASK_ARG)" != 'plan' ] && \
+		! printf '%s' "$(TASK_ARG)" | grep -Eq '^[1-9][0-9]*$$'; then \
 		printf 'ID must be a positive integer.\n\nExample:\n\nmake task-1 $(TASK_OPERATION) 37\n'; \
 		exit 1; \
 	fi
@@ -85,6 +88,8 @@ task-1: ## Run a task_1 operation
 		$(GO) test ./... && \
 		$(GO) vet ./... && \
 		APP_ENV=test DRY_RUN_DATABASE_URL='$(DRY_RUN_DATABASE_URL)' $(CLI) run --dry-run; \
+	elif [ "$(TASK_OPERATION)" = 'run' ] && [ "$(TASK_ARG)" = 'plan' ]; then \
+		$(CLI) run --plan $(TASK_EXTRA_ARGS); \
 	elif [ -n "$(TASK_ARG)" ]; then \
 		$(CLI) $(TASK_OPERATION) "$(TASK_ARG)"; \
 	else \
@@ -150,7 +155,8 @@ build: ## Build the CLI binary
 # Treat operation and argument words as task-1 parameters, not separate targets.
 %:
 	@if [ "$(firstword $(MAKECMDGOALS))" = 'task-1' ] && \
-		{ [ "$@" = "$(TASK_OPERATION)" ] || [ "$@" = "$(TASK_ARG)" ]; }; then \
+		{ [ "$@" = "$(TASK_OPERATION)" ] || [ "$@" = "$(TASK_ARG)" ] || \
+			{ [ "$(TASK_ARG)" = 'plan' ] && [ "$@" = "$(strip $(TASK_EXTRA_ARGS))" ]; }; }; then \
 		:; \
 	else \
 		printf 'Unknown command: %s\n\nRun make help to see available commands.\n' "$@"; \
