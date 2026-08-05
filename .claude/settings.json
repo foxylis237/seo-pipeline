@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+
+  "permissions": {
+    "defaultMode": "default",
+
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(../.env)",
+      "Read(../.env.*)",
+      "Read(**/*.env)",
+      "Read(./data/**)",
+      "Read(**/keysso-storage-state.json)",
+      "Read(**/Cookies)",
+      "Bash(rm -rf /*)",
+      "Bash(git push --force*)",
+      "Bash(git reset --hard*)"
+    ],
+
+    "ask": [
+      "Bash(make task-1 prepare*)",
+      "Bash(make task-1 generate*)",
+      "Bash(make task-1 demo-generate*)",
+      "Bash(make task-1 run*)",
+      "Bash(make task-1 retry*)",
+      "Bash(make task-1 article*)",
+      "Bash(make task-1 info*)",
+      "Bash(make task-1 review*)",
+      "Bash(make task-1 fix*)",
+      "Bash(make task-1 html*)",
+      "Bash(make task-1 deepseek-login*)",
+      "Bash(go run ./cmd/seo-pipeline*)",
+      "Bash(docker compose down*)",
+      "Bash(git push*)",
+      "Bash(git commit*)"
+    ],
+
+    "allow": [
+      "Bash(go build*)",
+      "Bash(go test*)",
+      "Bash(go vet*)",
+      "Bash(go fmt*)",
+      "Bash(go list*)",
+      "Bash(go doc*)",
+      "Bash(go mod tidy)",
+      "Bash(gofmt*)",
+      "Bash(golangci-lint run*)",
+      "Bash(gopls*)",
+      "Bash(make help)",
+      "Bash(make test)",
+      "Bash(make test-race)",
+      "Bash(make lint)",
+      "Bash(make lint-fix)",
+      "Bash(make vet)",
+      "Bash(make fmt)",
+      "Bash(make build)",
+      "Bash(make docker-ps)",
+      "Bash(make docker-logs*)",
+      "Bash(docker compose ps*)",
+      "Bash(docker compose logs*)",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(git show*)",
+      "Bash(git branch*)",
+      "Bash(git add*)",
+      "Bash(git stash list*)"
+    ]
+  },
+
+  "enabledMcpjsonServers": ["gopls", "chrome-devtools"],
+
+  "includeCoAuthoredBy": false,
+
+  "cleanupPeriodDays": 60
+}

@@ -1,0 +1,75 @@
+# golangci-lint v2 configuration.
+#
+# Набор подобран под конкретные находки аудита, а не «включить всё»:
+# линтер, который на первом запуске выдаёт стену шума, перестают запускать.
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  # standard = errcheck, govet, ineffassign, staticcheck, unused
+  default: standard
+  enable:
+    # Ошибка вместо строкового матчинга: ловит err.Error()-сравнения и потерянный %w.
+    - errorlint
+    # Незакрытые response.Body — актуально для OpenAI-совместимого клиента.
+    - bodyclose
+    # Потерянный context: функции, которые принимают ctx, но передают context.Background().
+    - contextcheck
+    # Проглоченные ошибки в возвратах.
+    - nilerr
+    # Копипаста — прямое подтверждение кластеров дублирования из аудита.
+    - dupl
+    # Слишком большие функции.
+    - gocyclo
+    - gocognit
+    # Дешёвые проверки без ложных срабатываний.
+    - misspell
+    - unconvert
+    - wastedassign
+    - nakedret
+
+  settings:
+    dupl:
+      # Подобрано эмпирически: 100 ловит реальные кластеры (Stage*, Save*Path,
+      # Run*ByExternalID), 150+ не ловит ничего, ниже 80 начинается шум
+      # на одинаковых guard-блоках.
+      threshold: 100
+    gocyclo:
+      min-complexity: 20
+    gocognit:
+      min-complexity: 30
+    errcheck:
+      check-type-assertions: true
+    misspell:
+      locale: US
+
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - std-error-handling
+    rules:
+      # В тестах повторяющиеся таблицы и фикстуры — норма.
+      - path: _test\.go
+        linters:
+          - dupl
+          - gocyclo
+          - gocognit
+          - errcheck
+      # Диагностические Fprint в CLI-выводе не проверяем на ошибку записи.
+      - path: cmd/seo-pipeline/
+        linters:
+          - errcheck
+        source: fmt\.Fprint
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/foxylis237/seo-pipeline
