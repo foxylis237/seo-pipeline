@@ -3,6 +3,7 @@ SHELL := /bin/sh
 .DEFAULT_GOAL := help
 
 GO ?= go
+GOLANGCI_LINT ?= golangci-lint
 DOCKER_COMPOSE ?= docker compose
 TASK := task-1
 CLI := $(GO) run ./cmd/seo-pipeline $(TASK)
@@ -13,11 +14,11 @@ DRY_RUN_DATABASE_URL ?= postgres://seo:seo@localhost:5433/seo_dry_run?sslmode=di
 TASK_OPERATION := $(word 2,$(MAKECMDGOALS))
 TASK_ARG := $(word 3,$(MAKECMDGOALS))
 TASK_EXTRA_ARGS := $(wordlist 4,$(words $(MAKECMDGOALS)),$(MAKECMDGOALS))
-TASK_OPERATIONS := import errors retry run dry-run prepare generate demo-generate article info review fix html result
+TASK_OPERATIONS := import errors retry run dry-run prepare generate demo-generate article info review fix html result deepseek-login
 OPTIONAL_ARGUMENT_OPERATIONS := errors retry run prepare generate demo-generate article info review fix html result
 
 .PHONY: help task-1 docker-up docker-start docker-stop docker-down docker-restart docker-logs docker-ps
-.PHONY: test test-race fmt vet build
+.PHONY: test test-race fmt vet lint lint-fix build
 
 # ----------------------------------------------------
 # Help
@@ -40,8 +41,9 @@ help: ## Show all available commands
 	@printf '  %-32s %s\n' 'make task-1 fix [ID]' 'Fix pending reviewed articles or one article'
 	@printf '  %-32s %s\n' 'make task-1 html [ID]' 'Generate pending HTML or process one article'
 	@printf '  %-32s %s\n' 'make task-1 result [ID]' 'Build pending results or process one article'
+	@printf '  %-32s %s\n' 'make task-1 deepseek-login' 'Open Chromium for manual DeepSeek login'
 	@printf '\nProject commands:\n'
-	@awk 'BEGIN {FS = ":.*## "} /^(docker|test|fmt|vet|build)[a-zA-Z0-9_-]*:.*## / {printf "  make %-27s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ":.*## "} /^(docker|test|fmt|vet|lint|build)[a-zA-Z0-9_-]*:.*## / {printf "  make %-27s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 # ----------------------------------------------------
 # task_1
@@ -72,6 +74,10 @@ task-1: ## Run a task_1 operation
 	fi
 	@if [ "$(TASK_OPERATION)" = 'dry-run' ] && [ -n "$(TASK_ARG)" ]; then \
 		printf 'dry-run does not accept arguments.\n\nExample:\n\nmake task-1 dry-run\n'; \
+		exit 1; \
+	fi
+	@if [ "$(TASK_OPERATION)" = 'deepseek-login' ] && [ -n "$(TASK_ARG)" ]; then \
+		printf 'deepseek-login does not accept arguments.\n\nExample:\n\nmake task-1 deepseek-login\n'; \
 		exit 1; \
 	fi
 	@if [ "$(TASK_OPERATION)" = 'dry-run' ]; then \
@@ -126,6 +132,12 @@ fmt: ## Format all Go packages
 
 vet: ## Run Go static analysis
 	$(GO) vet ./...
+
+lint: ## Run golangci-lint using .golangci.yml
+	$(GOLANGCI_LINT) run ./...
+
+lint-fix: ## Run golangci-lint and apply the fixes it can make safely
+	$(GOLANGCI_LINT) run --fix ./...
 
 # ----------------------------------------------------
 # Build

@@ -4,6 +4,7 @@
 data/keysso-storage-state.json
 data/keysso-browser-profile/
 data/arsenkin-browser-profile/
+data/browser/deepseek/
 
 # Input
 input/**/*.xlsx
@@ -28,3 +29,14 @@ tasks/*/output/
 # Build
 bin/
 dist/
+# Binary produced by `go build` without -o at the repository root.
+/seo-pipeline
+
+# Test and coverage artifacts
+*.test
+coverage.out
+coverage.html
+
+# Claude Code personal scope (project scope is committed on purpose)
+.claude/settings.local.json
+CLAUDE.local.md
