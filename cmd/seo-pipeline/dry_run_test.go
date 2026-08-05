@@ -23,7 +23,7 @@ func TestDryRunClientProvidesEveryStatelessStage(t *testing.T) {
 }
 
 func TestDryRunChatProvidesArticleAndParseableInfo(t *testing.T) {
-	chat, err := (dryRunClient{}).NewChat(context.Background())
+	chat, err := (dryRunClient{}).NewChat(context.Background(), 7)
 	if err != nil {
 		t.Fatal(err)
 	}

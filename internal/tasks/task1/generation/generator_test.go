@@ -12,7 +12,7 @@ type fakeGenerator struct {
 	results []llm.Response
 }
 
-func (g fakeGenerator) NewChat(context.Context) (llm.Chat, error) {
+func (g fakeGenerator) NewChat(context.Context, int64) (llm.Chat, error) {
 	results := append([]llm.Response(nil), g.results...)
 	return &fakeChat{results: results}, nil
 }
@@ -44,11 +44,11 @@ func (c *fakeChat) Close() error {
 
 func TestFakeGeneratorCreatesIndependentChats(t *testing.T) {
 	factory := fakeGenerator{results: []llm.Response{{Text: "structure"}, {Text: "article"}}}
-	first, err := factory.NewChat(context.Background())
+	first, err := factory.NewChat(context.Background(), 7)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := factory.NewChat(context.Background())
+	second, err := factory.NewChat(context.Background(), 7)
 	if err != nil {
 		t.Fatal(err)
 	}

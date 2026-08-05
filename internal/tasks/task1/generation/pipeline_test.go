@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -25,15 +26,17 @@ type fakeLLMClient struct {
 }
 
 type recordingChatFactory struct {
-	results []llm.Response
-	errAt   int
-	prompts []string
-	chats   int
-	closed  int
+	results    []llm.Response
+	errAt      int
+	prompts    []string
+	chats      int
+	closed     int
+	articleIDs []int64
 }
 
-func (f *recordingChatFactory) NewChat(context.Context) (llm.Chat, error) {
+func (f *recordingChatFactory) NewChat(_ context.Context, articleID int64) (llm.Chat, error) {
 	f.chats++
+	f.articleIDs = append(f.articleIDs, articleID)
 	return &recordingChat{factory: f}, nil
 }
 
@@ -145,6 +148,7 @@ type fakePipelineRepository struct {
 	demoCompleted      bool
 	demoStateSaved     bool
 	completionCalls    int
+	trace              article.Trace
 }
 
 func (r *fakePipelineRepository) GetDemoGenerationInput(_ context.Context, _ string) (article.GenerationInput, error) {
@@ -155,6 +159,22 @@ func (r *fakePipelineRepository) CompleteGeneration(_ context.Context, _ int64) 
 	r.demoCompleted = true
 	r.completionCalls++
 	return nil
+}
+
+func (r *fakePipelineRepository) GetArticleTrace(_ context.Context, articleID int64) (article.Trace, error) {
+	if r.trace.ArticleID != 0 {
+		return r.trace, nil
+	}
+	// PostgreSQL отдаёт одну и ту же строку articles независимо от того, какой запрос
+	// репозитория её загрузил, поэтому подставляем ту статью, что настроена в тесте.
+	stored := r.input.Article
+	if stored.ExternalID == "" {
+		stored = r.savedInput.Article
+	}
+	return article.Trace{
+		ArticleID: articleID, ExternalID: stored.ExternalID, Title: stored.Title,
+		Keyword: "ключ", ReferenceURL: "https://example.test/reference",
+	}, nil
 }
 
 func (r *fakePipelineRepository) BeginGeneration(_ context.Context, _ int64) error {
@@ -620,6 +640,9 @@ func TestRunArticleByExternalIDGeneratesArticleAndInfoInOneChat(t *testing.T) {
 	}
 	if chatFactory.chats != 1 || chatFactory.closed != 1 || len(chatFactory.prompts) != 2 {
 		t.Fatalf("chat: created=%d closed=%d prompts=%d", chatFactory.chats, chatFactory.closed, len(chatFactory.prompts))
+	}
+	if !reflect.DeepEqual(chatFactory.articleIDs, []int64{input.Article.ID}) {
+		t.Fatalf("chat article ids = %v, want [%d]", chatFactory.articleIDs, input.Article.ID)
 	}
 	if !strings.Contains(chatFactory.prompts[0], "Сохранённая структура") {
 		t.Fatalf("article prompt = %q", chatFactory.prompts[0])

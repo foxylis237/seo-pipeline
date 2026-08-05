@@ -7,7 +7,8 @@ import (
 	"github.com/foxylis237/seo-pipeline/internal/llm"
 )
 
-// ChatFactory creates an isolated conversation for one article.
+// ChatFactory creates an isolated conversation for one article. The article id travels with
+// the chat so that every LLM request it makes is attributable to the article in the logs.
 type ChatFactory interface {
-	NewChat(ctx context.Context) (llm.Chat, error)
+	NewChat(ctx context.Context, articleID int64) (llm.Chat, error)
 }

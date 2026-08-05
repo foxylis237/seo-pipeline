@@ -98,6 +98,9 @@ EDA и Vertical Slice сейчас не внедряем, но решения н
 - Процедуры — `/` (skills). Начать с `/grill` для нетривиальной задачи и `/ship` перед коммитом.
   Архитектурный разбор области — `/arch-review`. Проектные процедуры: `/stage-add`,
   `/db-check`, `/selector-fix`, `/prompt-tune`, `/prod-ready`.
+- Диагностика прогона — в каталоге самой статьи: `<external_id>-<slug>/prepare/`
+  (`input.json`, `keysso.json`, `arsenkin.json`, `prepare-report.json`) и
+  `<external_id>-<slug>/logs/<операция>.log`. Пишет приложение, `tee` не нужен.
 - Единый язык — `docs/CONTEXT.md`.
 - Архитектурные решения — `docs/adr/`. Конфигурация Claude Code целиком живёт в `.claude/`;
   универсальный слой в `~/.claude/` сюда намеренно не подключён — см. ADR-0007.

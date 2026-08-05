@@ -19,11 +19,22 @@ type fakeStructureRepository struct {
 	savedID   int64
 	savedPath string
 	err       error
+	trace     article.Trace
 }
 
 func (r *fakeStructureRepository) SaveStructurePath(_ context.Context, articleID int64, path string) error {
 	r.savedID, r.savedPath = articleID, path
 	return r.err
+}
+
+func (r *fakeStructureRepository) GetArticleTrace(_ context.Context, articleID int64) (article.Trace, error) {
+	if r.trace.ArticleID != 0 {
+		return r.trace, nil
+	}
+	return article.Trace{
+		ArticleID: articleID, ExternalID: "37", Title: "Тема",
+		Keyword: "ключ", ReferenceURL: "https://example.test/reference",
+	}, nil
 }
 
 func TestStructureServiceDatabaseErrorKeepsPreviousFiles(t *testing.T) {

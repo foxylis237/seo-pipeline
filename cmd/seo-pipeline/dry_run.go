@@ -31,7 +31,7 @@ func (dryRunClient) Generate(_ context.Context, request llm.Request) (llm.Respon
 	return llm.Response{Text: text, Model: request.Model, InputTokens: 120, OutputTokens: 80}, nil
 }
 
-func (dryRunClient) NewChat(context.Context) (llm.Chat, error) {
+func (dryRunClient) NewChat(context.Context, int64) (llm.Chat, error) {
 	return &dryRunChat{responses: []llm.Response{
 		{Text: dryRunArticle, Model: dryRunModelPrefix + "article", InputTokens: 240, OutputTokens: 420},
 		{Text: dryRunInfo, Model: dryRunModelPrefix + "info", InputTokens: 80, OutputTokens: 60},

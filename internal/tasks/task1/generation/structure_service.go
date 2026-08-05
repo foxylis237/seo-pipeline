@@ -8,11 +8,13 @@ import (
 
 	"github.com/foxylis237/seo-pipeline/internal/llm"
 	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/article"
+	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/diagnostics"
 	articleoutput "github.com/foxylis237/seo-pipeline/internal/tasks/task1/output"
 )
 
 type StructureRepository interface {
 	SaveStructurePath(ctx context.Context, articleID int64, structurePath string) error
+	GetArticleTrace(ctx context.Context, articleID int64) (article.Trace, error)
 }
 
 type StructureWriter interface {
@@ -40,7 +42,19 @@ func NewStructureService(repository StructureRepository, router *llm.Router, wri
 func (s *StructureService) Generate(ctx context.Context, input article.GenerationInput) (StructureOutput, error) {
 	started := time.Now()
 	logger := s.logger.With("article_id", input.Article.ID, "external_id", input.Article.ExternalID)
-	logger.Info("генерация структуры запущена", "stage", "structure_generation")
+	logger.Info("генерация структуры запущена", "stage", "structure_generation",
+		"title", input.Article.Title,
+		"competitor_structure_fingerprint", diagnostics.Fingerprint(input.CompetitorStructure),
+		"competitor_structure_length", len([]rune(input.CompetitorStructure)),
+	)
+	trace, err := articleTrace(ctx, logger, s.repository, input)
+	if err != nil {
+		logger.Error("идентичность статьи не подтверждена", "stage", "verify_article_identity", "error", err)
+		return StructureOutput{}, fmt.Errorf("подтвердить идентичность статьи external_id %q: %w", input.Article.ExternalID, err)
+	}
+	diagnostics.LogStep(s.logger, "llm_structure", "before", trace,
+		"competitor_structure_fingerprint", diagnostics.Fingerprint(input.CompetitorStructure),
+	)
 
 	result, err := s.router.Generate(ctx, llm.Call{Stage: "structure", ArticleID: input.Article.ID, Data: struct {
 		Title     string
@@ -65,5 +79,10 @@ func (s *StructureService) Generate(ctx context.Context, input article.Generatio
 		return StructureOutput{}, fmt.Errorf("сохранить результат структуры для external_id %q: %w", input.Article.ExternalID, err)
 	}
 	logger.Info("генерация структуры успешно завершена", "stage", "structure_generation_complete", "provider", result.Provider, "model", result.Model, "prompt_size", promptSize, "duration_ms", time.Since(started).Milliseconds(), "input_tokens", result.InputTokens, "output_tokens", result.OutputTokens, "structure_path", paths.StructurePath)
+	diagnostics.LogStep(s.logger, "llm_structure", "after", trace,
+		"prompt_fingerprint", diagnostics.Fingerprint(result.Prompt),
+		"response_fingerprint", diagnostics.Fingerprint(result.Text),
+		"result_path", paths.StructurePath,
+	)
 	return StructureOutput{Structure: result.Text, Result: result.Response, Paths: paths}, nil
 }
