@@ -305,7 +305,7 @@ func TestRecordErrorAppendsHistoryAndSaveErrorKeepsItAfterSuccess(t *testing.T) 
 		t.Fatal(err)
 	}
 	step := "article_generation"
-	operation := "gemini_article_generation"
+	operation := "llm_article_generation"
 	if err := repository.RecordError(ctx, article.ErrorRecord{
 		ArticleID: created.ID, ExternalID: created.ExternalID, Step: &step, Operation: &operation,
 		ErrorMessage: "first timeout", Retryable: true,
@@ -355,7 +355,7 @@ func TestRecordErrorAppendsHistoryAndSaveErrorKeepsItAfterSuccess(t *testing.T) 
 		t.Fatalf("failed state = %q %q %q", status, currentStep, message)
 	}
 	records, err = repository.ListErrors(ctx, created.ExternalID, 50)
-	if err != nil || len(records) != 3 || !records[0].Retryable || records[0].Operation == nil || *records[0].Operation != "gemini_article_generation" {
+	if err != nil || len(records) != 3 || !records[0].Retryable || records[0].Operation == nil || *records[0].Operation != "llm_article_generation" {
 		t.Fatalf("SaveError history = %+v, %v", records, err)
 	}
 	if err := repository.BeginGeneration(ctx, created.ID); err != nil {
@@ -1083,5 +1083,75 @@ func TestGetArticleTraceReadsIdentityOfRequestedArticle(t *testing.T) {
 	}
 	if _, err := repository.GetArticleTrace(ctx, first.ID+second.ID+1000); err == nil {
 		t.Fatal("missing article did not produce an error")
+	}
+}
+
+func TestClassifyErrorOperationIsProviderNeutral(t *testing.T) {
+	step := func(value string) *string { return &value }
+	tests := []struct {
+		name string
+		step *string
+		err  error
+		want string
+	}{
+		{
+			name: "DeepSeek на стадии html",
+			step: step("html_generation"),
+			err:  errors.New(`article_id=1 external_id=37 stage=validate_html: перед HTML обнаружен поясняющий текст`),
+			want: "llm_html_generation",
+		},
+		{
+			name: "OpenRouter на стадии article",
+			step: step("article_generation"),
+			err:  errors.New(`LLM stage "article" provider "openrouter": stage=article_generation: rate limit`),
+			want: "llm_article_generation",
+		},
+		{
+			name: "Gemini на стадии structure",
+			step: step("structure_generation"),
+			err:  errors.New(`stage=structure_generation: provider gemini failed`),
+			want: "llm_structure_generation",
+		},
+		{
+			name: "по этапу, когда в сообщении стадии нет",
+			step: step("metadata_generation"),
+			err:  errors.New("provider deepseek_web: browser closed"),
+			want: "llm_metadata_generation",
+		},
+		{
+			name: "Keys.so остаётся собой",
+			step: step("arsenkin_collection"),
+			err:  errors.New(`Keys.so stage=collect current_url="": timeout`),
+			want: "keysso_collect_keywords",
+		},
+		{
+			name: "Arsenkin остаётся собой",
+			step: step("arsenkin_collection"),
+			err:  errors.New("Arsenkin article_id=1 stage=wordstat: timeout"),
+			want: "arsenkin_request",
+		},
+		{
+			name: "сборка result.md",
+			step: step("final_file_assembly"),
+			err:  errors.New("не удалось собрать result.md"),
+			want: "write_result_file",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			operation := classifyErrorOperation(test.step, test.err)
+			if operation == nil {
+				t.Fatalf("операция не определена")
+			}
+			if *operation != test.want {
+				t.Fatalf("operation = %q, want %q", *operation, test.want)
+			}
+			if strings.Contains(*operation, "gemini") {
+				t.Fatalf("в имени операции остался провайдер: %q", *operation)
+			}
+		})
+	}
+	if classifyErrorOperation(nil, errors.New("неизвестный сбой")) != nil {
+		t.Fatal("неизвестная ошибка должна оставаться без операции")
 	}
 }

@@ -10,8 +10,9 @@ paths:
 - Оборачивать с контекстом действия: `fmt.Errorf("сохранить путь HTML: %w", err)`.
 - Классифицировать через `errors.As` по типам — `llm.StatusError`, `keysso.StageError`,
   `arsenkin.StageError`, `generation.StageError`. **Не** через `strings.Contains` по тексту
-  сообщения: `classifyErrorOperation` и `isRetryableError` так и написаны, и это уже ломается
-  (операции помечаются `gemini_*` даже когда стадию выполнил OpenRouter).
+  сообщения: `classifyErrorOperation` и `isRetryableError` так и написаны. Имена операций
+  уже провайдеро-нейтральны (`llm_*`), но сама классификация по подстрокам остаётся хрупкой:
+  меняется текст ошибки — молча меняется операция.
 - `net.Error.Temporary()` устарел с Go 1.18 — линтер это отмечает в трёх местах.
   Замена: `netErr.Timeout()` плюс явные `errors.Is(err, syscall.ECONNRESET/ECONNREFUSED)`.
 - Одна политика повторов на проект. Сейчас их две: `llm.isTemporary` (по типам, правильная)
