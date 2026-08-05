@@ -33,7 +33,18 @@ SEO Pipeline — CLI-приложение на Go для импорта зада
 | `DRY_RUN_DATABASE_URL` | Отдельная БД dry-run; по умолчанию `seo_dry_run` на `localhost:5433`. |
 | `INPUT_FILE_PATH` | Excel импорта; по умолчанию `input/task_1/input.xlsx`. |
 | `OUTPUT_DIR` | Каталог артефактов; по умолчанию `tasks/task_1/output`. |
-| `GEMINI_API_KEY`, `GEMINI_MODEL` | Доступ и модель Gemini. |
+| `GEMINI_API_KEY`, `GEMINI_MODEL` | Доступ и модель Gemini, если Gemini выбран в `config/config.yaml`. |
+| `OPENROUTER_API_KEY`, `OPENROUTER_MODEL` | Доступ и модель OpenRouter, если OpenRouter выбран в `config/config.yaml`. |
+
+LLM-этап может содержать упорядоченный fallback `targets`. Старые поля `provider` и `model` остаются допустимы и означают один target. Например:
+
+```yaml
+targets:
+  - provider: gemini
+    model: ${GEMINI_MODEL}
+  - provider: openrouter
+    model: ${OPENROUTER_MODEL}
+```
 | `KEYS_SO_EMAIL`, `KEYS_SO_PASSWORD` | Доступ к Keys.so. |
 | `ARSENKIN_EMAIL`, `ARSENKIN_PASSWORD` | Доступ к Arsenkin. |
 | `ARSENKIN_HEADLESS` | Headless-режим Arsenkin, по умолчанию `true`. |
@@ -83,6 +94,7 @@ Makefile — короткая оболочка над существующим C
 | `task-1 fix` | Исправляет статьи с готовым review без fixed article. | Необязательный ID. | `make task-1 fix` или `make task-1 fix 37` | `go run ./cmd/seo-pipeline task-1 fix [external_id]` |
 | `task-1 html` | Создаёт отсутствующий HTML из готовой fixed article. | Необязательный ID. | `make task-1 html` или `make task-1 html 37` | `go run ./cmd/seo-pipeline task-1 html [external_id]` |
 | `task-1 result` | Собирает отсутствующий `result.md` и завершает статью. | Необязательный ID. | `make task-1 result` или `make task-1 result 37` | `go run ./cmd/seo-pipeline task-1 result [external_id]` |
+| `task-1 deepseek-login` | Открывает Chromium для ручного входа в DeepSeek и сохраняет persistent profile. | Нет. | `make task-1 deepseek-login` | `go run ./cmd/seo-pipeline task-1 deepseek-login` |
 
 Отдельной CLI-операции `structure` сейчас нет: структура создаётся внутри `generate`.
 
@@ -139,6 +151,7 @@ go run ./cmd/seo-pipeline task-1 html <external_id>
 go run ./cmd/seo-pipeline task-1 html
 go run ./cmd/seo-pipeline task-1 result <external_id>
 go run ./cmd/seo-pipeline task-1 result
+go run ./cmd/seo-pipeline task-1 deepseek-login
 ```
 
 При `Ctrl+C`, `SIGINT` или `SIGTERM` общий контекст отменяется, текущие операции прекращаются, а созданные ресурсы закрываются.
@@ -222,13 +235,35 @@ ORDER BY created_at DESC;
 `generate [external_id]` выполняет:
 
 1. `structure` — структура статьи.
-2. `article` и `info` — текст и metadata в одном Gemini-чате.
+2. `article` и `info` — текст и metadata в общей логической беседе выбранного LLM-провайдера.
 3. `review` — проверка статьи.
 4. `fix` — исправленная версия.
 5. `html` — нормализованный HTML.
 6. `result` — сборка `result.md` Go-шаблоном без отдельного LLM-вызова.
 
 После HTML статья остаётся `processing` на `final_file_assembly`. Статус `completed` устанавливается только после успешной публикации `result.md`.
+
+### DeepSeek Web
+
+Провайдер `deepseek_web` использует бесплатный веб-интерфейс `chat.deepseek.com` через уже подключённый Playwright. API DeepSeek, пароль и автоматизация авторизации не используются. Профиль Chromium хранится локально в `data/browser/deepseek/` и исключён из Git.
+
+Первый вход выполняется вручную:
+
+```bash
+make task-1 deepseek-login
+```
+
+Команда открывает видимый Chromium. В нём пользователь самостоятельно проходит логин, CAPTCHA, подтверждение почты и другие проверки. Когда DeepSeek Chat становится доступен, браузер корректно закрывается, а persistent profile сохраняется. Если сохранённая сессия ещё действует, команда только проверяет её и сразу завершается.
+
+Чтобы выбрать веб-провайдер, укажите его в `targets` нужных этапов (значение `model` используется как метка в логах и результатах; моделью управляет сам веб-интерфейс):
+
+```yaml
+targets:
+  - provider: deepseek_web
+    model: deepseek-chat
+```
+
+После этого обычная команда `make task-1 generate [ID]` использует тот же pipeline и те же промпты. Клиент открывает сохранённый persistent profile, создаёт новый DeepSeek Chat, отправляет промпт и ждёт новый непустой ответ. Завершение определяется без `sleep`: видимый индикатор генерации должен исчезнуть, а текст последнего ответа — перестать изменяться. Общий LLM-router применяет настроенный stage-timeout, до трёх попыток для временных браузерных ошибок и `slog`-логирование. При истёкшей сессии возвращается ошибка `DeepSeek session expired. Run deepseek-login.` без повторных попыток.
 
 ### Run и demo-flow
 
