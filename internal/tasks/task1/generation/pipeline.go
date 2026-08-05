@@ -557,6 +557,31 @@ func (p *Pipeline) RunArticleByExternalID(ctx context.Context, externalID string
 	return PipelineOutput{Paths: output.Paths}, err
 }
 
+// RunStructureByExternalID generates only the structure from prepared research. Остальные
+// стадии уже адресуемы по имени; структура была доступна лишь внутри полного прогона, из-за
+// чего возобновление с неё требовало перегенерации всей статьи.
+func (p *Pipeline) RunStructureByExternalID(ctx context.Context, externalID string) (PipelineOutput, error) {
+	input, err := p.repository.GetGenerationInput(ctx, externalID)
+	if err != nil {
+		wrapped := &StageError{ExternalID: externalID, Stage: "load_structure_data", Err: err}
+		if !isContextCancellation(ctx, err) {
+			p.logger.Error("generation stage failed", "article_id", int64(0), "external_id", externalID, "stage", wrapped.Stage, "error", err)
+		}
+		return PipelineOutput{}, wrapped
+	}
+	if err := assertLoadedArticle(externalID, input.Article); err != nil {
+		return PipelineOutput{}, p.fail(ctx, p.stageLogger(input), input, "verify_article_identity", err)
+	}
+	if err := p.repository.BeginGeneration(ctx, input.Article.ID); err != nil {
+		return PipelineOutput{}, p.fail(ctx, p.stageLogger(input), input, "begin_structure", err)
+	}
+	output, err := p.structureService.Generate(ctx, input)
+	if err != nil {
+		return PipelineOutput{}, p.fail(ctx, p.stageLogger(input), input, "structure_generation", err)
+	}
+	return PipelineOutput{Paths: output.Paths}, nil
+}
+
 func (p *Pipeline) RunReviewByExternalID(ctx context.Context, externalID string) (PipelineOutput, error) {
 	saved, input, err := p.loadSavedInput(ctx, externalID, "review")
 	if err != nil {
