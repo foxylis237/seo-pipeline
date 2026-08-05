@@ -71,7 +71,15 @@ func (c *Client) generate(ctx context.Context, request llm.Request) (llm.Respons
 	if state == "expired" {
 		return llm.Response{}, sessionExpiredError()
 	}
+	c.stage("open_page", "url", c.cfg.ChatURL)
+
 	composer := page.Locator(composerSelector).First()
+	if err := composer.WaitFor(playwright.LocatorWaitForOptions{
+		State: playwright.WaitForSelectorStateVisible, Timeout: playwright.Float(timeout),
+	}); err != nil {
+		return llm.Response{}, c.browserError(ctx, "find DeepSeek prompt input", err)
+	}
+	c.stage("input_found")
 
 	answers := page.Locator(answerSelector)
 	previousCount, err := answers.Count()
@@ -84,22 +92,12 @@ func (c *Client) generate(ctx context.Context, request llm.Request) (llm.Respons
 	if err := composer.Press("Enter", playwright.LocatorPressOptions{Timeout: playwright.Float(timeout)}); err != nil {
 		return llm.Response{}, c.browserError(ctx, "send DeepSeek prompt", err)
 	}
-	c.logger.Info("DeepSeek Web prompt submitted", "model", request.Model)
+	c.stage("send_prompt", "length", len([]rune(request.Prompt)), "model", request.Model)
 
-	responseTimeout := operationTimeout(ctx, 0)
-	_, err = page.WaitForFunction(completedAnswerJS, map[string]any{
-		"answerSelector": answerSelector,
-		"stopSelector":   stopSelector,
-		"previousCount":  previousCount,
-		"stableForMs":    responseStableFor.Milliseconds(),
-	}, playwright.PageWaitForFunctionOptions{Polling: "raf", Timeout: playwright.Float(responseTimeout)})
-	if err != nil {
-		if expired, checkErr := isSessionExpired(page); checkErr == nil && expired {
-			return llm.Response{}, sessionExpiredError()
-		}
-		return llm.Response{}, c.browserError(ctx, "wait for complete DeepSeek answer", err)
+	if err := c.waitForAnswer(ctx, page, previousCount); err != nil {
+		return llm.Response{}, err
 	}
-	text, err := answers.Last().InnerText()
+	text, source, err := answerText(answers.Last())
 	if err != nil {
 		return llm.Response{}, c.browserError(ctx, "read DeepSeek answer", err)
 	}
@@ -107,7 +105,86 @@ func (c *Client) generate(ctx context.Context, request llm.Request) (llm.Respons
 	if text == "" {
 		return llm.Response{}, temporaryError("DeepSeek returned an empty response", nil)
 	}
+	c.stage("answer_received", "length", len([]rune(text)), "source", source)
 	return llm.Response{Text: text, Model: request.Model}, nil
+}
+
+// waitForAnswer waits for the generation to finish, reporting progress every heartbeat.
+// Ожидание разбито на короткие интервалы вместо одного длинного, чтобы состояние попадало
+// в лог без второй горутины возле страницы Playwright.
+func (c *Client) waitForAnswer(ctx context.Context, page playwright.Page, previousCount int) error {
+	started := time.Now()
+	deadline := started.Add(time.Duration(operationTimeout(ctx, defaultResponseTimeout)) * time.Millisecond)
+	state := "waiting"
+	for {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			if expired, checkErr := isSessionExpired(page); checkErr == nil && expired {
+				return sessionExpiredError()
+			}
+			return c.browserError(ctx, "wait for complete DeepSeek answer", fmt.Errorf(
+				"ответ не завершился за %s, последнее состояние %s", time.Since(started).Round(time.Second), state,
+			))
+		}
+		wait := responseHeartbeat
+		if remaining < wait {
+			wait = remaining
+		}
+		_, err := page.WaitForFunction(completedAnswerJS, map[string]any{
+			"answerSelector": answerSelector,
+			"stopSelector":   stopSelector,
+			"previousCount":  previousCount,
+			"stableForMs":    responseStableFor.Milliseconds(),
+		}, playwright.PageWaitForFunctionOptions{Polling: "raf", Timeout: playwright.Float(float64(wait.Milliseconds()))})
+		if err == nil {
+			return nil
+		}
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return fmt.Errorf("wait for complete DeepSeek answer: %w", ctxErr)
+		}
+		state = responseState(page, previousCount)
+		c.stage("waiting_response", "elapsed", time.Since(started).Round(time.Second).String(), "state", state)
+	}
+}
+
+// answerText returns the text the model wrote and where it was taken from.
+//
+// Разметку чат показывает блоком кода: внутри него лежит исходный текст модели, а innerText
+// всего ответа отдал бы отрендеренный DOM вместе с классами интерфейса. Для обычных
+// текстовых стадий блока кода нет, и поведение остаётся прежним.
+func answerText(answer playwright.Locator) (string, string, error) {
+	value, err := answer.Evaluate(answerTextJS, nil)
+	if err != nil {
+		return "", "", err
+	}
+	fields, ok := value.(map[string]any)
+	if !ok {
+		return "", "", fmt.Errorf("unexpected DeepSeek answer payload %T", value)
+	}
+	text, _ := fields["text"].(string)
+	source, _ := fields["source"].(string)
+	return text, source, nil
+}
+
+// responseState reports whether the answer has started arriving.
+func responseState(page playwright.Page, previousCount int) string {
+	value, err := page.Evaluate(responseStateJS, map[string]any{
+		"answerSelector": answerSelector,
+		"stopSelector":   stopSelector,
+		"previousCount":  previousCount,
+	})
+	if err != nil {
+		return "unknown"
+	}
+	if state, ok := value.(string); ok {
+		return state
+	}
+	return "unknown"
+}
+
+// stage writes one step of the DeepSeek run in the format the operator greps for.
+func (c *Client) stage(name string, fields ...any) {
+	c.logger.Info("[deepseek]", append([]any{"stage", name}, fields...)...)
 }
 
 func (c *Client) ensureSession() (*browserSession, error) {

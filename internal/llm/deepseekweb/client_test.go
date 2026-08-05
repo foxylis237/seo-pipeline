@@ -59,3 +59,20 @@ func TestIsLoginURL(t *testing.T) {
 		t.Fatal("chat URL was classified as login")
 	}
 }
+
+func TestOperationTimeoutFallsBackToLimitWithoutDeadline(t *testing.T) {
+	// Прямой вызов Generate идёт с context.Background(): раньше ожидание ответа
+	// получало 1 мс и падало мгновенно.
+	timeout := time.Duration(operationTimeout(context.Background(), defaultResponseTimeout)) * time.Millisecond
+	if timeout != defaultResponseTimeout {
+		t.Fatalf("timeout = %v, want %v", timeout, defaultResponseTimeout)
+	}
+}
+
+func TestOperationTimeoutStaysPositiveAfterDeadline(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), -time.Second)
+	defer cancel()
+	if timeout := operationTimeout(ctx, defaultResponseTimeout); timeout <= 0 {
+		t.Fatalf("timeout = %v, want positive", timeout)
+	}
+}

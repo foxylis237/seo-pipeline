@@ -13,6 +13,11 @@ const (
 	defaultOperationTimeout = 30 * time.Second
 	defaultLoginTimeout     = 30 * time.Minute
 	responseStableFor       = 4 * time.Second
+	// defaultResponseTimeout ограничивает ожидание ответа, когда у контекста нет своего
+	// дедлайна: прямой вызов Generate с context.Background() иначе получал 1 мс.
+	defaultResponseTimeout = 5 * time.Minute
+	// responseHeartbeat — как часто писать в лог, что ответ ещё генерируется.
+	responseHeartbeat = 30 * time.Second
 )
 
 type Config struct {
