@@ -15,11 +15,12 @@ paths:
 
 Миграции парные: `NNNNNN_name.up.sql` и `.down.sql`. Применяются docker-entrypoint'ом только
 при первой инициализации volume; отдельного runner'а нет. Уже существующий volume повторно
-не мигрируется — при изменении схемы нужен `make docker-down` + удаление volume.
+не мигрируется — при изменении схемы нужен `docker compose down -v` + `make docker-up`.
 
-Мёртвые колонки, которые `ValidateSchema` всё равно требует: `article_metadata.reading_time_minutes`,
-`article_outputs.word_count`, `article_inputs.seo_title/profession_name/image_name/image_url`.
-Прежде чем добавлять новую колонку — проверить, не повторяется ли этот сценарий.
+Вся схема живёт в одной baseline-миграции `000001_init_schema`. Мёртвых колонок в ней нет:
+каждая колонка либо читается, либо пишется репозиторием. Прежде чем добавлять новую —
+проверить, что она действительно читается, иначе база снова обрастёт write-only полями.
+Тесты применяют `migrations/*.up.sql` по glob, отдельного списка файлов вести не нужно.
 
 ## Транзакции
 

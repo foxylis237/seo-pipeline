@@ -28,24 +28,23 @@ argument-hint: "[имя стадии и что она делает]"
 
 Проверено 2026-08-05. Фактическое соответствие в `article_outputs`:
 
-| Колонка | Что в ней лежит на самом деле |
+| Колонка | Что в ней лежит |
 |---|---|
 | `structure_path` | `generated/structure.txt` |
 | `article_path` | `generated/article.txt` |
-| `metadata_path` | **`generated/review.txt`** — не метаданные |
-| `final_path` | **`generated/fixed_article.txt`** — не итоговый файл |
+| `review_path` | `generated/review.txt` |
+| `fixed_article_path` | `generated/fixed_article.txt` |
 | `html_path` | `article.html` |
-| `word_count` | ничего, только обнуляется |
 
 Путь `result.md` **нигде не сохраняется** — `CompleteGeneration` ставит только
 `status='completed'`. Восстанавливается из `external_id` + `slug`.
 
-Хуже: `GetPendingForOperation` использует NULL-ность этих колонок как **маркер прогресса**:
+Важно: `GetPendingForOperation` использует NULL-ность этих колонок как **маркер прогресса**:
 
 ```
-review  ждёт → metadata_path IS NULL
-fix     ждёт → metadata_path IS NOT NULL AND final_path IS NULL
-html    ждёт → final_path   IS NOT NULL AND html_path   IS NULL
+review  ждёт → review_path        IS NULL
+fix     ждёт → review_path        IS NOT NULL AND fixed_article_path IS NULL
+html    ждёт → fixed_article_path IS NOT NULL AND html_path          IS NULL
 ```
 
 Значит колонка — не просто хранилище пути, а часть машины состояний. Занять чужую нельзя,
@@ -77,7 +76,8 @@ html    ждёт → final_path   IS NOT NULL AND html_path   IS NULL
 ### 4. Миграция: новое значение `current_step`
 
 Значения `current_step` ограничены `CHECK`-констрейнтом. Эталонный образец —
-`migrations/000005_add_article_review_stage.up.sql`: констрейнт **дропается и пересоздаётся**
+`articles_current_step_check` в `migrations/000001_init_schema.up.sql`: констрейнт
+**дропается и пересоздаётся** новой миграцией целиком
 целиком со всем списком.
 
 ```sql

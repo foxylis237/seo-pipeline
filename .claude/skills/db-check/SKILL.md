@@ -67,20 +67,25 @@ WHERE conrelid = 'articles'::regclass AND contype = 'c';
 Значение, которое код пишет, а констрейнт не допускает, даёт ошибку только на конкретной
 статье в конкретный момент — то есть посреди оплаченного прогона.
 
-Добавление значения делается дропом и пересозданием констрейнта целиком; образец —
-`migrations/000005_add_article_review_stage.up.sql`.
+Добавление значения делается дропом и пересозданием констрейнта целиком в новой миграции;
+сам список живёт в `articles_current_step_check` в `migrations/000001_init_schema.up.sql`.
 
 ## Шаг 4. Семантика колонок путей
 
-Проверено 2026-08-05: имена колонок в `article_outputs` **не соответствуют содержимому**.
+С baseline-схемы (2026-08-05) имена колонок в `article_outputs` соответствуют содержимому:
 
 | Колонка | Что лежит |
 |---|---|
-| `metadata_path` | `review.txt` |
-| `final_path` | `fixed_article.txt` |
-| `word_count` | ничего, только обнуляется |
+| `structure_path` | `generated/structure.txt` |
+| `article_path` | `generated/article.txt` |
+| `review_path` | `generated/review.txt` |
+| `fixed_article_path` | `generated/fixed_article.txt` |
+| `html_path` | `article.html` |
 
-Плюс NULL-ность этих колонок работает как маркер прогресса в `GetPendingForOperation` —
+Путь `result.md` нигде не сохраняется — `CompleteGeneration` ставит только
+`status='completed'`. Восстанавливается из `external_id` + `slug`.
+
+NULL-ность этих колонок работает как маркер прогресса в `GetPendingForOperation` —
 то есть колонка входит в машину состояний, а не просто хранит путь.
 
 При любой правке этих колонок проверять оба смысла: и что пишется, и какой предикат

@@ -59,11 +59,11 @@ domain events не вводим — см. [.claude/rules/architecture.md](../.cl
 
 ## Этап
 
-**Этап** (`articles.current_step`) — где именно внутри пайплайна находится статья. Восемь
+**Этап** (`articles.current_step`) — где именно внутри пайплайна находится статья. Семь
 значений, ограничены `CHECK`:
 
-`arsenkin_collection` → `arsenkin_cleanup` → `structure_generation` → `article_generation` →
-`metadata_generation` → `reading_time_calculation` → `html_generation` → `final_file_assembly`
+`arsenkin_collection` → `structure_generation` → `article_generation` →
+`metadata_generation` → `article_review` → `html_generation` → `final_file_assembly`
 
 Этап — это **состояние в БД**, точка возобновления после сбоя. Не путать со стадией.
 
