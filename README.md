@@ -322,12 +322,10 @@ Dry-run разрешён только при `APP_ENV=local` или `APP_ENV=tes
 Разрешённые значения `current_step`:
 
 - `arsenkin_collection`;
-- `arsenkin_cleanup`;
 - `structure_generation`;
 - `article_generation`;
-- `article_review`;
 - `metadata_generation`;
-- `reading_time_calculation`;
+- `article_review`;
 - `html_generation`;
 - `final_file_assembly`.
 
@@ -363,16 +361,16 @@ tasks/task_1/output/37-primer/
 
 Схема состоит из таблиц `articles`, `article_inputs`, `article_research`, `article_metadata`, `article_outputs` и `article_errors`. Приложение проверяет ожидаемую схему перед выполнением команд, но не запускает миграции основной БД автоматически.
 
-Миграции применяются по номеру:
+Вся схема описана одной baseline-миграцией `000001_init_schema`. Цепочка `000001_create_articles` … `000008_add_article_errors` свёрнута в неё; промежуточных состояний схемы больше не существует, обновление старого volume не поддерживается — только пересоздание.
 
-1. `000001_create_articles`;
-2. `000002_add_articles_external_id`;
-3. `000003_add_wordstat_keywords`;
-4. `000004_add_article_research_updated_at`;
-5. `000005_add_article_review_stage`;
-6. `000006_add_structured_article_metadata`;
-7. `000007_add_result_input_fields`.
-8. `000008_add_article_errors`.
+Чистая база с нуля:
+
+```bash
+make docker-down                 # или: docker compose down -v
+docker compose down -v           # удалить volumes, иначе миграции не применятся повторно
+make docker-up
+go run ./cmd/seo-pipeline task-1 import
+```
 
 ## Текущие ограничения
 

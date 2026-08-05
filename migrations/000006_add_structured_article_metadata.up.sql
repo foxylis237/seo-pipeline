@@ -1,5 +1,0 @@
-ALTER TABLE article_metadata
-    ADD COLUMN tags TEXT,
-    ADD COLUMN tldr TEXT,
-    ADD COLUMN faq TEXT,
-    ADD COLUMN created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();

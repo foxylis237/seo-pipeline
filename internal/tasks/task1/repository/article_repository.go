@@ -196,7 +196,7 @@ func (r *ArticleRepository) GetSavedGenerationInput(ctx context.Context, externa
 			a.status, a.current_step, a.error_message, a.created_at, a.updated_at,
 			COALESCE(i.professions, ''), COALESCE(i.links, ''),
 			COALESCE(o.structure_path, ''), COALESCE(o.article_path, ''),
-			COALESCE(o.metadata_path, ''), COALESCE(o.final_path, '')
+			COALESCE(o.review_path, ''), COALESCE(o.fixed_article_path, '')
 		FROM articles AS a
 		LEFT JOIN article_inputs AS i ON i.article_id = a.id
 		LEFT JOIN article_outputs AS o ON o.article_id = a.id
@@ -391,6 +391,7 @@ func (r *ArticleRepository) Reset(ctx context.Context) error {
 
 	const query = `
 		TRUNCATE TABLE
+			article_errors,
 			article_outputs,
 			article_metadata,
 			article_research,
@@ -643,7 +644,7 @@ func (r *ArticleRepository) GetPendingForOperation(ctx context.Context, operatio
 	case "prepare":
 		predicate = `
 			a.status <> 'completed'
-			AND a.current_step IN ('arsenkin_collection', 'arsenkin_cleanup')
+			AND a.current_step = 'arsenkin_collection'
 			AND NULLIF(BTRIM(COALESCE(r.competitor_structure, '')), '') IS NULL`
 	case "generate":
 		predicate = `
@@ -666,19 +667,19 @@ func (r *ArticleRepository) GetPendingForOperation(ctx context.Context, operatio
 			AND a.current_step = 'article_review'
 			AND NULLIF(BTRIM(COALESCE(o.article_path, '')), '') IS NOT NULL
 			AND NULLIF(BTRIM(COALESCE(m.metadata_text, '')), '') IS NOT NULL
-			AND NULLIF(BTRIM(COALESCE(o.metadata_path, '')), '') IS NULL`
+			AND NULLIF(BTRIM(COALESCE(o.review_path, '')), '') IS NULL`
 	case "fix":
 		predicate = `
 			a.status <> 'completed'
 			AND a.current_step = 'article_review'
 			AND NULLIF(BTRIM(COALESCE(o.article_path, '')), '') IS NOT NULL
-			AND NULLIF(BTRIM(COALESCE(o.metadata_path, '')), '') IS NOT NULL
-			AND NULLIF(BTRIM(COALESCE(o.final_path, '')), '') IS NULL`
+			AND NULLIF(BTRIM(COALESCE(o.review_path, '')), '') IS NOT NULL
+			AND NULLIF(BTRIM(COALESCE(o.fixed_article_path, '')), '') IS NULL`
 	case "html":
 		predicate = `
 			a.status <> 'completed'
 			AND a.current_step = 'html_generation'
-			AND NULLIF(BTRIM(COALESCE(o.final_path, '')), '') IS NOT NULL
+			AND NULLIF(BTRIM(COALESCE(o.fixed_article_path, '')), '') IS NOT NULL
 			AND NULLIF(BTRIM(COALESCE(o.html_path, '')), '') IS NULL`
 	case "result":
 		predicate = `
@@ -766,10 +767,9 @@ func (r *ArticleRepository) SaveStructurePath(ctx context.Context, articleID int
 		ON CONFLICT (article_id) DO UPDATE
 		SET structure_path = EXCLUDED.structure_path,
 			article_path = NULL,
-			metadata_path = NULL,
+			review_path = NULL,
+			fixed_article_path = NULL,
 			html_path = NULL,
-			final_path = NULL,
-			word_count = NULL,
 			updated_at = NOW()
 	`
 	if _, err := tx.Exec(ctx, outputQuery, articleID, structurePath); err != nil {
@@ -838,7 +838,7 @@ func (r *ArticleRepository) SaveReviewPath(ctx context.Context, articleID int64,
 	defer func() { _ = tx.Rollback(ctx) }()
 	outputResult, err := tx.Exec(ctx, `
 		UPDATE article_outputs
-		SET metadata_path = $2, updated_at = NOW()
+		SET review_path = $2, updated_at = NOW()
 		WHERE article_id = $1
 	`, articleID, reviewPath)
 	if err != nil {
@@ -862,7 +862,7 @@ func (r *ArticleRepository) SaveFixedArticlePath(ctx context.Context, articleID 
 	defer func() { _ = tx.Rollback(ctx) }()
 	outputResult, err := tx.Exec(ctx, `
 		UPDATE article_outputs
-		SET final_path = $2, updated_at = NOW()
+		SET fixed_article_path = $2, updated_at = NOW()
 		WHERE article_id = $1
 	`, articleID, fixedArticlePath)
 	if err != nil {
@@ -959,12 +959,11 @@ func (r *ArticleRepository) SaveCleanedKeywords(
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	const researchQuery = `
-		INSERT INTO article_research (article_id, cleaned_keywords, collected_at, updated_at)
-		VALUES ($1, $2, NOW(), NOW())
+		INSERT INTO article_research (article_id, cleaned_keywords, updated_at)
+		VALUES ($1, $2, NOW())
 		ON CONFLICT (article_id) DO UPDATE
 		SET
 			cleaned_keywords = EXCLUDED.cleaned_keywords,
-			collected_at = NOW(),
 			updated_at = NOW()
 	`
 	if _, err := tx.Exec(ctx, researchQuery, articleID, string(encoded)); err != nil {
@@ -1016,16 +1015,15 @@ func (r *ArticleRepository) SavePreparedResearch(
 	const researchQuery = `
 		INSERT INTO article_research (
 			article_id, cleaned_keywords, wordstat_keywords, lsi_words,
-			competitor_structure, collected_at, updated_at
+			competitor_structure, updated_at
 		)
-		VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
+		VALUES ($1, $2, $3, $4, $5, NOW())
 		ON CONFLICT (article_id) DO UPDATE
 		SET
 			cleaned_keywords = EXCLUDED.cleaned_keywords,
 			wordstat_keywords = EXCLUDED.wordstat_keywords,
 			lsi_words = EXCLUDED.lsi_words,
 			competitor_structure = EXCLUDED.competitor_structure,
-			collected_at = NOW(),
 			updated_at = NOW()
 	`
 	if _, err := tx.Exec(ctx, researchQuery, articleID, string(cleanedKeywordsJSON), string(wordstatJSON), string(lsiJSON), competitorStructure); err != nil {

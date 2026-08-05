@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -196,7 +197,7 @@ func TestArticleRepositoryIdempotency(t *testing.T) {
 		t.Fatal(err)
 	}
 	var savedReviewPath, savedFixedArticlePath string
-	if err := pool.QueryRow(ctx, `SELECT metadata_path, final_path FROM article_outputs WHERE article_id = $1`, arsenkinArticle.ID).Scan(&savedReviewPath, &savedFixedArticlePath); err != nil {
+	if err := pool.QueryRow(ctx, `SELECT review_path, fixed_article_path FROM article_outputs WHERE article_id = $1`, arsenkinArticle.ID).Scan(&savedReviewPath, &savedFixedArticlePath); err != nil {
 		t.Fatal(err)
 	}
 	if savedReviewPath != reviewPath || savedFixedArticlePath != fixedArticlePath {
@@ -579,7 +580,7 @@ func TestGetPendingForOperationUsesPersistedPrerequisites(t *testing.T) {
 		}
 	}
 	if _, err := pool.Exec(ctx, `
-		INSERT INTO article_outputs (article_id, structure_path, article_path, metadata_path, final_path, html_path) VALUES
+		INSERT INTO article_outputs (article_id, structure_path, article_path, review_path, fixed_article_path, html_path) VALUES
 			($1, 'structure.txt', 'article.txt', NULL, NULL, NULL),
 			($2, 'structure.txt', 'article.txt', NULL, NULL, NULL),
 			($3, 'structure.txt', 'article.txt', 'review.txt', NULL, NULL),
@@ -948,22 +949,22 @@ func newTestRepository(t *testing.T) (*ArticleRepository, *pgxpool.Pool) {
 	}
 	t.Cleanup(pool.Close)
 
-	for _, name := range []string{
-		"000001_create_articles.up.sql",
-		"000002_add_articles_external_id.up.sql",
-		"000003_add_wordstat_keywords.up.sql",
-		"000004_add_article_research_updated_at.up.sql",
-		"000005_add_article_review_stage.up.sql",
-		"000006_add_structured_article_metadata.up.sql",
-		"000007_add_result_input_fields.up.sql",
-		"000008_add_article_errors.up.sql",
-	} {
-		migration, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "migrations", name))
+	// Тот же набор файлов и в том же порядке, что применяет docker-entrypoint.
+	migrations, err := filepath.Glob(filepath.Join("..", "..", "..", "..", "migrations", "*.up.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(migrations) == 0 {
+		t.Fatal("не найдено ни одной миграции в migrations/*.up.sql")
+	}
+	sort.Strings(migrations)
+	for _, name := range migrations {
+		migration, err := os.ReadFile(name)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if _, err := pool.Exec(ctx, string(migration)); err != nil {
-			t.Fatalf("применить миграцию %s: %v", name, err)
+			t.Fatalf("применить миграцию %s: %v", filepath.Base(name), err)
 		}
 	}
 	if err := ValidateSchema(ctx, pool); err != nil {
