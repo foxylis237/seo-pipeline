@@ -18,6 +18,11 @@ const (
 	defaultResponseTimeout = 5 * time.Minute
 	// responseHeartbeat — как часто писать в лог, что ответ ещё генерируется.
 	responseHeartbeat = 30 * time.Second
+	// clipboardMarker кладётся в буфер перед нажатием «Копировать», чтобы прежнее значение
+	// нельзя было принять за новый ответ.
+	clipboardMarker       = "__seo_pipeline_clipboard__"
+	clipboardTimeout      = 5 * time.Second
+	clipboardPollInterval = 200 * time.Millisecond
 )
 
 type Config struct {

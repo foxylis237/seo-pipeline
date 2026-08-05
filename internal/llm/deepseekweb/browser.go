@@ -40,6 +40,9 @@ func launchBrowser(profileDir string, headless bool) (*browserSession, error) {
 	}
 	browserContext, err := pw.Chromium.LaunchPersistentContext(profileDir, playwright.BrowserTypeLaunchPersistentContextOptions{
 		Headless: playwright.Bool(headless),
+		// Разрешение выдаётся только этому профилю: исходную разметку ответа отдаёт
+		// кнопка «Копировать», а прочитать её можно лишь из буфера обмена.
+		Permissions: []string{"clipboard-read", "clipboard-write"},
 	})
 	if err != nil {
 		_ = pw.Stop()
