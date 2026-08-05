@@ -205,13 +205,16 @@ type StageChatFactory struct {
 	stages []string
 }
 
-func (f *StageChatFactory) NewChat(context.Context) (Chat, error) { return &stageChat{factory: f}, nil }
+func (f *StageChatFactory) NewChat(_ context.Context, articleID int64) (Chat, error) {
+	return &stageChat{factory: f, articleID: articleID}, nil
+}
 
 type stageChat struct {
-	factory *StageChatFactory
-	next    int
-	history []Message
-	closed  bool
+	factory   *StageChatFactory
+	articleID int64
+	next      int
+	history   []Message
+	closed    bool
 }
 type Message struct{ Role, Content string }
 
@@ -232,7 +235,7 @@ func (c *stageChat) Generate(ctx context.Context, prompt string) (Response, erro
 		fmt.Fprintf(&transcript, "user:\n%s", prompt)
 	}
 	stage := c.factory.stages[c.next]
-	result, err := c.factory.router.generatePrompt(ctx, Call{Stage: stage}, transcript.String())
+	result, err := c.factory.router.generatePrompt(ctx, Call{Stage: stage, ArticleID: c.articleID}, transcript.String())
 	if err != nil {
 		return Response{}, err
 	}

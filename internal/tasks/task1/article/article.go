@@ -38,18 +38,20 @@ type ArticleError struct {
 	ErrorTime *time.Time
 }
 
+// Input is one imported Excel row. The tags are what prepare diagnostics writes to
+// prepare/input.json; nothing decodes this type from JSON.
 type Input struct {
-	ExcelID         int
-	Title           string
-	Header          string
-	ImageSlug       string
-	MetaDescription string
-	Keyword         string
-	ReferenceURL    string
-	Category        string
-	Author          string
-	Links           string
-	Professions     string
+	ExcelID         int    `json:"excel_id"`
+	Title           string `json:"title"`
+	Header          string `json:"header"`
+	ImageSlug       string `json:"image_slug"`
+	MetaDescription string `json:"meta_description"`
+	Keyword         string `json:"key_word"`
+	ReferenceURL    string `json:"reference_url"`
+	Category        string `json:"category"`
+	Author          string `json:"author"`
+	Links           string `json:"links"`
+	Professions     string `json:"professions"`
 }
 
 // KeywordFrequency содержит запрос и его частотность Wordstat.

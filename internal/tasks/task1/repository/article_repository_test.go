@@ -1045,3 +1045,43 @@ func assertArsenkinResult(t *testing.T, pool *pgxpool.Pool, articleID int64, wan
 		t.Fatalf("current_step = %q, want structure_generation", currentStep)
 	}
 }
+
+func TestGetArticleTraceReadsIdentityOfRequestedArticle(t *testing.T) {
+	repository, _ := newTestRepository(t)
+	ctx := context.Background()
+	first, err := repository.Create(ctx, article.Input{
+		ExcelID: 41, Title: "Бариста", Keyword: "бариста",
+		ImageSlug: "barista", ReferenceURL: "https://example.ru/barista",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := repository.Create(ctx, article.Input{
+		ExcelID: 42, Title: "Окна", Keyword: "окна",
+		ImageSlug: "okna", ReferenceURL: "https://okna.ru/montazh",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	trace, err := repository.GetArticleTrace(ctx, first.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := article.Trace{
+		ArticleID: first.ID, ExternalID: "41", Title: "Бариста",
+		Keyword: "бариста", ReferenceURL: "https://example.ru/barista",
+	}
+	if trace != want {
+		t.Fatalf("trace = %+v, want %+v", trace, want)
+	}
+	otherTrace, err := repository.GetArticleTrace(ctx, second.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if otherTrace.ExternalID != "42" || otherTrace.ReferenceURL != "https://okna.ru/montazh" {
+		t.Fatalf("second trace = %+v", otherTrace)
+	}
+	if _, err := repository.GetArticleTrace(ctx, first.ID+second.ID+1000); err == nil {
+		t.Fatal("missing article did not produce an error")
+	}
+}

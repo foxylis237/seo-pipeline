@@ -5,11 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/foxylis237/seo-pipeline/internal/llm"
 	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/article"
+	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/diagnostics"
 	articleoutput "github.com/foxylis237/seo-pipeline/internal/tasks/task1/output"
 )
 
@@ -28,6 +30,7 @@ type PipelineRepository interface {
 	SaveError(ctx context.Context, articleID int64, processingErr error) error
 	GetDemoGenerationInput(ctx context.Context, externalID string) (article.GenerationInput, error)
 	CompleteGeneration(ctx context.Context, articleID int64) error
+	GetArticleTrace(ctx context.Context, articleID int64) (article.Trace, error)
 }
 
 type ResultBuilder interface {
@@ -92,6 +95,9 @@ func (p *Pipeline) RunByExternalID(ctx context.Context, externalID string) (Pipe
 			p.logger.Error("generation pipeline failed", "article_id", int64(0), "external_id", externalID, "stage", wrapped.Stage, "error", err)
 		}
 		return PipelineOutput{}, wrapped
+	}
+	if err := assertLoadedArticle(externalID, input.Article); err != nil {
+		return PipelineOutput{}, p.fail(ctx, p.stageLogger(input), input, "verify_article_identity", err)
 	}
 	return p.Run(ctx, input)
 }
@@ -159,6 +165,9 @@ func (p *Pipeline) RunDemoByExternalID(ctx context.Context, externalID string) (
 	}
 	input := article.GenerationInput{Article: saved.Article, Professions: saved.Professions, Links: saved.Links}
 	logger := p.stageLogger(input)
+	if err := assertLoadedArticle(externalID, saved.Article); err != nil {
+		return PipelineOutput{}, p.fail(ctx, logger, input, "verify_article_identity", err)
+	}
 	if input.Article.Status == "completed" {
 		logger.Info("demo generation skipped: result already exists", "stage", "demo_complete")
 		return PipelineOutput{}, nil
@@ -213,6 +222,9 @@ func (p *Pipeline) RunQuickDemoByExternalID(ctx context.Context, externalID stri
 		return PipelineOutput{}, &StageError{ExternalID: externalID, Stage: "load_demo_data", Err: err}
 	}
 	logger := p.stageLogger(input)
+	if err := assertLoadedArticle(externalID, input.Article); err != nil {
+		return PipelineOutput{}, p.fail(ctx, logger, input, "verify_article_identity", err)
+	}
 	if err := p.repository.BeginGenerationStage(ctx, input.Article.ID, "article"); err != nil {
 		return PipelineOutput{}, p.fail(ctx, logger, input, "begin_demo_generation", err)
 	}
@@ -266,7 +278,17 @@ func (p *Pipeline) runArticleAndInfo(ctx context.Context, input article.Generati
 	if err != nil {
 		return articleStageOutput{}, p.fail(ctx, logger, input, "article_generation", err)
 	}
-	chat, err := p.chatFactory.NewChat(ctx)
+	trace, err := p.articleTrace(ctx, logger, input)
+	if err != nil {
+		return articleStageOutput{}, p.fail(ctx, logger, input, "verify_article_identity", err)
+	}
+	diagnostics.LogStep(p.logger, "llm_article", "before", trace,
+		"structure_fingerprint", diagnostics.Fingerprint(structure),
+		"keywords_count", len(input.WordstatKeywords),
+		"keywords_fingerprint", diagnostics.Fingerprint(formatKeywords(input.WordstatKeywords)),
+		"prompt_fingerprint", diagnostics.Fingerprint(articleCall.Prompt),
+	)
+	chat, err := p.chatFactory.NewChat(ctx, input.Article.ID)
 	if err != nil {
 		return articleStageOutput{}, p.fail(ctx, logger, input, "article_generation", err)
 	}
@@ -304,6 +326,11 @@ func (p *Pipeline) runArticleAndInfo(ctx context.Context, input article.Generati
 		}
 	}
 	logger.Info("article saved", "stage", "article_generation", "model", articleResult.Model, "result_path", paths.ArticlePath)
+	diagnostics.LogStep(p.logger, "llm_article", "after", trace,
+		"prompt_fingerprint", diagnostics.Fingerprint(articleCall.Prompt),
+		"response_fingerprint", diagnostics.Fingerprint(text),
+		"result_path", paths.ArticlePath,
+	)
 
 	infoStarted := time.Now()
 	if err := ctx.Err(); err != nil {
@@ -316,6 +343,9 @@ func (p *Pipeline) runArticleAndInfo(ctx context.Context, input article.Generati
 	if err != nil {
 		return articleStageOutput{}, p.fail(ctx, logger, input, "metadata_generation", err)
 	}
+	diagnostics.LogStep(p.logger, "llm_info", "before", trace,
+		"prompt_fingerprint", diagnostics.Fingerprint(infoCall.Prompt),
+	)
 	infoCtx, cancelInfo := context.WithTimeout(ctx, infoCall.Timeout)
 	infoResult, err := chat.Generate(infoCtx, infoCall.Prompt)
 	cancelInfo()
@@ -361,6 +391,10 @@ func (p *Pipeline) runArticleAndInfo(ctx context.Context, input article.Generati
 		return articleStageOutput{}, p.fail(ctx, logger, input, "save_article_info_state", err)
 	}
 	logger.Info("article info saved", "stage", "info")
+	diagnostics.LogStep(p.logger, "llm_info", "after", trace,
+		"prompt_fingerprint", diagnostics.Fingerprint(infoCall.Prompt),
+		"response_fingerprint", diagnostics.Fingerprint(articleInfo),
+	)
 	logger.Info("article stage completed", "stage", "article_generation", "duration_ms", time.Since(started).Milliseconds(), "result_path", paths.ArticlePath)
 	return articleStageOutput{stageOutput: stageOutput{Text: text, Paths: paths}, Info: articleInfo}, nil
 }
@@ -372,6 +406,10 @@ func (p *Pipeline) runReview(ctx context.Context, input article.GenerationInput,
 		return stageOutput{}, p.fail(ctx, logger, input, "article_review", err)
 	}
 	logger.Info("article review started", "stage", "article_review")
+	trace, err := p.traceLLMStage(ctx, logger, input, "llm_review", articleText)
+	if err != nil {
+		return stageOutput{}, p.fail(ctx, logger, input, "verify_article_identity", err)
+	}
 	result, err := p.router.Generate(ctx, llm.Call{Stage: "review", ArticleID: input.Article.ID, Data: struct{ Article string }{articleText}})
 	if err != nil {
 		return stageOutput{}, p.fail(ctx, logger, input, "article_review", err)
@@ -395,6 +433,11 @@ func (p *Pipeline) runReview(ctx context.Context, input article.GenerationInput,
 		return stageOutput{}, p.fail(ctx, logger, input, "save_article_review_path", err)
 	}
 	logger.Info("article review completed", "stage", "article_review", "prompt_size", len([]rune(result.Prompt)), "input_tokens", result.InputTokens, "output_tokens", result.OutputTokens, "duration_ms", time.Since(started).Milliseconds(), "result_path", paths.ReviewPath)
+	diagnostics.LogStep(p.logger, "llm_review", "after", trace,
+		"prompt_fingerprint", diagnostics.Fingerprint(result.Prompt),
+		"response_fingerprint", diagnostics.Fingerprint(text),
+		"result_path", paths.ReviewPath,
+	)
 	return stageOutput{Text: text, Paths: paths}, nil
 }
 
@@ -405,6 +448,10 @@ func (p *Pipeline) runFix(ctx context.Context, input article.GenerationInput, ar
 		return stageOutput{}, p.fail(ctx, logger, input, "article_fix", err)
 	}
 	logger.Info("article fix started", "stage", "article_fix")
+	trace, err := p.traceLLMStage(ctx, logger, input, "llm_fix", articleText+reviewText)
+	if err != nil {
+		return stageOutput{}, p.fail(ctx, logger, input, "verify_article_identity", err)
+	}
 	result, err := p.router.Generate(ctx, llm.Call{Stage: "fix", ArticleID: input.Article.ID, Data: struct {
 		Article, Review, Professions, Links string
 	}{articleText, reviewText, input.Professions, input.Links}})
@@ -430,6 +477,11 @@ func (p *Pipeline) runFix(ctx context.Context, input article.GenerationInput, ar
 		return stageOutput{}, p.fail(ctx, logger, input, "save_fixed_article_path", err)
 	}
 	logger.Info("article fix completed", "stage", "article_fix", "prompt_size", len([]rune(result.Prompt)), "input_tokens", result.InputTokens, "output_tokens", result.OutputTokens, "duration_ms", time.Since(started).Milliseconds(), "result_path", paths.FixedArticlePath)
+	diagnostics.LogStep(p.logger, "llm_fix", "after", trace,
+		"prompt_fingerprint", diagnostics.Fingerprint(result.Prompt),
+		"response_fingerprint", diagnostics.Fingerprint(text),
+		"result_path", paths.FixedArticlePath,
+	)
 	return stageOutput{Text: text, Paths: paths}, nil
 }
 
@@ -440,6 +492,10 @@ func (p *Pipeline) runHTML(ctx context.Context, input article.GenerationInput, f
 		return stageOutput{}, p.fail(ctx, logger, input, "html_generation", err)
 	}
 	logger.Info("HTML generation started", "stage", "html_generation")
+	trace, err := p.traceLLMStage(ctx, logger, input, "llm_html", fixedArticle)
+	if err != nil {
+		return stageOutput{}, p.fail(ctx, logger, input, "verify_article_identity", err)
+	}
 	result, err := p.router.Generate(ctx, llm.Call{Stage: "html", ArticleID: input.Article.ID, Data: struct{ Article string }{fixedArticle}})
 	if err != nil {
 		return stageOutput{}, p.fail(ctx, logger, input, "html_generation", err)
@@ -463,6 +519,11 @@ func (p *Pipeline) runHTML(ctx context.Context, input article.GenerationInput, f
 		return stageOutput{}, p.fail(ctx, logger, input, "save_html_path", err)
 	}
 	logger.Info("HTML generation completed", "stage", "html_generation", "prompt_size", len([]rune(result.Prompt)), "input_tokens", result.InputTokens, "output_tokens", result.OutputTokens, "duration_ms", time.Since(started).Milliseconds(), "result_path", paths.HTMLPath)
+	diagnostics.LogStep(p.logger, "llm_html", "after", trace,
+		"prompt_fingerprint", diagnostics.Fingerprint(result.Prompt),
+		"response_fingerprint", diagnostics.Fingerprint(html),
+		"result_path", paths.HTMLPath,
+	)
 	return stageOutput{Text: html, Paths: paths}, nil
 }
 
@@ -475,9 +536,15 @@ func (p *Pipeline) RunArticleByExternalID(ctx context.Context, externalID string
 		}
 		return PipelineOutput{}, wrapped
 	}
+	if err := assertLoadedArticle(externalID, input.Article); err != nil {
+		return PipelineOutput{}, p.fail(ctx, p.stageLogger(input), input, "verify_article_identity", err)
+	}
 	saved, err := p.repository.GetSavedGenerationInput(ctx, externalID)
 	if err != nil {
 		return PipelineOutput{}, p.fail(ctx, p.stageLogger(input), input, "load_article_artifacts", err)
+	}
+	if err := assertLoadedArticle(externalID, saved.Article); err != nil {
+		return PipelineOutput{}, p.fail(ctx, p.stageLogger(input), input, "verify_article_identity", err)
 	}
 	structure, err := p.readRequiredArtifact(ctx, input, "article", "structure", saved.StructurePath)
 	if err != nil {
@@ -552,7 +619,71 @@ func (p *Pipeline) loadSavedInput(ctx context.Context, externalID, stage string)
 		return article.SavedGenerationInput{}, article.GenerationInput{}, wrapped
 	}
 	input := article.GenerationInput{Article: saved.Article, Professions: saved.Professions, Links: saved.Links}
+	if err := assertLoadedArticle(externalID, saved.Article); err != nil {
+		return article.SavedGenerationInput{}, article.GenerationInput{},
+			p.fail(ctx, p.stageLogger(input), input, "verify_article_identity", err)
+	}
 	return saved, input, nil
+}
+
+// articleTraceReader re-reads one article identity straight from PostgreSQL.
+type articleTraceReader interface {
+	GetArticleTrace(ctx context.Context, articleID int64) (article.Trace, error)
+}
+
+func (p *Pipeline) articleTrace(ctx context.Context, logger *slog.Logger, input article.GenerationInput) (article.Trace, error) {
+	return articleTrace(ctx, logger, p.repository, input)
+}
+
+// articleTrace re-reads the article identity from PostgreSQL right before the LLM call and
+// verifies it still matches the input the stage is about to send.
+func articleTrace(ctx context.Context, logger *slog.Logger, reader articleTraceReader, input article.GenerationInput) (article.Trace, error) {
+	inMemory := article.Trace{
+		ArticleID: input.Article.ID, ExternalID: input.Article.ExternalID, Title: input.Article.Title,
+	}
+	stored, err := reader.GetArticleTrace(ctx, input.Article.ID)
+	if err != nil {
+		if isContextCancellation(ctx, err) {
+			return article.Trace{}, err
+		}
+		logger.Warn("не удалось прочитать идентичность статьи для трассировки", "stage", "identity_trace", "error", err)
+		return inMemory, nil
+	}
+	if mismatchErr := diagnostics.TraceMismatch(inMemory, stored); mismatchErr != nil {
+		return article.Trace{}, mismatchErr
+	}
+	return stored, nil
+}
+
+// traceLLMStage re-reads the article identity and records what one LLM stage is about to send.
+func (p *Pipeline) traceLLMStage(ctx context.Context, logger *slog.Logger, input article.GenerationInput, stage, inputText string) (article.Trace, error) {
+	trace, err := p.articleTrace(ctx, logger, input)
+	if err != nil {
+		return article.Trace{}, err
+	}
+	diagnostics.LogStep(p.logger, stage, "before", trace, "input_fingerprint", diagnostics.Fingerprint(inputText))
+	return trace, nil
+}
+
+// assertLoadedArticle guards against a lookup answering with another article's data.
+func assertLoadedArticle(requestedExternalID string, loaded article.Article) error {
+	if loaded.ExternalID == requestedExternalID {
+		return nil
+	}
+	return fmt.Errorf(
+		"запрошена статья external_id=%s, а загружена article_id=%d external_id=%s title=%q",
+		requestedExternalID, loaded.ID, loaded.ExternalID, loaded.Title,
+	)
+}
+
+// assertArtifactOwner guards against reading an artifact from another article's directory:
+// every path is <external_id>-<slug>/... relative to OUTPUT_DIR.
+func assertArtifactOwner(externalID, name, path string) error {
+	directory := strings.SplitN(strings.TrimPrefix(filepath.ToSlash(path), "/"), "/", 2)[0]
+	if strings.HasPrefix(directory, externalID+"-") {
+		return nil
+	}
+	return fmt.Errorf("сохранённый %s принадлежит другой статье: путь %q не начинается с %q", name, path, externalID+"-")
 }
 
 func (p *Pipeline) readRequiredArtifact(ctx context.Context, input article.GenerationInput, stage, name, path string) (string, error) {
@@ -562,6 +693,9 @@ func (p *Pipeline) readRequiredArtifact(ctx context.Context, input article.Gener
 	}
 	if strings.TrimSpace(path) == "" {
 		return "", p.fail(ctx, logger, input, stage, fmt.Errorf("article_id=%d external_id=%s: missing saved %s result", input.Article.ID, input.Article.ExternalID, name))
+	}
+	if err := assertArtifactOwner(input.Article.ExternalID, name, path); err != nil {
+		return "", p.fail(ctx, logger, input, stage, err)
 	}
 	text, err := p.writer.Read(path)
 	if err != nil {

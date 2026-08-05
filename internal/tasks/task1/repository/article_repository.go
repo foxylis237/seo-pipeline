@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"strconv"
 	"strings"
 
 	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/article"
@@ -634,6 +635,56 @@ func (r *ArticleRepository) GetArticleByExternalID(ctx context.Context, external
 		return article.Article{}, fmt.Errorf("получить статью с external_id %q: %w", externalID, err)
 	}
 	return selected, nil
+}
+
+// GetArticleTrace loads the identity of one article by its internal id. It is used by the
+// temporary cross-article diagnostics: every external step re-reads the identity from
+// PostgreSQL instead of trusting the value carried in memory.
+func (r *ArticleRepository) GetArticleTrace(ctx context.Context, articleID int64) (article.Trace, error) {
+	var trace article.Trace
+	err := r.pool.QueryRow(ctx, `
+		SELECT a.id, a.external_id, a.title,
+			COALESCE(i.key_word, ''), COALESCE(i.reference_url, '')
+		FROM articles AS a
+		LEFT JOIN article_inputs AS i ON i.article_id = a.id
+		WHERE a.id = $1
+	`, articleID).Scan(&trace.ArticleID, &trace.ExternalID, &trace.Title, &trace.Keyword, &trace.ReferenceURL)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return article.Trace{}, fmt.Errorf("статья %d не найдена при чтении идентичности", articleID)
+	}
+	if err != nil {
+		return article.Trace{}, fmt.Errorf("прочитать идентичность статьи %d: %w", articleID, err)
+	}
+	return trace, nil
+}
+
+// GetArticleInput loads the imported Excel row of one article. It is used by prepare
+// diagnostics to record what the run started from.
+func (r *ArticleRepository) GetArticleInput(ctx context.Context, articleID int64) (article.Input, error) {
+	var input article.Input
+	var externalID string
+	err := r.pool.QueryRow(ctx, `
+		SELECT a.external_id, a.title,
+			COALESCE(i.header, ''), COALESCE(i.image_slug, ''), COALESCE(i.meta_description, ''),
+			COALESCE(i.key_word, ''), COALESCE(i.reference_url, ''), COALESCE(i.category, ''),
+			COALESCE(i.author, ''), COALESCE(i.links, ''), COALESCE(i.professions, '')
+		FROM articles AS a
+		LEFT JOIN article_inputs AS i ON i.article_id = a.id
+		WHERE a.id = $1
+	`, articleID).Scan(
+		&externalID, &input.Title, &input.Header, &input.ImageSlug, &input.MetaDescription,
+		&input.Keyword, &input.ReferenceURL, &input.Category, &input.Author, &input.Links, &input.Professions,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return article.Input{}, fmt.Errorf("статья %d не найдена при чтении входных данных", articleID)
+	}
+	if err != nil {
+		return article.Input{}, fmt.Errorf("прочитать входные данные статьи %d: %w", articleID, err)
+	}
+	if excelID, convErr := strconv.Atoi(strings.TrimSpace(externalID)); convErr == nil {
+		input.ExcelID = excelID
+	}
+	return input, nil
 }
 
 // GetPendingForOperation returns articles whose persisted state requires the

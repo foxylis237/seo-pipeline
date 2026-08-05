@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -18,6 +19,7 @@ import (
 	"github.com/foxylis237/seo-pipeline/internal/llm/deepseekweb"
 	llmgemini "github.com/foxylis237/seo-pipeline/internal/llm/gemini"
 	"github.com/foxylis237/seo-pipeline/internal/storage"
+	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/diagnostics"
 	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/generation"
 	articleoutput "github.com/foxylis237/seo-pipeline/internal/tasks/task1/output"
 	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/repository"
@@ -90,9 +92,25 @@ func main() {
 		os.Exit(1)
 	}
 
-	taskLogger := logger.With("task", "task_1", "operation", command.Name)
-	articleRepository := repository.NewArticleRepository(pool, taskLogger)
 	writer := articleoutput.NewWriter(cfg.OutputDir)
+	// Логи этапа пишутся не только в stdout, но и в каталог самой статьи:
+	// <external_id>-<slug>/logs/<operation>.log. Пайпинг через tee больше не нужен.
+	newHandler, err := newHandlerFactory(cfg.LogLevel, cfg.LogFormat)
+	if err != nil {
+		logger.Error("не удалось настроить логирование", "error", err)
+		os.Exit(1)
+	}
+	var logRouter *diagnostics.ArticleLogRouter
+	if isArticleOperation(command.Name) {
+		logRouter = diagnostics.NewArticleLogRouter(writer, command.Name, newHandler)
+	}
+	defer func() {
+		if closeErr := logRouter.Close(); closeErr != nil {
+			logger.Warn("не удалось закрыть логи статей", "stage", "shutdown", "error", closeErr)
+		}
+	}()
+	taskLogger := slog.New(logRouter.Handler(logger.Handler())).With("task", "task_1", "operation", command.Name)
+	articleRepository := repository.NewArticleRepository(pool, taskLogger)
 	resultService := resultassembly.NewService(articleRepository, writer, taskLogger)
 
 	taskStarted := time.Now()
@@ -105,8 +123,7 @@ func main() {
 		err = runImport(ctx, articleRepository, cfg.InputFilePath, "output/task1/import-reports", command.ImportLimit, taskLogger)
 
 	case "prepare":
-		writer := articleoutput.NewWriter(cfg.OutputDir)
-		err = runPrepare(ctx, articleRepository, cfg, taskLogger, writer, command.ExternalID)
+		err = runPrepare(ctx, articleRepository, cfg, taskLogger, writer, logRouter, command.ExternalID)
 
 	case "result":
 		runResult := func(ctx context.Context, externalID string) error {
@@ -229,7 +246,7 @@ func main() {
 					if validateErr := cfg.ValidatePrepare(); validateErr != nil {
 						return validateErr
 					}
-					if prepareErr := runPrepare(ctx, articleRepository, cfg, taskLogger, writer, externalID); prepareErr != nil {
+					if prepareErr := runPrepare(ctx, articleRepository, cfg, taskLogger, writer, logRouter, externalID); prepareErr != nil {
 						return prepareErr
 					}
 				}
@@ -341,11 +358,26 @@ func main() {
 	taskLogger.Info("task completed", "stage", "complete", "duration_ms", time.Since(taskStarted).Milliseconds())
 }
 
+// isArticleOperation reports an operation that works on one article at a time and therefore
+// deserves its own log in the article directory. Импорт сюда не входит: он работает со всей
+// таблицей сразу и уже пишет отчёт в output/task1/import-reports.
+func isArticleOperation(name string) bool {
+	switch name {
+	case "prepare", "run", "generate", "demo-generate", "retry",
+		"article", "info", "review", "fix", "html", "result":
+		return true
+	default:
+		return false
+	}
+}
+
 func isGracefulCancellation(ctx context.Context, err error) bool {
 	return errors.Is(ctx.Err(), context.Canceled) && errors.Is(err, context.Canceled)
 }
 
-func newLogger(levelValue, formatValue string) (*slog.Logger, error) {
+// newHandlerFactory builds log handlers of the configured level and format. The same factory
+// serves stdout and the per-article stage logs, so both keep one format.
+func newHandlerFactory(levelValue, formatValue string) (func(io.Writer) slog.Handler, error) {
 	var level slog.Level
 	switch strings.ToLower(strings.TrimSpace(levelValue)) {
 	case "debug":
@@ -359,18 +391,23 @@ func newLogger(levelValue, formatValue string) (*slog.Logger, error) {
 	default:
 		return nil, fmt.Errorf("неподдерживаемый LOG_LEVEL %q", levelValue)
 	}
-
 	options := &slog.HandlerOptions{Level: level}
-	var handler slog.Handler
 	switch strings.ToLower(strings.TrimSpace(formatValue)) {
 	case "text":
-		handler = slog.NewTextHandler(os.Stdout, options)
+		return func(destination io.Writer) slog.Handler { return slog.NewTextHandler(destination, options) }, nil
 	case "json":
-		handler = slog.NewJSONHandler(os.Stdout, options)
+		return func(destination io.Writer) slog.Handler { return slog.NewJSONHandler(destination, options) }, nil
 	default:
 		return nil, fmt.Errorf("неподдерживаемый LOG_FORMAT %q", formatValue)
 	}
-	return slog.New(handler), nil
+}
+
+func newLogger(levelValue, formatValue string) (*slog.Logger, error) {
+	newHandler, err := newHandlerFactory(levelValue, formatValue)
+	if err != nil {
+		return nil, err
+	}
+	return slog.New(newHandler(os.Stdout)), nil
 }
 
 type taskCommand struct {

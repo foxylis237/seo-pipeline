@@ -524,7 +524,38 @@ func (s *Service) submitCompetitorSearch(ctx context.Context, referenceURL strin
 	}
 	s.requestedURL = s.resultsURL
 	s.log(slog.LevelDebug, "поиск конкурента отправлен, ожидание результатов", "collect_competitor_queries", "requested_url", s.requestedURL)
+	if !resultsMatchReference(s.resultsURL, referenceURL) {
+		s.log(slog.LevelWarn,
+			"страница результатов Keys.so не упоминает reference_url статьи",
+			"validate_results_url",
+			"article_id", s.cfg.ArticleID, "external_id", s.cfg.ExternalID,
+			"reference_url", referenceURL, "results_url", s.resultsURL,
+		)
+	}
 	return nil
+}
+
+// resultsMatchReference reports the Keys.so results URL carrying the requested competitor
+// site. A false result means the page shown belongs to some other search — most likely the
+// previous article's one — and the collected queries must not be trusted.
+func resultsMatchReference(resultsURL, referenceURL string) bool {
+	reference, err := url.Parse(strings.TrimSpace(referenceURL))
+	if err != nil {
+		return true
+	}
+	host := strings.TrimPrefix(strings.ToLower(reference.Hostname()), "www.")
+	if host == "" {
+		// reference_url may be stored without a scheme; take the first path segment instead.
+		host = strings.ToLower(strings.Split(strings.TrimPrefix(reference.Path, "/"), "/")[0])
+	}
+	if host == "" {
+		return true
+	}
+	decoded, err := url.QueryUnescape(resultsURL)
+	if err != nil {
+		decoded = resultsURL
+	}
+	return strings.Contains(strings.ToLower(decoded), host)
 }
 
 func (s *Service) waitKeywordsResults(ctx context.Context) error {

@@ -197,7 +197,7 @@ func TestRouterAggregatesAllTargetErrorsAndChatCarriesHistory(t *testing.T) {
 	first := &fakeClient{errors: []error{temporary, temporary, temporary, temporary, temporary, temporary}}
 	second := &fakeClient{}
 	router := fallbackTestRouter(first, second)
-	chat, _ := router.NewStageChatFactory("structure", "structure").NewChat(context.Background())
+	chat, _ := router.NewStageChatFactory("structure", "structure").NewChat(context.Background(), 7)
 	if _, err := chat.Generate(context.Background(), "first prompt"); err != nil {
 		t.Fatal(err)
 	}
@@ -310,4 +310,39 @@ func testRouter(client Client) *Router {
 	}, map[string]Client{"selected": client}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	router.sleep = func(context.Context, time.Duration) error { return nil }
 	return router
+}
+
+func TestStageChatLogsArticleIDForEveryStage(t *testing.T) {
+	client := &fakeClient{}
+	var logs bytes.Buffer
+	temperature := 0.3
+	router := NewRouter(config.LLMConfig{
+		Providers: map[string]config.LLMProviderConfig{"selected": {Type: "openai_compatible", APIKeyEnv: "TEST"}},
+		Stages: map[string]config.LLMStageConfig{
+			"article": {Provider: "selected", Model: "configured-model", PromptTemplate: "{{.Title}}",
+				Temperature: &temperature, MaxTokens: 100, Timeout: time.Second},
+			"info": {Provider: "selected", Model: "configured-model", PromptTemplate: "{{.Title}}",
+				Temperature: &temperature, MaxTokens: 100, Timeout: time.Second},
+		},
+	}, map[string]Client{"selected": client}, slog.New(slog.NewJSONHandler(&logs, nil)))
+
+	chat, err := router.NewStageChatFactory("article", "info").NewChat(context.Background(), 77)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := chat.Generate(context.Background(), "article prompt"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := chat.Generate(context.Background(), "info prompt"); err != nil {
+		t.Fatal(err)
+	}
+	output := logs.String()
+	for _, expected := range []string{`"article_id":77,"stage":"article"`, `"article_id":77,"stage":"info"`} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("log does not contain %s: %s", expected, output)
+		}
+	}
+	if strings.Contains(output, `"article_id":0`) {
+		t.Fatalf("chat stage was logged without an article: %s", output)
+	}
 }
