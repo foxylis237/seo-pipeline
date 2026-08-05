@@ -103,3 +103,13 @@ func TestOtherMakeTargetsStillResolve(t *testing.T) {
 		}
 	}
 }
+
+func TestMakeDeepSeekLoginAcceptsNoArguments(t *testing.T) {
+	root := filepath.Join("..", "..")
+	command := exec.Command("make", "-n", "task-1", "deepseek-login")
+	command.Dir = root
+	output, err := command.CombinedOutput()
+	if err != nil || !strings.Contains(string(output), "task-1 deepseek-login") {
+		t.Fatalf("make task-1 deepseek-login: %v\n%s", err, output)
+	}
+}

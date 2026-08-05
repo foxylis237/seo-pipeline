@@ -3,8 +3,6 @@ package main
 import (
 	"strings"
 	"testing"
-
-	"github.com/foxylis237/seo-pipeline/internal/config"
 )
 
 func TestParseCommand(t *testing.T) {
@@ -27,6 +25,8 @@ func TestParseCommand(t *testing.T) {
 		{[]string{"seo-pipeline", "task-1", "prepare"}, taskCommand{Name: "prepare"}, ""},
 		{[]string{"seo-pipeline", "task-1", "generate", "37"}, taskCommand{Name: "generate", ExternalID: "37"}, ""},
 		{[]string{"seo-pipeline", "task-1", "generate"}, taskCommand{Name: "generate"}, ""},
+		{[]string{"seo-pipeline", "task-1", "deepseek-login"}, taskCommand{Name: "deepseek-login"}, ""},
+		{[]string{"seo-pipeline", "task-1", "deepseek-login", "37"}, taskCommand{}, "usage: seo-pipeline task-1 deepseek-login"},
 		{[]string{"seo-pipeline", "task-1", "article", "37"}, taskCommand{Name: "article", ExternalID: "37"}, ""},
 		{[]string{"seo-pipeline", "task-1", "article"}, taskCommand{Name: "article"}, ""},
 		{[]string{"seo-pipeline", "task-1", "info", "37"}, taskCommand{Name: "info", ExternalID: "37"}, ""},
@@ -69,21 +69,6 @@ func TestParseCommand(t *testing.T) {
 		}
 		if err != nil || got != test.want {
 			t.Fatalf("parseCommand(%v) = %+v, %v; want %+v", test.args, got, err, test.want)
-		}
-	}
-}
-
-func TestUseGeminiModelAppliesEnvironmentModelToEveryStage(t *testing.T) {
-	cfg := config.LLMConfig{Stages: map[string]config.LLMStageConfig{
-		"article": {Provider: "gemini", Model: "yaml-model"},
-		"info":    {Provider: "gemini", Model: "yaml-model"},
-	}}
-	if err := useGeminiModel(&cfg, "gemini-from-env"); err != nil {
-		t.Fatal(err)
-	}
-	for name, stage := range cfg.Stages {
-		if stage.Model != "gemini-from-env" {
-			t.Fatalf("%s model = %q", name, stage.Model)
 		}
 	}
 }

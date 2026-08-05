@@ -15,6 +15,7 @@ import (
 	"github.com/foxylis237/seo-pipeline/internal/config"
 	"github.com/foxylis237/seo-pipeline/internal/integrations/arsenkin"
 	"github.com/foxylis237/seo-pipeline/internal/llm"
+	"github.com/foxylis237/seo-pipeline/internal/llm/deepseekweb"
 	llmgemini "github.com/foxylis237/seo-pipeline/internal/llm/gemini"
 	"github.com/foxylis237/seo-pipeline/internal/storage"
 	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/generation"
@@ -32,6 +33,14 @@ func main() {
 	if err != nil {
 		logger.Error(err.Error())
 		os.Exit(1)
+	}
+	if command.Name == "deepseek-login" {
+		if err := runDeepSeekLogin(ctx, logger); err != nil {
+			logger.Error("DeepSeek login failed", "error", err)
+			os.Exit(1)
+		}
+		logger.Info("DeepSeek login completed")
+		return
 	}
 
 	var cfg config.Config
@@ -139,22 +148,37 @@ func main() {
 			err = configErr
 			break
 		}
-		if configErr := useGeminiModel(&llmConfig, cfg.GeminiModel); configErr != nil {
-			err = configErr
-			break
-		}
 		clients := make(map[string]llm.Client)
-		var geminiClient *llmgemini.Client
-		for name, provider := range llmConfig.Providers {
+		var closeClients []interface{ Close() error }
+		usedProviders := make(map[string]struct{})
+		for _, stage := range llmConfig.Stages {
+			for _, target := range stage.Targets {
+				usedProviders[target.Provider] = struct{}{}
+			}
+		}
+		for name := range usedProviders {
+			provider := llmConfig.Providers[name]
 			switch provider.Type {
 			case "gemini":
-				client, generatorErr := llmgemini.NewClient(ctx, os.Getenv(provider.APIKeyEnv), cfg.GeminiModel)
+				model := ""
+				for _, stage := range llmConfig.Stages {
+					for _, target := range stage.Targets {
+						if target.Provider == name {
+							model = target.Model
+							break
+						}
+					}
+					if model != "" {
+						break
+					}
+				}
+				client, generatorErr := llmgemini.NewClient(ctx, os.Getenv(provider.APIKeyEnv), model)
 				if generatorErr != nil {
 					err = fmt.Errorf("создать LLM provider %q: %w", name, generatorErr)
 					break
 				}
 				clients[name] = client
-				geminiClient = client
+				closeClients = append(closeClients, client)
 			case "openai_compatible":
 				client, clientErr := llm.NewOpenAICompatibleClient(provider.BaseURL, os.Getenv(provider.APIKeyEnv), name, taskLogger)
 				if clientErr != nil {
@@ -162,6 +186,21 @@ func main() {
 					break
 				}
 				clients[name] = client
+			case "deepseek_web":
+				headless := true
+				if provider.Headless != nil {
+					headless = *provider.Headless
+				}
+				client, clientErr := deepseekweb.NewClient(deepseekweb.Config{
+					ChatURL: provider.ChatURL, LoginURL: provider.LoginURL,
+					ProfileDir: provider.ProfileDir, Headless: headless,
+				}, taskLogger.With("provider", name))
+				if clientErr != nil {
+					err = fmt.Errorf("создать LLM provider %q: %w", name, clientErr)
+					break
+				}
+				clients[name] = client
+				closeClients = append(closeClients, client)
 			}
 			if err != nil {
 				break
@@ -170,12 +209,9 @@ func main() {
 		if err != nil {
 			break
 		}
-		if geminiClient == nil {
-			err = fmt.Errorf("Gemini provider is not configured")
-			break
-		}
 		router := llm.NewRouter(llmConfig, clients, taskLogger)
-		generationPipeline := generation.NewPipeline(articleRepository, router, geminiClient, writer, taskLogger, resultService)
+		chatFactory := router.NewStageChatFactory("article", "info")
+		generationPipeline := generation.NewPipeline(articleRepository, router, chatFactory, writer, taskLogger, resultService)
 		runPreparedDemo := func(ctx context.Context, externalID string) error {
 			saved, loadErr := articleRepository.GetSavedGenerationInput(ctx, externalID)
 			if loadErr != nil {
@@ -258,8 +294,10 @@ func main() {
 				err = runHTML(ctx, generationPipeline, command.ExternalID)
 			}
 		}
-		if closeErr := geminiClient.Close(); closeErr != nil {
-			err = errors.Join(err, fmt.Errorf("закрыть Gemini client: %w", closeErr))
+		for _, client := range closeClients {
+			if closeErr := client.Close(); closeErr != nil {
+				err = errors.Join(err, fmt.Errorf("закрыть LLM client: %w", closeErr))
+			}
 		}
 
 	}
@@ -367,12 +405,17 @@ func parseCommand(args []string) (taskCommand, error) {
 }
 
 func parseTaskCommand(args []string) (taskCommand, error) {
-	const available = "available task-1 operations: import, errors, retry, run, demo-generate, prepare, generate, article, info, review, fix, html, result"
+	const available = "available task-1 operations: import, errors, retry, run, demo-generate, prepare, generate, article, info, review, fix, html, result, deepseek-login"
 	if len(args) < 3 || (args[1] != "task-1" && args[1] != "task_1") {
 		return taskCommand{}, fmt.Errorf("usage: seo-pipeline task-1 <operation> [arguments]; %s", available)
 	}
 	task := args[2]
 	switch task {
+	case "deepseek-login":
+		if len(args) != 3 {
+			return taskCommand{}, fmt.Errorf("usage: seo-pipeline task-1 deepseek-login")
+		}
+		return taskCommand{Name: task}, nil
 	case "import":
 		if len(args) > 4 {
 			return taskCommand{}, fmt.Errorf("usage: seo-pipeline task-1 import [limit]")
@@ -414,21 +457,6 @@ func parseExternalIDCommand(name, value string) (taskCommand, error) {
 		return taskCommand{}, fmt.Errorf("external_id must be a positive integer: %q", value)
 	}
 	return taskCommand{Name: name, ExternalID: strconv.FormatInt(externalID, 10)}, nil
-}
-
-func useGeminiModel(cfg *config.LLMConfig, model string) error {
-	model = strings.TrimSpace(model)
-	if model == "" {
-		return fmt.Errorf("GEMINI_MODEL is required")
-	}
-	for name, stage := range cfg.Stages {
-		if stage.Provider != "gemini" {
-			return fmt.Errorf("LLM stage %q must use Gemini", name)
-		}
-		stage.Model = model
-		cfg.Stages[name] = stage
-	}
-	return nil
 }
 
 func validateConfig(command string, cfg config.Config) error {

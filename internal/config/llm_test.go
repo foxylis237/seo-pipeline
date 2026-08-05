@@ -15,7 +15,9 @@ func TestProjectLLMStageTimeouts(t *testing.T) {
 	}
 	t.Chdir(projectRoot)
 	t.Setenv("GEMINI_API_KEY", "test-gemini")
+	t.Setenv("GEMINI_MODEL", "gemini-test")
 	t.Setenv("OPENROUTER_API_KEY", "test-openrouter")
+	t.Setenv("OPENROUTER_MODEL", "nvidia/test-free")
 	t.Setenv("GROQ_API_KEY", "test-groq")
 	cfg, err := LoadLLMConfig("config/config.yaml")
 	if err != nil {
@@ -61,9 +63,71 @@ func TestLoadLLMConfigRejectsUnknownProvider(t *testing.T) {
 	path := writeLLMTestConfig(t, "missing", "TEST_GEMINI_KEY", "")
 	t.Setenv("TEST_GEMINI_KEY", "test-value")
 	_, err := LoadLLMConfig(path)
-	if err == nil || !strings.Contains(err.Error(), `stage "structure" references unknown provider "missing"`) {
+	if err == nil || !strings.Contains(err.Error(), `stage "structure" target 0 references unknown provider "missing"`) || !strings.Contains(err.Error(), "available providers: gemini") {
 		t.Fatalf("error = %v", err)
 	}
+}
+
+func TestValidateLLMConfigSupportsConfiguredProviderTypes(t *testing.T) {
+	prompt := filepath.Join(t.TempDir(), "prompt.txt")
+	if err := os.WriteFile(prompt, []byte("{{.Title}}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name, providerType, baseURL, wantType string
+	}{
+		{name: "gemini", providerType: "gemini", wantType: "gemini"},
+		{name: "standard OpenAI", providerType: "openai", baseURL: "https://api.openai.com/v1", wantType: "openai_compatible"},
+		{name: "custom compatible", providerType: "openai-compatible", baseURL: "https://openrouter.ai/api/v1", wantType: "openai_compatible"},
+		{name: "DeepSeek Web", providerType: "deepseek-web", wantType: "deepseek_web"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := testLLMConfig(prompt, "selected", "model-a", "model-b")
+			provider := LLMProviderConfig{Type: test.providerType, BaseURL: test.baseURL, APIKeyEnv: "TEST_KEY"}
+			if test.wantType == "deepseek_web" {
+				provider.APIKeyEnv = ""
+			}
+			cfg.Providers = map[string]LLMProviderConfig{"selected": provider}
+			if err := validateLLMConfig(&cfg, false); err != nil {
+				t.Fatal(err)
+			}
+			if cfg.Providers["selected"].Type != test.wantType {
+				t.Fatalf("type = %q", cfg.Providers["selected"].Type)
+			}
+			if test.wantType == "deepseek_web" && cfg.Providers["selected"].ProfileDir != "data/browser/deepseek" {
+				t.Fatalf("profile_dir = %q", cfg.Providers["selected"].ProfileDir)
+			}
+			if cfg.Stages["structure"].Model != "model-a" || cfg.Stages["review"].Model != "model-b" {
+				t.Fatalf("stage models were not independent: structure=%q review=%q", cfg.Stages["structure"].Model, cfg.Stages["review"].Model)
+			}
+		})
+	}
+}
+
+func TestValidateLLMConfigRejectsUnknownProviderTypeWithAllowedTypes(t *testing.T) {
+	prompt := filepath.Join(t.TempDir(), "prompt.txt")
+	if err := os.WriteFile(prompt, []byte("prompt"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := testLLMConfig(prompt, "selected", "model-a", "model-b")
+	cfg.Providers = map[string]LLMProviderConfig{"selected": {Type: "openrouter", APIKeyEnv: "KEY"}}
+	err := validateLLMConfig(&cfg, false)
+	if err == nil || !strings.Contains(err.Error(), "supported types: gemini, openai_compatible, deepseek_web") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func testLLMConfig(prompt, provider, structureModel, otherModel string) LLMConfig {
+	temperature := 0.3
+	stages := make(map[string]LLMStageConfig, len(requiredLLMStages))
+	for _, name := range requiredLLMStages {
+		model := otherModel
+		if name == "structure" {
+			model = structureModel
+		}
+		stages[name] = LLMStageConfig{Provider: provider, Model: model, Prompt: prompt, Temperature: &temperature, MaxTokens: 100, TimeoutText: "1m"}
+	}
+	return LLMConfig{Stages: stages}
 }
 
 func TestLoadLLMConfigRejectsMissingEnvironment(t *testing.T) {
@@ -84,6 +148,47 @@ func TestLoadLLMConfigForDryRunDoesNotRequireProviderCredentials(t *testing.T) {
 	}
 	if cfg.Stages["structure"].PromptTemplate == "" {
 		t.Fatal("dry-run prompt template is empty")
+	}
+}
+
+func TestLoadLLMProviderConfigDoesNotValidatePipeline(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	content := `llm:
+  providers:
+    deepseek_web:
+      type: deepseek_web
+      profile_dir: data/test-deepseek
+  stages:
+    structure:
+      provider: gemini
+      model: "${MISSING_LOGIN_TEST_MODEL}"
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.Unsetenv("MISSING_LOGIN_TEST_MODEL")
+	provider, err := LoadLLMProviderConfig(path, "deepseek_web")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if provider.Type != "deepseek_web" || provider.ProfileDir != "data/test-deepseek" || provider.ChatURL == "" {
+		t.Fatalf("provider = %+v", provider)
+	}
+}
+
+func TestDeepSeekWebDoesNotRequireAPICredentials(t *testing.T) {
+	prompt := filepath.Join(t.TempDir(), "prompt.txt")
+	if err := os.WriteFile(prompt, []byte("prompt"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := testLLMConfig(prompt, "deepseek", "deepseek-chat", "deepseek-chat")
+	cfg.Providers = map[string]LLMProviderConfig{"deepseek": {Type: "deepseek_web"}}
+	if err := validateLLMConfig(&cfg, true); err != nil {
+		t.Fatal(err)
+	}
+	provider := cfg.Providers["deepseek"]
+	if provider.ChatURL == "" || provider.LoginURL == "" || provider.ProfileDir == "" {
+		t.Fatalf("DeepSeek defaults were not applied: %+v", provider)
 	}
 }
 

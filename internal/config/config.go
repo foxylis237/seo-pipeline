@@ -172,9 +172,6 @@ func (c Config) ValidateGenerate() error {
 	if c.DatabaseURL == "" {
 		return fmt.Errorf("DATABASE_URL is required")
 	}
-	if c.GeminiModel == "" {
-		return fmt.Errorf("GEMINI_MODEL is required")
-	}
 	return nil
 }
 

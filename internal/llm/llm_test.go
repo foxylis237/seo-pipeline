@@ -142,6 +142,87 @@ func TestRouterSelectsProviderAndModel(t *testing.T) {
 	}
 }
 
+func TestRouterSelectsModelsIndependentlyPerStage(t *testing.T) {
+	structureClient := &fakeClient{}
+	reviewClient := &fakeClient{}
+	temperature := 0.3
+	cfg := config.LLMConfig{Stages: map[string]config.LLMStageConfig{
+		"structure": {Provider: "gemini", Model: "gemini-model", PromptTemplate: "{{.Title}}", Temperature: &temperature, MaxTokens: 100, Timeout: time.Second},
+		"review":    {Provider: "openrouter", Model: "free-model", PromptTemplate: "{{.Title}}", Temperature: &temperature, MaxTokens: 200, Timeout: time.Second},
+	}}
+	router := NewRouter(cfg, map[string]Client{"gemini": structureClient, "openrouter": reviewClient}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if _, err := router.Generate(context.Background(), Call{Stage: "structure", Data: struct{ Title string }{"Structure"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := router.Generate(context.Background(), Call{Stage: "review", Data: struct{ Title string }{"Review"}}); err != nil {
+		t.Fatal(err)
+	}
+	if structureClient.request.Model != "gemini-model" || reviewClient.request.Model != "free-model" {
+		t.Fatalf("models: structure=%q review=%q", structureClient.request.Model, reviewClient.request.Model)
+	}
+}
+
+func TestRouterFallsBackForEligibleErrors(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		err  error
+	}{
+		{"rate limit", NewStatusError(429, "rate limit exceeded")},
+		{"resource exhausted", NewStatusError(429, "resource exhausted")},
+		{"service unavailable", NewStatusError(503, "temporary")},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			first := &fakeClient{errors: []error{test.err, test.err, test.err}}
+			second := &fakeClient{}
+			router := fallbackTestRouter(first, second)
+			result, err := router.Generate(context.Background(), Call{Stage: "structure", Data: struct{ Title string }{"T"}})
+			if err != nil || result.Provider != "second" || second.calls != 1 {
+				t.Fatalf("result=%+v err=%v calls=%d", result, err, second.calls)
+			}
+		})
+	}
+}
+
+func TestRouterDoesNotFallbackForPermanentError(t *testing.T) {
+	first := &fakeClient{errors: []error{NewStatusError(400, "bad request")}}
+	second := &fakeClient{}
+	_, err := fallbackTestRouter(first, second).Generate(context.Background(), Call{Stage: "structure", Data: struct{ Title string }{"T"}})
+	if err == nil || second.calls != 0 {
+		t.Fatalf("err=%v second.calls=%d", err, second.calls)
+	}
+}
+
+func TestRouterAggregatesAllTargetErrorsAndChatCarriesHistory(t *testing.T) {
+	temporary := NewStatusError(503, "temporary")
+	first := &fakeClient{errors: []error{temporary, temporary, temporary, temporary, temporary, temporary}}
+	second := &fakeClient{}
+	router := fallbackTestRouter(first, second)
+	chat, _ := router.NewStageChatFactory("structure", "structure").NewChat(context.Background())
+	if _, err := chat.Generate(context.Background(), "first prompt"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := chat.Generate(context.Background(), "second prompt"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(second.request.Prompt, "assistant:\nok") || !strings.Contains(second.request.Prompt, "first prompt") {
+		t.Fatalf("history missing: %q", second.request.Prompt)
+	}
+
+	failedRouter := fallbackTestRouter(&fakeClient{errors: []error{temporary, temporary, temporary}}, &fakeClient{errors: []error{temporary, temporary, temporary}})
+	_, err := failedRouter.Generate(context.Background(), Call{Stage: "structure", Data: struct{ Title string }{"T"}})
+	if err == nil || !strings.Contains(err.Error(), "provider=first") || !strings.Contains(err.Error(), "provider=second") {
+		t.Fatalf("aggregate error=%v", err)
+	}
+}
+
+func fallbackTestRouter(first, second Client) *Router {
+	temperature := 0.3
+	stage := config.LLMStageConfig{Targets: []config.LLMTargetConfig{{Provider: "first", Model: "one"}, {Provider: "second", Model: "two"}}, PromptTemplate: "{{.Title}}", Temperature: &temperature, MaxTokens: 100, Timeout: time.Second}
+	router := NewRouter(config.LLMConfig{Stages: map[string]config.LLMStageConfig{"structure": stage}}, map[string]Client{"first": first, "second": second}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	router.sleep = func(context.Context, time.Duration) error { return nil }
+	return router
+}
+
 func TestRouterRetriesTemporaryErrors(t *testing.T) {
 	for _, code := range []int{429, 500, 502, 503, 504} {
 		client := &fakeClient{errors: []error{NewStatusError(code, "temporary rate limit"), nil}}

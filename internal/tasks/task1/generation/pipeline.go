@@ -272,10 +272,10 @@ func (p *Pipeline) runArticleAndInfo(ctx context.Context, input article.Generati
 	}
 	defer func() {
 		if err := chat.Close(); err != nil {
-			returnErr = errors.Join(returnErr, fmt.Errorf("close article Gemini chat: %w", err))
+			returnErr = errors.Join(returnErr, fmt.Errorf("close article LLM chat: %w", err))
 		}
 	}()
-	logger.Info("Gemini chat created", "stage", "article_generation", "model", articleCall.Model)
+	logger.Info("LLM chat created", "stage", "article_generation", "model", articleCall.Model)
 	articleCtx, cancelArticle := context.WithTimeout(ctx, articleCall.Timeout)
 	articleResult, err := chat.Generate(articleCtx, articleCall.Prompt)
 	cancelArticle()

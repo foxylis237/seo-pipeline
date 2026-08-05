@@ -19,6 +19,9 @@ type OpenAICompatibleClient struct {
 	provider   string
 	httpClient *http.Client
 	logger     *slog.Logger
+	chatModel  string
+	chatTemp   float64
+	chatTokens int
 }
 
 func NewOpenAICompatibleClient(baseURL, apiKey, provider string, logger *slog.Logger) (*OpenAICompatibleClient, error) {
@@ -66,9 +69,13 @@ func (c *OpenAICompatibleClient) Generate(ctx context.Context, request Request) 
 	if strings.TrimSpace(request.Prompt) == "" {
 		return Response{}, fmt.Errorf("prompt is empty")
 	}
+	return c.generateMessages(ctx, request, []chatCompletionMessage{{Role: "user", Content: request.Prompt}})
+}
+
+func (c *OpenAICompatibleClient) generateMessages(ctx context.Context, request Request, messages []chatCompletionMessage) (Response, error) {
 	payload, err := json.Marshal(chatCompletionRequest{
 		Model:       request.Model,
-		Messages:    []chatCompletionMessage{{Role: "user", Content: request.Prompt}},
+		Messages:    messages,
 		Temperature: request.Temperature,
 		MaxTokens:   request.MaxTokens,
 	})
@@ -135,9 +142,53 @@ func (c *OpenAICompatibleClient) Generate(ctx context.Context, request Request) 
 		return Response{}, fmt.Errorf("%s returned an empty response", c.provider)
 	}
 	return Response{
-		Text: text, InputTokens: decoded.Usage.PromptTokens,
+		Text: text, Model: request.Model, InputTokens: decoded.Usage.PromptTokens,
 		OutputTokens: decoded.Usage.CompletionTokens,
 	}, nil
+}
+
+// ConfigureChat configures stateful Article + Info conversations for this provider.
+func (c *OpenAICompatibleClient) ConfigureChat(model string, temperature float64, maxTokens int) {
+	c.chatModel = strings.TrimSpace(model)
+	c.chatTemp = temperature
+	c.chatTokens = maxTokens
+}
+
+// NewChat starts an isolated OpenAI-compatible conversation.
+func (c *OpenAICompatibleClient) NewChat(context.Context) (Chat, error) {
+	if c.chatModel == "" {
+		return nil, fmt.Errorf("chat model for provider %q is empty", c.provider)
+	}
+	return &openAICompatibleChat{client: c}, nil
+}
+
+type openAICompatibleChat struct {
+	client   *OpenAICompatibleClient
+	messages []chatCompletionMessage
+}
+
+func (c *openAICompatibleChat) Generate(ctx context.Context, prompt string) (Response, error) {
+	if c.client == nil {
+		return Response{}, fmt.Errorf("OpenAI-compatible chat is closed")
+	}
+	if strings.TrimSpace(prompt) == "" {
+		return Response{}, fmt.Errorf("prompt is empty")
+	}
+	messages := append(append([]chatCompletionMessage(nil), c.messages...), chatCompletionMessage{Role: "user", Content: prompt})
+	response, err := c.client.generateMessages(ctx, Request{
+		Model: c.client.chatModel, Temperature: c.client.chatTemp, MaxTokens: c.client.chatTokens,
+	}, messages)
+	if err != nil {
+		return Response{}, err
+	}
+	c.messages = append(messages, chatCompletionMessage{Role: "assistant", Content: response.Text})
+	return response, nil
+}
+
+func (c *openAICompatibleChat) Close() error {
+	c.client = nil
+	c.messages = nil
+	return nil
 }
 
 const maxErrorBody = 32 << 10
