@@ -97,15 +97,24 @@ func (c *Client) generate(ctx context.Context, request llm.Request) (llm.Respons
 	if err := c.waitForAnswer(ctx, page, previousCount); err != nil {
 		return llm.Response{}, err
 	}
-	text, source, err := answerText(answers.Last())
+	sources, err := c.readAnswerSources(page)
 	if err != nil {
 		return llm.Response{}, c.browserError(ctx, "read DeepSeek answer", err)
 	}
-	text = strings.TrimSpace(text)
+	text, source := selectAnswer(sources)
 	if text == "" {
 		return llm.Response{}, temporaryError("DeepSeek returned an empty response", nil)
 	}
-	c.stage("answer_received", "length", len([]rune(text)), "source", source)
+	c.stage("answer_received",
+		"source", source,
+		"response_chars", len([]rune(text)),
+		"has_markdown_headings", containsMarkdownHeading(text),
+		"has_markdown_table", containsMarkdownTable(text),
+		"has_html_tags", containsHTMLTags(text),
+	)
+	if lost := detectFormatLoss(sources, text, source); len(lost) > 0 {
+		return llm.Response{}, formatLostError(request.Model, source, lost)
+	}
 	return llm.Response{Text: text, Model: request.Model}, nil
 }
 
@@ -126,10 +135,7 @@ func (c *Client) waitForAnswer(ctx context.Context, page playwright.Page, previo
 				"ответ не завершился за %s, последнее состояние %s", time.Since(started).Round(time.Second), state,
 			))
 		}
-		wait := responseHeartbeat
-		if remaining < wait {
-			wait = remaining
-		}
+		wait := min(responseHeartbeat, remaining)
 		_, err := page.WaitForFunction(completedAnswerJS, map[string]any{
 			"answerSelector": answerSelector,
 			"stopSelector":   stopSelector,
@@ -147,23 +153,80 @@ func (c *Client) waitForAnswer(ctx context.Context, page playwright.Page, previo
 	}
 }
 
-// answerText returns the text the model wrote and where it was taken from.
+// readAnswerSources собирает все доступные представления последнего ответа.
 //
-// Разметку чат показывает блоком кода: внутри него лежит исходный текст модели, а innerText
-// всего ответа отдал бы отрендеренный DOM вместе с классами интерфейса. Для обычных
-// текстовых стадий блока кода нет, и поведение остаётся прежним.
-func answerText(answer playwright.Locator) (string, string, error) {
-	value, err := answer.Evaluate(answerTextJS, nil)
+// Разметку модели сохраняет только кнопка «Копировать»: innerText отдаёт отрисованный текст,
+// в котором «## Заголовок» превращается в «Заголовок», а Markdown-таблица — в строки с
+// табуляцией. Поэтому сначала пробуем буфер обмена и лишь потом читаем DOM.
+func (c *Client) readAnswerSources(page playwright.Page) (answerSources, error) {
+	sources := answerSources{}
+	raw, err := page.Evaluate(answerSourcesJS, map[string]any{"answerSelector": answerSelector})
 	if err != nil {
-		return "", "", err
+		return sources, err
 	}
-	fields, ok := value.(map[string]any)
+	fields, ok := raw.(map[string]any)
 	if !ok {
-		return "", "", fmt.Errorf("unexpected DeepSeek answer payload %T", value)
+		return sources, fmt.Errorf("unexpected DeepSeek answer payload %T", raw)
 	}
-	text, _ := fields["text"].(string)
-	source, _ := fields["source"].(string)
-	return text, source, nil
+	sources.Rendered, _ = fields["rendered"].(string)
+	sources.CodeBlock, _ = fields["codeBlock"].(string)
+	sources.DOMHasTable, _ = fields["hasTable"].(bool)
+	sources.DOMHasHeadings, _ = fields["hasHeadings"].(bool)
+
+	clipboard, err := c.copyAnswerToClipboard(page)
+	if err != nil {
+		// Буфер — предпочтительный, но не обязательный источник: разметку страницы могли
+		// поменять. Остальные источники ниже по точности, но рабочие.
+		c.stage("clipboard_unavailable", "error", err.Error())
+		return sources, nil
+	}
+	sources.Clipboard = clipboard
+	return sources, nil
+}
+
+// copyAnswerToClipboard нажимает кнопку копирования и ждёт нового значения буфера.
+func (c *Client) copyAnswerToClipboard(page playwright.Page) (string, error) {
+	marker := clipboardMarker
+	if _, err := page.Evaluate(`(marker) => navigator.clipboard.writeText(marker)`, marker); err != nil {
+		return "", fmt.Errorf("подготовить буфер обмена: %w", err)
+	}
+	clicked, err := page.Evaluate(copyLastAnswerJS, map[string]any{"answerSelector": answerSelector})
+	if err != nil {
+		return "", fmt.Errorf("нажать кнопку копирования: %w", err)
+	}
+	if state, _ := clicked.(string); state != "clicked" {
+		return "", fmt.Errorf("кнопка копирования не найдена: %s", state)
+	}
+	deadline := time.Now().Add(clipboardTimeout)
+	for {
+		raw, err := page.Evaluate(`() => navigator.clipboard.readText()`)
+		if err != nil {
+			return "", fmt.Errorf("прочитать буфер обмена: %w", err)
+		}
+		value, _ := raw.(string)
+		if text, ok := acceptClipboardValue(marker, value); ok {
+			return text, nil
+		}
+		if time.Now().After(deadline) {
+			return "", fmt.Errorf("буфер обмена не обновился за %s", clipboardTimeout)
+		}
+		if _, err := page.WaitForFunction(
+			`marker => navigator.clipboard.readText().then(value => value.trim() !== "" && value !== marker)`,
+			marker,
+			playwright.PageWaitForFunctionOptions{Timeout: playwright.Float(float64(clipboardPollInterval.Milliseconds()))},
+		); err != nil {
+			continue
+		}
+	}
+}
+
+// formatLostError сообщает, что видимый текст потерял разметку, показанную на странице.
+func formatLostError(model, source string, lost []string) error {
+	return &llm.StatusError{
+		Code: 503, Type: llm.ErrorTypeProvider,
+		Message: fmt.Sprintf("deepseek_response_format_lost: model=%s source=%s lost=%s",
+			model, source, strings.Join(lost, ",")),
+	}
 }
 
 // responseState reports whether the answer has started arriving.

@@ -28,19 +28,44 @@ const chatReadyJS = `(options) => {
   return false;
 }`
 
-// answerTextJS returns the model's own text instead of the rendered DOM.
+// copyLastAnswerJS нажимает кнопку копирования последнего ответа.
 //
-// Ответ с разметкой чат показывает блоком кода, и innerText узла ответа отдаёт его вместе
-// с обёртками интерфейса (ds-markdown-paragraph, пустые span). Внутри pre лежит исходный
-// текст модели, поэтому берём его; если блока кода нет — обычный видимый текст.
-const answerTextJS = `(element) => {
-  const blocks = Array.from(element.querySelectorAll("pre"))
+// Кнопка опознаётся положением, а не классом и не иконкой: панель действий стоит под
+// текстом ответа, и «Копировать» в ней первая. Ни aria-label, ни title у неё нет.
+const copyLastAnswerJS = `(options) => {
+  const answers = Array.from(document.querySelectorAll(options.answerSelector));
+  const last = answers[answers.length - 1];
+  if (!last) return "no_answer";
+  let block = last;
+  for (let i = 0; i < 3 && block.parentElement; i++) block = block.parentElement;
+  const answerBottom = last.getBoundingClientRect().bottom;
+  const buttons = Array.from(block.querySelectorAll('[role="button"]'))
+    .filter((button) => button.getBoundingClientRect().top >= answerBottom - 4)
+    .sort((left, right) => left.getBoundingClientRect().x - right.getBoundingClientRect().x);
+  if (buttons.length === 0) return "no_button";
+  buttons[0].click();
+  return "clicked";
+}`
+
+// answerSourcesJS собирает всё, что страница может рассказать про последний ответ.
+const answerSourcesJS = `(options) => {
+  const visible = (element) => {
+    const style = window.getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
+  };
+  const answers = Array.from(document.querySelectorAll(options.answerSelector)).filter(visible);
+  const last = answers[answers.length - 1];
+  if (!last) return {rendered: "", codeBlock: "", hasTable: false, hasHeadings: false};
+  const blocks = Array.from(last.querySelectorAll("pre"))
     .map((block) => ((block.querySelector("code") || block).textContent || ""))
     .filter((text) => text.trim().length > 0);
-  if (blocks.length > 0) {
-    return {source: "code_block", text: blocks.join("\n\n")};
-  }
-  return {source: "rendered_text", text: element.innerText || element.textContent || ""};
+  return {
+    rendered: last.innerText || last.textContent || "",
+    codeBlock: blocks.join("\n\n"),
+    hasTable: last.querySelectorAll("table").length > 0,
+    hasHeadings: last.querySelectorAll("h1,h2,h3,h4,h5,h6").length > 0
+  };
 }`
 
 // responseStateJS reports what the page is doing while the answer is awaited:
