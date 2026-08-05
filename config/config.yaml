@@ -18,9 +18,10 @@ llm:
 
   stages:
     structure:
+      # ВРЕМЕННО: весь пайплайн переключён на DeepSeek Web для тестового прогона.
+      # Вернуть две строки gemini/openrouter, см. отчёт.
       targets: &default_targets
-        - { provider: gemini, model: "${GEMINI_MODEL}" }
-        - { provider: openrouter, model: "${OPENROUTER_MODEL}" }
+        - { provider: deepseek_web, model: deepseek-web }
       prompt: tasks/task_1/prompts/structure.txt
       temperature: 0.3
       max_tokens: 3000
