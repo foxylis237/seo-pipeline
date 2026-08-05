@@ -50,6 +50,51 @@ func TestOpenAICompatibleClientSuccess(t *testing.T) {
 	}
 }
 
+func TestOpenAICompatibleChatPreservesArticleForInfo(t *testing.T) {
+	requestNumber := 0
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		requestNumber++
+		var body chatCompletionRequest
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body.Model != "free-model" {
+			t.Fatalf("model = %q", body.Model)
+		}
+		if requestNumber == 1 && len(body.Messages) != 1 {
+			t.Fatalf("first messages = %+v", body.Messages)
+		}
+		if requestNumber == 2 {
+			if len(body.Messages) != 3 || body.Messages[1].Role != "assistant" || body.Messages[1].Content != "article text" {
+				t.Fatalf("second messages = %+v", body.Messages)
+			}
+		}
+		response := "article text"
+		if requestNumber == 2 {
+			response = "article info"
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"` + response + `"}}]}`))
+	}))
+	defer server.Close()
+	client, err := NewOpenAICompatibleClient(server.URL, "secret", "openrouter", discardLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.ConfigureChat("free-model", 0.7, 10000)
+	chat, err := client.NewChat(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := chat.Generate(context.Background(), "article prompt"); err != nil {
+		t.Fatal(err)
+	}
+	info, err := chat.Generate(context.Background(), "info prompt")
+	if err != nil || info.Text != "article info" {
+		t.Fatalf("info = %+v, %v", info, err)
+	}
+}
+
 func TestOpenAICompatibleClientReadsSlowResponseAndLogsPhases(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")

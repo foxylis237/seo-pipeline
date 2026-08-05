@@ -92,6 +92,7 @@ func classifyStatusError(code int, message string) ErrorType {
 	case code == 402:
 		return ErrorTypeCreditsExhausted
 	case strings.Contains(normalized, "insufficient_quota"),
+		strings.Contains(normalized, "resource exhausted"),
 		strings.Contains(normalized, "quota exceeded"),
 		strings.Contains(normalized, "quota has been exceeded"),
 		strings.Contains(normalized, "free requests exhausted"),
@@ -168,20 +169,90 @@ func (r *Router) Generate(ctx context.Context, call Call) (RoutedResponse, error
 	if err != nil {
 		return RoutedResponse{}, err
 	}
+	return r.generatePrompt(ctx, call, prepared.Prompt)
+}
+
+func (r *Router) generatePrompt(ctx context.Context, call Call, prompt string) (RoutedResponse, error) {
 	stage, found := r.config.Stages[call.Stage]
 	if !found {
 		return RoutedResponse{}, fmt.Errorf("LLM stage %q is not configured", call.Stage)
 	}
-	client, found := r.clients[stage.Provider]
-	if !found {
-		return RoutedResponse{}, fmt.Errorf("LLM provider %q for stage %q is not registered", stage.Provider, call.Stage)
+	if len(stage.Targets) == 0 {
+		stage.Targets = []config.LLMTargetConfig{{Provider: stage.Provider, Model: stage.Model}}
 	}
-	request := Request{Prompt: prepared.Prompt, Model: stage.Model, Temperature: *stage.Temperature, MaxTokens: stage.MaxTokens}
+	var failures []error
+	for targetIndex, target := range stage.Targets {
+		response, targetErr := r.generateTarget(ctx, call, prompt, stage, target, targetIndex)
+		if targetErr == nil {
+			return response, nil
+		}
+		failures = append(failures, fmt.Errorf("provider=%s model=%s: %w", target.Provider, target.Model, targetErr))
+		if !isFallbackEligible(targetErr) || targetIndex == len(stage.Targets)-1 {
+			break
+		}
+		r.logger.Warn("LLM fallback selected", "stage", call.Stage, "provider", target.Provider, "model", target.Model, "target_index", targetIndex, "reason", errorTypeOf(targetErr))
+	}
+	return RoutedResponse{}, fmt.Errorf("LLM stage %q failed for all attempted targets: %w", call.Stage, errors.Join(failures...))
+}
+
+// NewStageChatFactory creates chats that retain explicit message history across provider fallback.
+func (r *Router) NewStageChatFactory(stages ...string) *StageChatFactory {
+	return &StageChatFactory{router: r, stages: stages}
+}
+
+type StageChatFactory struct {
+	router *Router
+	stages []string
+}
+
+func (f *StageChatFactory) NewChat(context.Context) (Chat, error) { return &stageChat{factory: f}, nil }
+
+type stageChat struct {
+	factory *StageChatFactory
+	next    int
+	history []Message
+	closed  bool
+}
+type Message struct{ Role, Content string }
+
+func (c *stageChat) Generate(ctx context.Context, prompt string) (Response, error) {
+	if c.closed {
+		return Response{}, fmt.Errorf("LLM chat is closed")
+	}
+	if c.next >= len(c.factory.stages) {
+		return Response{}, fmt.Errorf("LLM chat has no configured stage for message %d", c.next+1)
+	}
+	var transcript strings.Builder
+	if len(c.history) == 0 {
+		transcript.WriteString(prompt)
+	} else {
+		for _, message := range c.history {
+			fmt.Fprintf(&transcript, "%s:\n%s\n\n", message.Role, message.Content)
+		}
+		fmt.Fprintf(&transcript, "user:\n%s", prompt)
+	}
+	stage := c.factory.stages[c.next]
+	result, err := c.factory.router.generatePrompt(ctx, Call{Stage: stage}, transcript.String())
+	if err != nil {
+		return Response{}, err
+	}
+	c.history = append(c.history, Message{Role: "user", Content: prompt}, Message{Role: "assistant", Content: result.Text})
+	c.next++
+	return result.Response, nil
+}
+func (c *stageChat) Close() error { c.closed = true; c.history = nil; return nil }
+
+func (r *Router) generateTarget(ctx context.Context, call Call, prompt string, stage config.LLMStageConfig, target config.LLMTargetConfig, targetIndex int) (RoutedResponse, error) {
+	client, found := r.clients[target.Provider]
+	if !found {
+		return RoutedResponse{}, fmt.Errorf("LLM provider %q is not registered", target.Provider)
+	}
+	request := Request{Prompt: prompt, Model: target.Model, Temperature: *stage.Temperature, MaxTokens: stage.MaxTokens}
 	stageCtx, cancel := context.WithTimeout(ctx, stage.Timeout)
 	defer cancel()
 	for attempt := 1; attempt <= 3; attempt++ {
 		if err := stageCtx.Err(); err != nil {
-			return RoutedResponse{}, fmt.Errorf("LLM stage %q deadline exceeded before attempt %d: %w", call.Stage, attempt, err)
+			return RoutedResponse{}, fmt.Errorf("deadline before attempt %d: %w", attempt, err)
 		}
 		remaining := time.Duration(-1)
 		if deadline, found := stageCtx.Deadline(); found {
@@ -191,32 +262,46 @@ func (r *Router) Generate(ctx context.Context, call Call) (RoutedResponse, error
 			}
 		}
 		r.logger.Info("LLM request attempt started",
-			"article_id", call.ArticleID, "stage", call.Stage, "provider", stage.Provider,
-			"model", stage.Model, "attempt", attempt, "remaining_ms", remaining.Milliseconds(),
+			"article_id", call.ArticleID, "stage", call.Stage, "provider", target.Provider,
+			"model", target.Model, "target_index", targetIndex, "attempt", attempt, "remaining_ms", remaining.Milliseconds(),
 		)
 		started := time.Now()
-		stopHeartbeat := r.startHeartbeat(stageCtx, call, stage.Provider, stage.Model, attempt, started)
+		stopHeartbeat := r.startHeartbeat(stageCtx, call, target.Provider, target.Model, attempt, started)
 		response, requestErr := client.Generate(stageCtx, request)
 		stopHeartbeat()
-		fields := []any{"article_id", call.ArticleID, "stage", call.Stage, "provider", stage.Provider, "model", stage.Model, "attempt", attempt, "duration_ms", time.Since(started).Milliseconds(), "success", requestErr == nil}
+		fields := []any{"article_id", call.ArticleID, "stage", call.Stage, "provider", target.Provider, "model", target.Model, "target_index", targetIndex, "attempt", attempt, "duration_ms", time.Since(started).Milliseconds(), "success", requestErr == nil}
 		if requestErr == nil {
 			fields = append(fields, "input_tokens", response.InputTokens, "output_tokens", response.OutputTokens)
 			r.logger.Info("LLM request completed", fields...)
-			return RoutedResponse{Response: response, Prompt: prepared.Prompt, Provider: stage.Provider, Model: stage.Model}, nil
+			return RoutedResponse{Response: response, Prompt: prompt, Provider: target.Provider, Model: target.Model}, nil
 		}
 		retryable := isTemporary(requestErr)
 		statusCode, errorType, providerMessage := errorLogFields(requestErr)
 		fields = append(fields, "status_code", statusCode, "error_type", errorType, "provider_message", providerMessage, "retryable", retryable)
 		r.logger.Warn("LLM request failed", fields...)
 		if attempt == 3 || !retryable {
-			return RoutedResponse{}, routedError(call.Stage, stage.Provider, stage.Model, requestErr)
+			return RoutedResponse{}, routedError(call.Stage, target.Provider, target.Model, requestErr)
 		}
 		if err := r.sleep(stageCtx, r.baseDelay*time.Duration(1<<(attempt-1))); err != nil {
 			return RoutedResponse{}, fmt.Errorf("LLM stage %q deadline exceeded before retry: %w", call.Stage, err)
 		}
 	}
-	return RoutedResponse{}, fmt.Errorf("LLM stage %q failed", call.Stage)
+	return RoutedResponse{}, fmt.Errorf("LLM target failed")
 }
+
+func isFallbackEligible(err error) bool {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var statusErr *StatusError
+	if errors.As(err, &statusErr) {
+		return statusErr.Type == ErrorTypeQuotaExhausted || statusErr.Type == ErrorTypeRateLimit || statusErr.Code == 502 || statusErr.Code == 503 || statusErr.Code == 504
+	}
+	var netErr net.Error
+	return errors.As(err, &netErr) && (netErr.Timeout() || netErr.Temporary())
+}
+
+func errorTypeOf(err error) ErrorType { _, kind, _ := errorLogFields(err); return kind }
 
 // Prepare renders a configured stage without sending an LLM request.
 func (r *Router) Prepare(call Call) (PreparedCall, error) {
