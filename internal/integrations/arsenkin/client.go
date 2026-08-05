@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -34,8 +35,18 @@ const (
 	copywritersInputSelector = `textarea[name="keys"][placeholder*="Каждый запрос с новой строки"]`
 	structureLinkSelector    = `a[data-target="#structure"][data-toggle="modal"]`
 
-	operationTimeout   = 30_000
-	wordstatTimeout    = 300_000
+	wordstatTaskRowSelector = `.arshis__row--body[data-task-id]`
+
+	operationTimeout = 30_000
+	// wordstatHistoryTimeout ограничивает ожидание отрисовки списка задач: пустая история
+	// тоже валидна, поэтому ждать её долго незачем.
+	wordstatHistoryTimeout = 15_000
+	wordstatForeignSample  = 5
+	// wordstatPollInterval — шаг ожидания между перезагрузками списка задач.
+	wordstatPollInterval = 20_000
+	// wordstatTimeout — бюджет ожидания своей задачи. Раньше хватало и меньшего, потому что
+	// подходила любая готовая строка, в том числе чужая; теперь ждём именно свою.
+	wordstatTimeout    = 600_000
 	copywritersTimeout = 600_000
 	resultLimit        = 50
 )
@@ -297,10 +308,12 @@ func (s *Service) runWordstat(ctx context.Context, queries []string) ([]KeywordF
 		}
 		return nil, fmt.Errorf("%w; start controls: %v", err, diagnostic)
 	}
-	knownTaskIDs, err := s.wordstatTaskIDs()
+	knownTaskIDs, err := s.snapshotWordstatTasks(ctx)
 	if err != nil {
 		return nil, err
 	}
+	s.log(slog.LevelInfo, "состояние Wordstat до запуска", "wordstat_start",
+		"known_task_count", len(knownTaskIDs), "known_task_ids", knownTaskIDs)
 	if err := input.Fill(strings.Join(queries, "\n")); err != nil {
 		return nil, fmt.Errorf("fill Wordstat queries: %w", err)
 	}
@@ -326,12 +339,112 @@ func (s *Service) runWordstat(ctx context.Context, queries []string) ([]KeywordF
 		return nil, err
 	}
 	s.log(slog.LevelInfo, "progress 100", "wordstat_progress")
+	s.log(slog.LevelInfo, "состояние Wordstat после ожидания", "wordstat_result",
+		"known_task_count", len(knownTaskIDs), "task_id", taskID)
 	result, err := s.downloadWordstatResult(taskID)
 	if err != nil {
 		return nil, err
 	}
+	if err := acceptWordstatResult(queries, result); err != nil {
+		return nil, err
+	}
 	s.log(slog.LevelInfo, "таблица получена", "parse_download", "matches_count", len(result))
 	return result, nil
+}
+
+// snapshotWordstatTasks records the tasks already on the page before a new one is started.
+//
+// Список задач подгружается отдельным запросом, поэтому снимать его сразу после появления
+// формы нельзя: пустой снимок делает чужую завершённую задачу «новой», и её результат
+// уезжает в текущую статью. Ждём отрисовки списка; пустая история — законный исход
+// (чистый профиль), и тогда снимок пуст по существу, а не из-за гонки.
+func (s *Service) snapshotWordstatTasks(ctx context.Context) ([]string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if _, err := s.page.WaitForFunction(
+		`selector => document.querySelectorAll(selector).length > 0`,
+		wordstatTaskRowSelector,
+		playwright.PageWaitForFunctionOptions{Timeout: playwright.Float(wordstatHistoryTimeout)},
+	); err != nil {
+		s.log(slog.LevelWarn, "история задач Wordstat пуста или не отрисовалась", "wordstat_start",
+			"locator", wordstatTaskRowSelector, "timeout_ms", wordstatHistoryTimeout, "error", err)
+	}
+	return s.wordstatTaskIDs()
+}
+
+// acceptWordstatResult verifies the downloaded table answers the submitted queries.
+//
+// Wordstat отвечает теми же фразами, которые ему отправили, поэтому расхождение означает,
+// что скачан файл чужой задачи. Это последняя проверка, не зависящая от вёрстки: она ловит
+// подмену даже тогда, когда разметка страницы поменялась и защита по task_id промахнулась.
+func acceptWordstatResult(submitted []string, returned []KeywordFrequency) error {
+	if len(returned) == 0 {
+		return nil
+	}
+	known := make(map[string]struct{}, len(submitted))
+	for _, query := range submitted {
+		if normalized := normalizeWordstatPhrase(query); normalized != "" {
+			known[normalized] = struct{}{}
+		}
+	}
+	matched := 0
+	foreign := make([]string, 0, wordstatForeignSample)
+	for _, row := range returned {
+		if _, found := known[normalizeWordstatPhrase(row.Query)]; found {
+			matched++
+			continue
+		}
+		if len(foreign) < wordstatForeignSample {
+			foreign = append(foreign, row.Query)
+		}
+	}
+	if matched*2 >= len(returned) {
+		return nil
+	}
+	return fmt.Errorf(
+		"Wordstat вернул результат другой задачи: из %d фраз отправлялись только %d (например: %v)",
+		len(returned), matched, foreign,
+	)
+}
+
+func normalizeWordstatPhrase(value string) string {
+	return strings.Join(strings.Fields(strings.ReplaceAll(strings.ToLower(strings.TrimSpace(value)), "ё", "е")), " ")
+}
+
+// selectNewWordstatTask returns the task created by this run: the single completed task that
+// was not on the page before the start.
+func selectNewWordstatTask(known, completed []string) (string, error) {
+	seen := make(map[string]struct{}, len(known))
+	for _, taskID := range known {
+		if trimmed := strings.TrimSpace(taskID); trimmed != "" {
+			seen[trimmed] = struct{}{}
+		}
+	}
+	fresh := make([]string, 0, 1)
+	for _, taskID := range completed {
+		trimmed := strings.TrimSpace(taskID)
+		if trimmed == "" {
+			continue
+		}
+		if _, found := seen[trimmed]; found {
+			continue
+		}
+		if !slices.Contains(fresh, trimmed) {
+			fresh = append(fresh, trimmed)
+		}
+	}
+	switch len(fresh) {
+	case 1:
+		return fresh[0], nil
+	case 0:
+		return "", fmt.Errorf(
+			"Wordstat не создал новую задачу: на странице только прежние результаты (задач до запуска: %d, завершённых: %d)",
+			len(known), len(completed),
+		)
+	default:
+		return "", fmt.Errorf("Wordstat показал несколько новых задач %v: определить свою невозможно", fresh)
+	}
 }
 
 func (s *Service) wordstatTaskIDs() ([]string, error) {
@@ -341,51 +454,99 @@ func (s *Service) wordstatTaskIDs() ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read existing Wordstat task IDs: %w", err)
 	}
+	return decodeTaskIDs(raw, "existing Wordstat task IDs")
+}
+
+func decodeTaskIDs(raw any, reason string) ([]string, error) {
 	encoded, err := json.Marshal(raw)
 	if err != nil {
-		return nil, fmt.Errorf("encode existing Wordstat task IDs: %w", err)
+		return nil, fmt.Errorf("encode %s: %w", reason, err)
 	}
 	var taskIDs []string
 	if err := json.Unmarshal(encoded, &taskIDs); err != nil {
-		return nil, fmt.Errorf("decode existing Wordstat task IDs: %w", err)
+		return nil, fmt.Errorf("decode %s: %w", reason, err)
 	}
 	return taskIDs, nil
 }
 
+// waitWordstatDownload waits for the task started by this run to appear as completed.
+//
+// Список задач Arsenkin отрисовывается при загрузке страницы: завершение задачи в уже
+// открытом документе не появляется само. Поэтому ждём короткими интервалами и между ними
+// перезагружаем страницу. Раньше этого было не видно, потому что подходила любая
+// завершённая строка — в том числе задача предыдущей статьи.
 func (s *Service) waitWordstatDownload(ctx context.Context, knownTaskIDs []string) (string, error) {
+	deadline := time.Now().Add(wordstatTimeout * time.Millisecond)
+	for attempt := 1; ; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return "", fmt.Errorf(
+				"новая задача Wordstat не завершилась за %s: результат предыдущей задачи не принимается (задач до запуска: %d, перезагрузок страницы: %d)",
+				wordstatTimeout*time.Millisecond, len(knownTaskIDs), attempt-1,
+			)
+		}
+		wait := wordstatPollInterval * time.Millisecond
+		if remaining < wait {
+			wait = remaining
+		}
+		s.log(slog.LevelDebug, "ожидание файла результата Wordstat", "wait_download",
+			"attempt", attempt, "known_task_count", len(knownTaskIDs), "remaining_ms", remaining.Milliseconds())
+		_, err := s.page.WaitForFunction(`knownTaskIDs => {
+			const known = new Set(knownTaskIDs);
+			return Array.from(document.querySelectorAll('.arshis__row--body[data-task-id]')).some(row => {
+				const taskID = row.getAttribute('data-task-id');
+				const done = row.querySelector('.arshis__status--done');
+				const download = row.querySelector('a[href*="/tools/download/23/csv/"][href*="encode=xls"]');
+				return taskID && !known.has(taskID) && done && download;
+			});
+		}`, knownTaskIDs, playwright.PageWaitForFunctionOptions{Timeout: playwright.Float(float64(wait.Milliseconds()))})
+		if err == nil {
+			completed, completedErr := s.completedWordstatTaskIDs()
+			if completedErr != nil {
+				return "", completedErr
+			}
+			return selectNewWordstatTask(knownTaskIDs, completed)
+		}
+		if reloadErr := s.reloadWordstatHistory(ctx); reloadErr != nil {
+			return "", reloadErr
+		}
+	}
+}
+
+// reloadWordstatHistory re-renders the task list, the only way to see a task finish.
+func (s *Service) reloadWordstatHistory(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
-		return "", err
+		return err
 	}
-	s.log(slog.LevelDebug, "ожидание файла результата Wordstat", "wait_download")
-	_, err := s.page.WaitForFunction(`knownTaskIDs => {
-		const known = new Set(knownTaskIDs);
-		return Array.from(document.querySelectorAll('.arshis__row--body[data-task-id]')).some(row => {
-			const taskID = row.getAttribute('data-task-id');
-			const done = row.querySelector('.arshis__status--done');
-			const download = row.querySelector('a[href*="/tools/download/23/csv/"][href*="encode=xls"]');
-			return taskID && !known.has(taskID) && done && download;
-		});
-	}`, knownTaskIDs, playwright.PageWaitForFunctionOptions{Timeout: playwright.Float(wordstatTimeout)})
+	s.log(slog.LevelDebug, "перезагрузка списка задач Wordstat", "wait_download")
+	if _, err := s.page.Reload(playwright.PageReloadOptions{
+		WaitUntil: playwright.WaitUntilStateDomcontentloaded,
+		Timeout:   playwright.Float(operationTimeout),
+	}); err != nil {
+		return fmt.Errorf("перезагрузить список задач Wordstat: %w", err)
+	}
+	if isLoginURL(s.currentURL()) {
+		return fmt.Errorf("Arsenkin session expired while waiting for the Wordstat result")
+	}
+	return nil
+}
+
+// completedWordstatTaskIDs returns the tasks whose result is ready for download.
+func (s *Service) completedWordstatTaskIDs() ([]string, error) {
+	raw, err := s.page.Locator("body").Evaluate(`body => Array.from(new Set(
+		Array.from(body.querySelectorAll('.arshis__row--body[data-task-id]'))
+			.filter(row => row.querySelector('.arshis__status--done') &&
+				row.querySelector('a[href*="/tools/download/23/csv/"][href*="encode=xls"]'))
+			.map(row => row.getAttribute('data-task-id'))
+			.filter(Boolean)
+	))`, nil)
 	if err != nil {
-		return "", fmt.Errorf("wait for completed Wordstat download: %w", err)
+		return nil, fmt.Errorf("read completed Wordstat task IDs: %w", err)
 	}
-	raw, err := s.page.Locator("body").Evaluate(`(body, knownTaskIDs) => {
-		const known = new Set(knownTaskIDs);
-		const row = Array.from(body.querySelectorAll('.arshis__row--body[data-task-id]')).find(candidate => {
-			const taskID = candidate.getAttribute('data-task-id');
-			return taskID && !known.has(taskID) && candidate.querySelector('.arshis__status--done') &&
-				candidate.querySelector('a[href*="/tools/download/23/csv/"][href*="encode=xls"]');
-		});
-		return row?.getAttribute('data-task-id') || '';
-	}`, knownTaskIDs)
-	if err != nil {
-		return "", fmt.Errorf("read completed Wordstat task ID: %w", err)
-	}
-	taskID := strings.TrimSpace(fmt.Sprint(raw))
-	if taskID == "" {
-		return "", fmt.Errorf("completed Wordstat task ID is empty")
-	}
-	return taskID, nil
+	return decodeTaskIDs(raw, "completed Wordstat task IDs")
 }
 
 func (s *Service) downloadWordstatResult(taskID string) ([]KeywordFrequency, error) {
@@ -483,6 +644,15 @@ func (s *Service) runCopywriters(ctx context.Context, keywords []KeywordFrequenc
 	if err := s.waitUniqueVisible(button, `button#ok`, "кнопка запуска Copywriters"); err != nil {
 		return Result{}, err
 	}
+	// Copywriters, в отличие от Wordstat, восстанавливает на странице последнюю
+	// завершённую задачу аккаунта. Запоминаем её до запуска и дальше ждём строго
+	// другой task_id — так же, как Wordstat ждёт task_id вне knownTaskIDs.
+	previousTask, err := s.copywritersTask()
+	if err != nil {
+		return Result{}, err
+	}
+	s.log(slog.LevelInfo, "состояние Copywriters до запуска", "copywriters_start",
+		"previous_task_id", previousTask.ID, "previous_structure_length", len([]rune(previousTask.Structure)))
 	if err := input.Fill(strings.Join(copywriterQueries, "\n")); err != nil {
 		return Result{}, fmt.Errorf("fill Copywriters Top-50: %w", err)
 	}
@@ -492,10 +662,10 @@ func (s *Service) runCopywriters(ctx context.Context, keywords []KeywordFrequenc
 	s.log(slog.LevelInfo, "Copywriters стартовал", "copywriters_start", "queries_count", len(copywriterQueries))
 
 	for _, threshold := range []int{25, 50, 75} {
-		if err := s.waitCopywritersProgressOrResult(ctx, threshold); err != nil {
+		if err := s.waitCopywritersProgressOrResult(ctx, threshold, previousTask.ID); err != nil {
 			return Result{}, err
 		}
-		progress, err := s.copywritersProgress()
+		progress, err := s.copywritersProgress(previousTask.ID)
 		if err != nil {
 			return Result{}, err
 		}
@@ -503,10 +673,21 @@ func (s *Service) runCopywriters(ctx context.Context, keywords []KeywordFrequenc
 			s.log(slog.LevelInfo, fmt.Sprintf("Copywriters progress %d", threshold), "copywriters_progress")
 		}
 	}
-	if err := s.waitCopywritersResult(ctx); err != nil {
+	if err := s.waitCopywritersResult(ctx, previousTask.ID); err != nil {
 		return Result{}, err
 	}
 	s.log(slog.LevelInfo, "Copywriters progress 100", "copywriters_progress")
+
+	currentTask, err := s.copywritersTask()
+	if err != nil {
+		return Result{}, err
+	}
+	s.log(slog.LevelInfo, "состояние Copywriters после ожидания", "copywriters_result",
+		"previous_task_id", previousTask.ID, "task_id", currentTask.ID,
+		"structure_length", len([]rune(currentTask.Structure)))
+	if err := acceptCopywritersResult(previousTask, currentTask); err != nil {
+		return Result{}, err
+	}
 
 	result, err := s.parseCopywritersResult()
 	if err != nil {
@@ -520,35 +701,95 @@ func (s *Service) runCopywriters(ctx context.Context, keywords []KeywordFrequenc
 	return result, nil
 }
 
-func (s *Service) waitCopywritersProgressOrResult(ctx context.Context, threshold int) error {
+// copywritersTask identifies the task currently shown on the Copywriters page.
+type copywritersTask struct {
+	ID        string
+	Theme     string
+	Structure string
+}
+
+// acceptCopywritersResult verifies the page shows the task started for this very article.
+// The result is rejected when the task identifier did not change, when it is missing, and —
+// as a fallback for a page without an identifier — when the payload equals the previous one.
+func acceptCopywritersResult(previous, current copywritersTask) error {
+	if strings.TrimSpace(current.ID) == "" {
+		return fmt.Errorf(
+			"Copywriters не выдал task_id: подтвердить, что результат принадлежит этой статье, невозможно",
+		)
+	}
+	if current.ID == previous.ID {
+		return fmt.Errorf(
+			"Copywriters вернул результат предыдущей задачи: task_id=%q не изменился после запуска; данные принадлежат другой статье",
+			current.ID,
+		)
+	}
+	if previous.ID == "" && previous.Structure != "" &&
+		previous.Theme == current.Theme && previous.Structure == current.Structure {
+		return fmt.Errorf(
+			"Copywriters вернул неизменённый результат предыдущей задачи: тематические слова и структура совпадают с состоянием до запуска",
+		)
+	}
+	return nil
+}
+
+func (s *Service) copywritersTask() (copywritersTask, error) {
+	raw, err := s.page.Locator("body").Evaluate(`body => ({
+		id: (body.querySelector('input[name="task_id"]')?.value || '').trim(),
+		theme: (body.querySelector('textarea[name="theme"]')?.value || '').trim(),
+		structure: (body.querySelector('#structure .modal-body')?.innerText || '').trim()
+	})`, nil)
+	if err != nil {
+		return copywritersTask{}, fmt.Errorf("read Copywriters task state: %w", err)
+	}
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		return copywritersTask{}, fmt.Errorf("encode Copywriters task state: %w", err)
+	}
+	var state struct {
+		ID        string `json:"id"`
+		Theme     string `json:"theme"`
+		Structure string `json:"structure"`
+	}
+	if err := json.Unmarshal(encoded, &state); err != nil {
+		return copywritersTask{}, fmt.Errorf("decode Copywriters task state: %w", err)
+	}
+	return copywritersTask{ID: state.ID, Theme: state.Theme, Structure: state.Structure}, nil
+}
+
+func (s *Service) waitCopywritersProgressOrResult(ctx context.Context, threshold int, previousTaskID string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	s.log(slog.LevelDebug, "ожидание прогресса Copywriters", "wait_copywriters_progress", "threshold", threshold)
-	_, err := s.page.WaitForFunction(`threshold => {
+	s.log(slog.LevelDebug, "ожидание прогресса Copywriters", "wait_copywriters_progress", "threshold", threshold, "previous_task_id", previousTaskID)
+	_, err := s.page.WaitForFunction(`args => {
 		const match = (document.body?.innerText || '').match(/Прогресс\s*:\s*(\d+)\s*%/i);
 		const progress = match ? Number(match[1]) : 0;
+		const taskID = (document.querySelector('input[name="task_id"]')?.value || '').trim();
 		const theme = (document.querySelector('textarea[name="theme"]')?.value || '').trim();
 		const structureLink = document.querySelector('a[data-target="#structure"][data-toggle="modal"]');
 		const structure = (document.querySelector('#structure .modal-body')?.innerText || '').trim();
-		const complete = theme.length > 0 && structureLink && structure.length > 0 && !match;
-		return progress >= threshold || complete;
-	}`, threshold, playwright.PageWaitForFunctionOptions{Timeout: playwright.Float(copywritersTimeout)})
+		const fresh = taskID.length > 0 && taskID !== args.previousTaskID;
+		const complete = fresh && theme.length > 0 && structureLink && structure.length > 0 && !match;
+		return progress >= args.threshold || complete;
+	}`, map[string]any{"threshold": threshold, "previousTaskID": previousTaskID},
+		playwright.PageWaitForFunctionOptions{Timeout: playwright.Float(copywritersTimeout)})
 	if err != nil {
 		return fmt.Errorf("wait for Copywriters progress %d%%: %w", threshold, err)
 	}
 	return nil
 }
 
-func (s *Service) copywritersProgress() (int, error) {
-	value, err := s.page.Locator("body").Evaluate(`body => {
+func (s *Service) copywritersProgress(previousTaskID string) (int, error) {
+	value, err := s.page.Locator("body").Evaluate(`(body, previousTaskID) => {
 		const match = (body.innerText || '').match(/Прогресс\s*:\s*(\d+)\s*%/i);
 		if (match) return match[1];
-		const ready = (body.querySelector('textarea[name="theme"]')?.value || '').trim() &&
+		const taskID = (body.querySelector('input[name="task_id"]')?.value || '').trim();
+		const ready = taskID.length > 0 && taskID !== previousTaskID &&
+			(body.querySelector('textarea[name="theme"]')?.value || '').trim() &&
 			body.querySelector('a[data-target="#structure"][data-toggle="modal"]') &&
 			(body.querySelector('#structure .modal-body')?.innerText || '').trim();
 		return ready ? '100' : '0';
-	}`, nil)
+	}`, previousTaskID)
 	if err != nil {
 		return 0, fmt.Errorf("read Copywriters progress: %w", err)
 	}
@@ -559,22 +800,25 @@ func (s *Service) copywritersProgress() (int, error) {
 	return progress, nil
 }
 
-func (s *Service) waitCopywritersResult(ctx context.Context) error {
+func (s *Service) waitCopywritersResult(ctx context.Context, previousTaskID string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	s.log(slog.LevelDebug, "ожидание результата Copywriters", "wait_copywriters_result")
-	_, err := s.page.WaitForFunction(`() => {
+	s.log(slog.LevelDebug, "ожидание результата Copywriters", "wait_copywriters_result", "previous_task_id", previousTaskID)
+	_, err := s.page.WaitForFunction(`previousTaskID => {
 		const taskID = (document.querySelector('input[name="task_id"]')?.value || '').trim();
 		const theme = (document.querySelector('textarea[name="theme"]')?.value || '').trim();
 		const structureLink = document.querySelector('a[data-target="#structure"][data-toggle="modal"]');
 		const structure = (document.querySelector('#structure .modal-body')?.innerText || '').trim();
 		const match = (document.body?.innerText || '').match(/Прогресс\s*:\s*(\d+)\s*%/i);
-		return taskID.length > 0 && theme.length > 0 && structureLink && structure.length > 0 &&
-			(!match || Number(match[1]) >= 100);
-	}`, nil, playwright.PageWaitForFunctionOptions{Timeout: playwright.Float(copywritersTimeout)})
+		return taskID.length > 0 && taskID !== previousTaskID && theme.length > 0 &&
+			structureLink && structure.length > 0 && (!match || Number(match[1]) >= 100);
+	}`, previousTaskID, playwright.PageWaitForFunctionOptions{Timeout: playwright.Float(copywritersTimeout)})
 	if err != nil {
-		return fmt.Errorf("wait for final Copywriters result: %w", err)
+		return fmt.Errorf(
+			"не удалось дождаться новой задачи Copywriters (task_id до запуска %q): результат предыдущей задачи не принимается: %w",
+			previousTaskID, err,
+		)
 	}
 	return nil
 }
