@@ -26,7 +26,7 @@ func (r *fakeCurrentErrorsRepository) GetArticleByExternalID(_ context.Context, 
 }
 
 func TestRunErrorsFormatsCurrentErrors(t *testing.T) {
-	message, step, operation, retryable := "request\ntimeout", "article_generation", "gemini_article_generation", true
+	message, step, operation, retryable := "request\ntimeout", "article_generation", "llm_article_generation", true
 	errorTime := time.Date(2026, 8, 4, 9, 40, 12, 0, time.Local)
 	repository := &fakeCurrentErrorsRepository{records: []article.ArticleError{{
 		Article:   article.Article{ID: 9, ExternalID: "124", Title: "Как стать сварщиком", Status: "failed", CurrentStep: &step, ErrorMessage: &message},

@@ -1266,6 +1266,11 @@ func safeErrorMessage(err error) string {
 	return message
 }
 
+// classifyErrorOperation определяет, что именно делала статья в момент сбоя.
+//
+// Имя операции не содержит провайдера: одну и ту же стадию выполняет любой из настроенных
+// LLM (Gemini, OpenRouter, DeepSeek Web), и подставлять сюда конкретного было бы враньём —
+// прежние значения gemini_* появлялись даже тогда, когда стадию выполнял другой провайдер.
 func classifyErrorOperation(step *string, err error) *string {
 	message := strings.ToLower(err.Error())
 	operation := ""
@@ -1281,27 +1286,27 @@ func classifyErrorOperation(step *string, err error) *string {
 	case strings.Contains(message, "result_generation") || strings.Contains(message, "result.md"):
 		operation = "write_result_file"
 	case strings.Contains(message, "stage=structure_generation"):
-		operation = "gemini_structure_generation"
+		operation = "llm_structure_generation"
 	case strings.Contains(message, "stage=article_generation"):
-		operation = "gemini_article_generation"
+		operation = "llm_article_generation"
 	case strings.Contains(message, "stage=metadata_generation") || strings.Contains(message, "stage=metadata_parsing"):
-		operation = "gemini_metadata_generation"
+		operation = "llm_metadata_generation"
 	case strings.Contains(message, "stage=article_review"):
-		operation = "gemini_article_review"
+		operation = "llm_article_review"
 	case strings.Contains(message, "stage=article_fix"):
-		operation = "gemini_article_fix"
+		operation = "llm_article_fix"
 	case strings.Contains(message, "stage=html_generation") || strings.Contains(message, "stage=validate_html"):
-		operation = "gemini_html_generation"
+		operation = "llm_html_generation"
 	case step != nil:
 		switch *step {
 		case "structure_generation":
-			operation = "gemini_structure_generation"
+			operation = "llm_structure_generation"
 		case "article_generation":
-			operation = "gemini_article_generation"
+			operation = "llm_article_generation"
 		case "metadata_generation", "article_review":
-			operation = "gemini_metadata_generation"
+			operation = "llm_metadata_generation"
 		case "html_generation":
-			operation = "gemini_html_generation"
+			operation = "llm_html_generation"
 		case "final_file_assembly":
 			operation = "write_result_file"
 		}
