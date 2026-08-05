@@ -2,6 +2,7 @@ package output
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -113,6 +114,44 @@ func (w *Writer) ResetDiagnostics(externalID, slug, subdirectory string) error {
 		return fmt.Errorf("очистить диагностику предыдущего прогона %s: %w", target, err)
 	}
 	return nil
+}
+
+// generatedArtifacts перечисляет то, что производит генерация: подкаталоги и отдельные файлы
+// внутри каталога статьи. Диагностика prepare и логи сюда не входят намеренно.
+var generatedArtifacts = struct {
+	Directories []string
+	Files       []string
+}{
+	Directories: []string{"generated", "prompts"},
+	Files:       []string{"article.html", "result.md"},
+}
+
+// ResetGeneratedArtifacts removes the generated results of one article and returns the paths
+// it deleted, relative to the output root.
+//
+// Сохраняются prepare/ и logs/: результаты Keys.so и Arsenkin и история прогонов переживают
+// пересоздание статьи.
+func (w *Writer) ResetGeneratedArtifacts(externalID, slug string) ([]string, error) {
+	directory, err := w.resolveArticleDirectory(externalID, slug)
+	if err != nil {
+		return nil, err
+	}
+	removed := make([]string, 0, len(generatedArtifacts.Directories)+len(generatedArtifacts.Files))
+	for _, name := range append(append([]string{}, generatedArtifacts.Directories...), generatedArtifacts.Files...) {
+		relativePath := filepath.ToSlash(filepath.Join(directory, name))
+		target := filepath.Join(w.root, directory, name)
+		if _, statErr := os.Stat(target); statErr != nil {
+			if errors.Is(statErr, os.ErrNotExist) {
+				continue
+			}
+			return removed, fmt.Errorf("проверить артефакт %s: %w", relativePath, statErr)
+		}
+		if err := os.RemoveAll(target); err != nil {
+			return removed, fmt.Errorf("удалить артефакт %s: %w", relativePath, err)
+		}
+		removed = append(removed, relativePath)
+	}
+	return removed, nil
 }
 
 // OpenArticleLog opens the append-only stage log of one article, creating the directory.

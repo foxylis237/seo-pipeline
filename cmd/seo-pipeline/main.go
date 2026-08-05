@@ -123,6 +123,9 @@ func main() {
 	case "import":
 		err = runImport(ctx, articleRepository, cfg.InputFilePath, "output/task1/import-reports", command.ImportLimit, taskLogger)
 
+	case "import-check":
+		err = runImportCheck(ctx, articleRepository, cfg.InputFilePath, os.Stdout, command.ExternalID)
+
 	case "prepare":
 		err = runPrepare(ctx, articleRepository, cfg, taskLogger, writer, logRouter, command.ExternalID)
 
@@ -156,7 +159,7 @@ func main() {
 			err = runResult(ctx, command.ExternalID)
 		}
 
-	case "run", "generate", "demo-generate", "retry", "article", "info", "review", "fix", "html":
+	case "run", "regenerate", "generate", "demo-generate", "retry", "article", "info", "review", "fix", "html":
 		if command.DryRun {
 			err = runDryRun(ctx, articleRepository, cfg, taskLogger, writer, resultService)
 			break
@@ -263,7 +266,7 @@ func main() {
 			} else {
 				err = runGenerate(ctx, generationPipeline, command.ExternalID)
 			}
-		case "run":
+		case "run", "regenerate":
 			if command.Plan {
 				err = runPipelinePlan(ctx, articleRepository, os.Stdout, command.ExternalID)
 				break
@@ -303,6 +306,10 @@ func main() {
 			}
 			runOne := func(ctx context.Context, externalID string) error {
 				return runFullPipeline(ctx, articleRepository, execute, taskLogger, externalID)
+			}
+			if command.Name == "regenerate" {
+				err = runRegenerate(ctx, articleRepository, writer, runOne, taskLogger, command.ExternalID)
+				break
 			}
 			if command.ExternalID == "" {
 				var pending []article.Article
@@ -406,7 +413,7 @@ func main() {
 // таблицей сразу и уже пишет отчёт в output/task1/import-reports.
 func isArticleOperation(name string) bool {
 	switch name {
-	case "prepare", "run", "generate", "demo-generate", "retry",
+	case "prepare", "run", "regenerate", "generate", "demo-generate", "retry",
 		"article", "info", "review", "fix", "html", "result":
 		return true
 	default:
@@ -503,7 +510,7 @@ func parseCommand(args []string) (taskCommand, error) {
 }
 
 func parseTaskCommand(args []string) (taskCommand, error) {
-	const available = "available task-1 operations: import, errors, retry, run, demo-generate, prepare, generate, article, info, review, fix, html, result, deepseek-login"
+	const available = "available task-1 operations: import, import-check, errors, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, deepseek-login"
 	if len(args) < 3 || (args[1] != "task-1" && args[1] != "task_1") {
 		return taskCommand{}, fmt.Errorf("usage: seo-pipeline task-1 <operation> [arguments]; %s", available)
 	}
@@ -536,7 +543,12 @@ func parseTaskCommand(args []string) (taskCommand, error) {
 			return taskCommand{}, fmt.Errorf("usage: seo-pipeline task-1 run [external_id]")
 		}
 		return parseExternalIDCommand(task, args[3])
-	case "errors", "retry", "prepare", "generate", "demo-generate", "review", "fix", "info", "html", "result", "article":
+	case "regenerate":
+		if len(args) != 4 {
+			return taskCommand{}, fmt.Errorf("usage: seo-pipeline task-1 regenerate <external_id>")
+		}
+		return parseExternalIDCommand(task, args[3])
+	case "errors", "retry", "prepare", "generate", "demo-generate", "review", "fix", "info", "html", "result", "article", "import-check":
 		if len(args) == 3 {
 			return taskCommand{Name: task}, nil
 		}
@@ -559,11 +571,11 @@ func parseExternalIDCommand(name, value string) (taskCommand, error) {
 
 func validateConfig(command string, cfg config.Config) error {
 	switch command {
-	case "import":
+	case "import", "import-check":
 		return cfg.ValidateImport()
 	case "prepare":
 		return cfg.ValidatePrepare()
-	case "run", "generate", "demo-generate", "retry", "article", "info", "review", "fix", "html":
+	case "run", "regenerate", "generate", "demo-generate", "retry", "article", "info", "review", "fix", "html":
 		return cfg.ValidateGenerate()
 	case "result":
 		return cfg.ValidateReset()

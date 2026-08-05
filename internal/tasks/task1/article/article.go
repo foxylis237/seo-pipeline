@@ -54,6 +54,14 @@ type Input struct {
 	Professions     string `json:"professions"`
 }
 
+// ImportedArticle связывает статью с сохранённой при импорте строкой Excel.
+// HasInput отличает отсутствующую строку article_inputs от строки с пустыми полями.
+type ImportedArticle struct {
+	Article  Article
+	Input    Input
+	HasInput bool
+}
+
 // KeywordFrequency содержит запрос и его частотность Wordstat.
 type KeywordFrequency struct {
 	Query     string `json:"query"`

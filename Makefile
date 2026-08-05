@@ -14,8 +14,8 @@ DRY_RUN_DATABASE_URL ?= postgres://seo:seo@localhost:5433/seo_dry_run?sslmode=di
 TASK_OPERATION := $(word 2,$(MAKECMDGOALS))
 TASK_ARG := $(word 3,$(MAKECMDGOALS))
 TASK_EXTRA_ARGS := $(wordlist 4,$(words $(MAKECMDGOALS)),$(MAKECMDGOALS))
-TASK_OPERATIONS := import errors retry run dry-run prepare generate demo-generate article info review fix html result deepseek-login
-OPTIONAL_ARGUMENT_OPERATIONS := errors retry run prepare generate demo-generate article info review fix html result
+TASK_OPERATIONS := import import-check errors retry run regenerate dry-run prepare generate demo-generate article info review fix html result deepseek-login
+OPTIONAL_ARGUMENT_OPERATIONS := import-check errors retry run regenerate prepare generate demo-generate article info review fix html result
 
 .PHONY: help task-1 docker-up docker-start docker-stop docker-down docker-restart docker-logs docker-ps
 .PHONY: test test-race fmt vet lint lint-fix build
@@ -42,6 +42,8 @@ help: ## Show all available commands
 	@printf '  %-32s %s\n' 'make task-1 html [ID]' 'Generate pending HTML or process one article'
 	@printf '  %-32s %s\n' 'make task-1 result [ID]' 'Build pending results or process one article'
 	@printf '  %-32s %s\n' 'make task-1 run plan [ID]' 'Show where the pipeline would resume, without running it'
+	@printf '  %-32s %s\n' 'make task-1 import-check [ID]' 'Check the Excel to PostgreSQL import without changing data'
+	@printf '  %-32s %s\n' 'make task-1 regenerate ID' 'Reset one article and rebuild it through the full pipeline'
 	@printf '  %-32s %s\n' 'make task-1 deepseek-login' 'Open Chromium for manual DeepSeek login'
 	@printf '\nProject commands:\n'
 	@awk 'BEGIN {FS = ":.*## "} /^(docker|test|fmt|vet|lint|build)[a-zA-Z0-9_-]*:.*## / {printf "  make %-27s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
