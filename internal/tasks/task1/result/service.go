@@ -167,7 +167,7 @@ func (s *Service) BuildStaged(ctx context.Context, externalID string) (*articleo
 		Title:              input.Article.Title,
 		SEOTitle:           input.Article.Title,
 		ProfessionName:     input.Keyword,
-		ImageName:          input.Article.Title,
+		ImageName:          input.Header,
 		ImageURL:           input.Article.Slug,
 		ReadingTimeMinutes: ReadingTimeMinutes(articleText),
 		FAQItems:           faqItems,
@@ -194,7 +194,7 @@ func (s *Service) warnMissingResultFields(input article.ResultInput) {
 	}{
 		{"SEO-заголовок", input.Article.Title},
 		{"Название профессии", input.Keyword},
-		{"Название картинки", input.Article.Title},
+		{"Название картинки", input.Header},
 		{"URL картинки", input.Article.Slug},
 	}
 	for _, field := range fields {

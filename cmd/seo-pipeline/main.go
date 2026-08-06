@@ -231,7 +231,9 @@ func main() {
 			break
 		}
 		router := llm.NewRouter(llmConfig, clients, taskLogger)
-		chatFactory := router.NewStageChatFactory("article", "info")
+		// review и fix идут одним чатом: fix опирается на историю, а не на повторную
+		// передачу статьи и ревью.
+		chatFactory := router.NewStageChatFactory("review", "fix")
 		generationPipeline := generation.NewPipeline(articleRepository, router, chatFactory, writer, taskLogger, resultService)
 		runPreparedDemo := func(ctx context.Context, externalID string) error {
 			saved, loadErr := articleRepository.GetSavedGenerationInput(ctx, externalID)

@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/foxylis237/seo-pipeline/internal/llm"
-	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/article"
 )
 
 func TestDryRunClientProvidesEveryStatelessStage(t *testing.T) {
@@ -22,21 +21,34 @@ func TestDryRunClientProvidesEveryStatelessStage(t *testing.T) {
 	}
 }
 
-func TestDryRunChatProvidesArticleAndParseableInfo(t *testing.T) {
+func TestDryRunChatProvidesReviewAndFixedArticle(t *testing.T) {
+	// Чат dry-run повторяет продовую схему: первое сообщение — review, второе — fix.
 	chat, err := (dryRunClient{}).NewChat(context.Background(), 7)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer chat.Close()
-	articleResponse, err := chat.Generate(context.Background(), "article prompt")
-	if err != nil || !strings.Contains(articleResponse.Text, "[[ARTICLE_COMPLETE]]") {
-		t.Fatalf("article response = %+v, %v", articleResponse, err)
+	reviewResponse, err := chat.Generate(context.Background(), "review prompt")
+	if err != nil || strings.TrimSpace(reviewResponse.Text) == "" {
+		t.Fatalf("review response = %+v, %v", reviewResponse, err)
 	}
-	infoResponse, err := chat.Generate(context.Background(), "info prompt")
+	fixResponse, err := chat.Generate(context.Background(), "fix prompt")
+	if err != nil || !strings.Contains(fixResponse.Text, "[[ARTICLE_COMPLETE]]") {
+		t.Fatalf("fix response = %+v, %v", fixResponse, err)
+	}
+}
+
+func TestDryRunChatWithHistoryStartsFromFixMessage(t *testing.T) {
+	chat, err := (dryRunClient{}).NewChatWithHistory(context.Background(), 7,
+		llm.Message{Role: "user", Content: "review prompt"},
+		llm.Message{Role: "assistant", Content: "review answer"},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := article.ParseArticleInfo(infoResponse.Text); err != nil {
-		t.Fatalf("parse dry-run info: %v", err)
+	defer chat.Close()
+	response, err := chat.Generate(context.Background(), "fix prompt")
+	if err != nil || !strings.Contains(response.Text, "[[ARTICLE_COMPLETE]]") {
+		t.Fatalf("fix response = %+v, %v", response, err)
 	}
 }

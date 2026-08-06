@@ -18,6 +18,9 @@ type Client struct {
 	access  chan struct{}
 	mu      sync.Mutex
 	session *browserSession
+
+	pace          pacing
+	lastRequestAt time.Time
 }
 
 func NewClient(cfg Config, logger *slog.Logger) (*Client, error) {
@@ -26,6 +29,7 @@ func NewClient(cfg Config, logger *slog.Logger) (*Client, error) {
 	}
 	return &Client{
 		cfg: cfg, logger: logger.With("provider_type", "deepseek_web"), access: make(chan struct{}, 1),
+		pace: defaultPacing(),
 	}, nil
 }
 
@@ -39,9 +43,13 @@ func (c *Client) Generate(ctx context.Context, request llm.Request) (llm.Respons
 	case <-ctx.Done():
 		return llm.Response{}, ctx.Err()
 	}
+	if err := c.waitBeforeRequest(ctx); err != nil {
+		return llm.Response{}, err
+	}
 	started := time.Now()
 	c.logger.Info("DeepSeek Web generation started", "model", request.Model)
 	response, err := c.generate(ctx, request)
+	c.markRequestFinished()
 	if err != nil {
 		c.logger.Warn("DeepSeek Web generation failed", "model", request.Model, "duration_ms", time.Since(started).Milliseconds(), "error", err)
 		return llm.Response{}, err
@@ -51,6 +59,13 @@ func (c *Client) Generate(ctx context.Context, request llm.Request) (llm.Respons
 }
 
 func (c *Client) generate(ctx context.Context, request llm.Request) (llm.Response, error) {
+	// Проверка до ensureSession: пока действует cooldown, Chromium не запускается вовсе.
+	if until, reason, blocked := readBlockedUntil(c.cfg.ProfileDir, c.pace.now()); blocked {
+		c.logger.Warn("DeepSeek request rejected by cooldown",
+			"blocked_until", until.UTC().Format(time.RFC3339), "reason", reason)
+		return llm.Response{}, accountUnavailableError(fmt.Sprintf(
+			"cooldown until %s (%s)", until.UTC().Format(time.RFC3339), reason))
+	}
 	session, err := c.ensureSession()
 	if err != nil {
 		c.logger.Warn("DeepSeek browser start failed", "error", err)
@@ -64,8 +79,16 @@ func (c *Client) generate(ctx context.Context, request llm.Request) (llm.Respons
 	}); err != nil {
 		return llm.Response{}, c.browserError(ctx, "open DeepSeek Chat", err)
 	}
+	if reason, blocked := c.detectBlocked(page); blocked {
+		return llm.Response{}, c.blockAccount(reason)
+	}
 	state, err := waitForChatReady(page, timeout)
 	if err != nil {
+		// Неизвестная страница — самый частый вид блокировки: ни поля ввода, ни формы входа.
+		// Проверяем ещё раз, прежде чем считать ошибку временной и уходить в повтор.
+		if reason, blocked := c.detectBlocked(page); blocked {
+			return llm.Response{}, c.blockAccount(reason)
+		}
 		return llm.Response{}, c.browserError(ctx, "wait for DeepSeek Chat", err)
 	}
 	if state == "expired" {

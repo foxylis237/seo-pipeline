@@ -23,6 +23,17 @@ const (
 	clipboardMarker       = "__seo_pipeline_clipboard__"
 	clipboardTimeout      = 5 * time.Second
 	clipboardPollInterval = 200 * time.Millisecond
+
+	// minRequestInterval и requestJitter задают паузу между двумя запросами к веб-интерфейсу:
+	// 30 s плюс случайные 0–20 s. Случайность здесь не маскирует автоматизацию, а убирает
+	// ровный машинный ритм, по которому нагрузка выглядит агрессивной.
+	minRequestInterval = 30 * time.Second
+	requestJitter      = 20 * time.Second
+
+	// blockCooldown — на сколько клиент перестаёт открывать браузер после того, как увидел
+	// страницу блокировки. Реальные блокировки длятся дольше, но ложное срабатывание на
+	// проверке Cloudflare не должно выключать провайдера на сутки.
+	blockCooldown = time.Hour
 )
 
 type Config struct {

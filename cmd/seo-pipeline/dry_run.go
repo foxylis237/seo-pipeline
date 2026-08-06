@@ -31,11 +31,24 @@ func (dryRunClient) Generate(_ context.Context, request llm.Request) (llm.Respon
 	return llm.Response{Text: text, Model: request.Model, InputTokens: 120, OutputTokens: 80}, nil
 }
 
-func (dryRunClient) NewChat(context.Context, int64) (llm.Chat, error) {
+func (c dryRunClient) NewChat(context.Context, int64) (llm.Chat, error) {
+	stages := dryRunStageResponses()
 	return &dryRunChat{responses: []llm.Response{
-		{Text: dryRunArticle, Model: dryRunModelPrefix + "article", InputTokens: 240, OutputTokens: 420},
-		{Text: dryRunInfo, Model: dryRunModelPrefix + "info", InputTokens: 80, OutputTokens: 60},
+		{Text: stages["review"], Model: dryRunModelPrefix + "review", InputTokens: 240, OutputTokens: 420},
+		{Text: stages["fix"], Model: dryRunModelPrefix + "fix", InputTokens: 80, OutputTokens: 60},
 	}}, nil
+}
+
+// NewChatWithHistory продолжает чат review в отдельном прогоне стадии fix.
+func (c dryRunClient) NewChatWithHistory(ctx context.Context, articleID int64, history ...llm.Message) (llm.Chat, error) {
+	chat, err := c.NewChat(ctx, articleID)
+	if err != nil {
+		return nil, err
+	}
+	if session, ok := chat.(*dryRunChat); ok {
+		session.next = len(history) / 2
+	}
+	return chat, nil
 }
 
 type dryRunChat struct {

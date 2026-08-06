@@ -73,6 +73,8 @@ make task-1 import
 
 Makefile — короткая оболочка над существующим CLI, командами Go и Docker Compose. Все операции первой задачи запускаются через единый namespace: `make task-1 <operation> [аргумент]`.
 
+`review` и `fix` выполняются в одном LLM-чате: `fix` вторым сообщением опирается на историю — статью и ответ ревью — и повторно их не получает. Это уменьшает размер запроса и снижает вероятность обрыва генерации. При отдельном запуске `fix` история восстанавливается из сохранённых `article.txt` и `review.txt` без дополнительного обращения к модели.
+
 Для `prepare`, `generate`, `article`, `info`, `review`, `fix`, `html` и `result` действует общее правило: без ID команда последовательно обрабатывает по внутреннему `articles.id` все статьи, которым по состоянию PostgreSQL нужен этот этап; с ID — только указанную статью, сохраняя прежнее точечное поведение. Нулевой, отрицательный и некорректный ID отклоняется до запуска. Ошибка одной статьи в batch фиксируется в её статусе и логах, остальные статьи продолжают обрабатываться, а итоговый код остаётся ненулевым.
 
 ### Команды приложения
@@ -89,10 +91,10 @@ Makefile — короткая оболочка над существующим C
 | `task-1 prepare` | Собирает отсутствующий Keys.so и Arsenkin research. | Необязательный ID. | `make task-1 prepare` или `make task-1 prepare 37` | `go run ./cmd/seo-pipeline task-1 prepare [external_id]` |
 | `task-1 generate` | Запускает требуемый полный flow `structure → article/info → review → fix → html → result`. | Необязательный ID. | `make task-1 generate` или `make task-1 generate 37` | `go run ./cmd/seo-pipeline task-1 generate [external_id]` |
 | `task-1 demo-generate` | Возобновляет demo-flow `prepare → structure → article/info → result`, не запуская review, fix и HTML. | Необязательный ID. | `make task-1 demo-generate` или `make task-1 demo-generate 37` | `go run ./cmd/seo-pipeline task-1 demo-generate [external_id]` |
-| `task-1 article` | Генерирует требуемые article и metadata `info` в общем чате. | Необязательный ID. | `make task-1 article` или `make task-1 article 37` | `go run ./cmd/seo-pipeline task-1 article [external_id]` |
+| `task-1 article` | Генерирует article и metadata `info` двумя отдельными вызовами. | Необязательный ID. | `make task-1 article` или `make task-1 article 37` | `go run ./cmd/seo-pipeline task-1 article [external_id]` |
 | `task-1 info` | Выполняет ту же объединённую операцию `article + info`. | Необязательный ID. | `make task-1 info` или `make task-1 info 37` | `go run ./cmd/seo-pipeline task-1 info [external_id]` |
-| `task-1 review` | Проверяет статьи с готовыми article и metadata без review. | Необязательный ID. | `make task-1 review` или `make task-1 review 37` | `go run ./cmd/seo-pipeline task-1 review [external_id]` |
-| `task-1 fix` | Исправляет статьи с готовым review без fixed article. | Необязательный ID. | `make task-1 fix` или `make task-1 fix 37` | `go run ./cmd/seo-pipeline task-1 fix [external_id]` |
+| `task-1 review` | Проверяет статьи с готовыми article и metadata без review. Открывает чат, который продолжит `fix`. | Необязательный ID. | `make task-1 review` или `make task-1 review 37` | `go run ./cmd/seo-pipeline task-1 review [external_id]` |
+| `task-1 fix` | Исправляет статьи с готовым review без fixed article, продолжая чат ревью. | Необязательный ID. | `make task-1 fix` или `make task-1 fix 37` | `go run ./cmd/seo-pipeline task-1 fix [external_id]` |
 | `task-1 html` | Создаёт отсутствующий HTML из готовой fixed article. | Необязательный ID. | `make task-1 html` или `make task-1 html 37` | `go run ./cmd/seo-pipeline task-1 html [external_id]` |
 | `task-1 result` | Собирает отсутствующий `result.md` и завершает статью. | Необязательный ID. | `make task-1 result` или `make task-1 result 37` | `go run ./cmd/seo-pipeline task-1 result [external_id]` |
 | `task-1 deepseek-login` | Открывает Chromium для ручного входа в DeepSeek и сохраняет persistent profile. | Нет. | `make task-1 deepseek-login` | `go run ./cmd/seo-pipeline task-1 deepseek-login` |

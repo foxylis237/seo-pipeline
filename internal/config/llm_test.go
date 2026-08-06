@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -227,4 +228,51 @@ func writeLLMTestConfig(t *testing.T, structureProvider, keyEnv, promptOverride 
 		t.Fatal(err)
 	}
 	return configPath
+}
+
+func TestTask1StageProvidersMatchConfiguredScheme(t *testing.T) {
+	projectRoot, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(projectRoot)
+	t.Setenv("GEMINI_API_KEY", "test-gemini")
+	t.Setenv("GEMINI_MODEL", "gemini-2.5-flash")
+	t.Setenv("OPENROUTER_API_KEY", "test-openrouter")
+	t.Setenv("OPENROUTER_MODEL", "openrouter-model")
+	config, err := LoadLLMConfig("config/config.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		stage     string
+		providers []string
+	}{
+		{stage: "structure", providers: []string{"deepseek_web"}},
+		{stage: "article", providers: []string{"gemini", "deepseek_web"}},
+		{stage: "info", providers: []string{"deepseek_web"}},
+		{stage: "review", providers: []string{"gemini", "deepseek_web"}},
+		// fix продолжает чат review и идёт к выбранному там провайдеру; список targets
+		// существует только ради обязательной валидации стадии.
+		{stage: "fix", providers: []string{"gemini", "deepseek_web"}},
+		{stage: "html", providers: []string{"deepseek_web"}},
+	}
+	for _, test := range tests {
+		t.Run(test.stage, func(t *testing.T) {
+			stage, found := config.Stages[test.stage]
+			if !found {
+				t.Fatalf("стадия %q не настроена", test.stage)
+			}
+			var providers []string
+			for _, target := range stage.Targets {
+				providers = append(providers, target.Provider)
+				if strings.TrimSpace(target.Model) == "" {
+					t.Errorf("у провайдера %s не задана модель", target.Provider)
+				}
+			}
+			if !reflect.DeepEqual(providers, test.providers) {
+				t.Fatalf("провайдеры = %v, ожидались %v", providers, test.providers)
+			}
+		})
+	}
 }

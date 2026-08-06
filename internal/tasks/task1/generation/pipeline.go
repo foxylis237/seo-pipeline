@@ -128,11 +128,14 @@ func (p *Pipeline) Run(ctx context.Context, input article.GenerationInput) (Pipe
 	articleText := articleOutput.Text
 	paths := articleOutput.Paths
 
-	reviewOutput, err := p.runReview(ctx, input, articleText)
+	_, reviewChat, err := p.runReview(ctx, input, articleText)
 	if err != nil {
 		return PipelineOutput{}, err
 	}
-	fixOutput, err := p.runFix(ctx, input, articleText, reviewOutput.Text)
+	fixOutput, err := p.runFix(ctx, input, reviewChat, articleText)
+	if closeErr := reviewChat.Close(); closeErr != nil {
+		logger.Warn("не удалось закрыть чат ревью", "stage", "article_fix", "error", closeErr)
+	}
 	if err != nil {
 		return PipelineOutput{}, err
 	}
@@ -266,7 +269,16 @@ func (p *Pipeline) runArticleAndInfo(ctx context.Context, input article.Generati
 		return articleStageOutput{}, p.fail(ctx, logger, input, "article_generation", err)
 	}
 	logger.Info("article generation started", "stage", "article_generation")
-	articleCall, err := p.router.Prepare(llm.Call{Stage: "article", ArticleID: input.Article.ID, Data: struct {
+	trace, err := p.articleTrace(ctx, logger, input)
+	if err != nil {
+		return articleStageOutput{}, p.fail(ctx, logger, input, "verify_article_identity", err)
+	}
+	diagnostics.LogStep(p.logger, "llm_article", "before", trace,
+		"structure_fingerprint", diagnostics.Fingerprint(structure),
+		"keywords_count", len(input.WordstatKeywords),
+		"keywords_fingerprint", diagnostics.Fingerprint(formatKeywords(input.WordstatKeywords)),
+	)
+	articleResult, err := p.router.Generate(ctx, llm.Call{Stage: "article", ArticleID: input.Article.ID, Data: struct {
 		Title              string
 		Keywords           string
 		LSIWords           string
@@ -278,32 +290,6 @@ func (p *Pipeline) runArticleAndInfo(ctx context.Context, input article.Generati
 	if err != nil {
 		return articleStageOutput{}, p.fail(ctx, logger, input, "article_generation", err)
 	}
-	trace, err := p.articleTrace(ctx, logger, input)
-	if err != nil {
-		return articleStageOutput{}, p.fail(ctx, logger, input, "verify_article_identity", err)
-	}
-	diagnostics.LogStep(p.logger, "llm_article", "before", trace,
-		"structure_fingerprint", diagnostics.Fingerprint(structure),
-		"keywords_count", len(input.WordstatKeywords),
-		"keywords_fingerprint", diagnostics.Fingerprint(formatKeywords(input.WordstatKeywords)),
-		"prompt_fingerprint", diagnostics.Fingerprint(articleCall.Prompt),
-	)
-	chat, err := p.chatFactory.NewChat(ctx, input.Article.ID)
-	if err != nil {
-		return articleStageOutput{}, p.fail(ctx, logger, input, "article_generation", err)
-	}
-	defer func() {
-		if err := chat.Close(); err != nil {
-			returnErr = errors.Join(returnErr, fmt.Errorf("close article LLM chat: %w", err))
-		}
-	}()
-	logger.Info("LLM chat created", "stage", "article_generation", "model", articleCall.Model)
-	articleCtx, cancelArticle := context.WithTimeout(ctx, articleCall.Timeout)
-	articleResult, err := chat.Generate(articleCtx, articleCall.Prompt)
-	cancelArticle()
-	if err != nil {
-		return articleStageOutput{}, p.fail(ctx, logger, input, "article_generation", err)
-	}
 	text := strings.TrimSpace(strings.ReplaceAll(articleResult.Text, "[[ARTICLE_COMPLETE]]", ""))
 	if text == "" {
 		return articleStageOutput{}, p.fail(ctx, logger, input, "article_generation", fmt.Errorf("article returned an empty response"))
@@ -311,8 +297,8 @@ func (p *Pipeline) runArticleAndInfo(ctx context.Context, input article.Generati
 	if err := ctx.Err(); err != nil {
 		return articleStageOutput{}, p.fail(ctx, logger, input, "article_generation", err)
 	}
-	logger.Info("article generated", "stage", "article_generation", "model", articleResult.Model, "prompt_size", len([]rune(articleCall.Prompt)), "input_tokens", articleResult.InputTokens, "output_tokens", articleResult.OutputTokens, "duration_ms", time.Since(started).Milliseconds())
-	articlePending, err := p.writer.StageArticle(input.Article.ExternalID, input.Article.Slug, articleCall.Prompt, text, articleResult.Model)
+	logger.Info("article generated", "stage", "article_generation", "model", articleResult.Model, "prompt_size", len([]rune(articleResult.Prompt)), "input_tokens", articleResult.InputTokens, "output_tokens", articleResult.OutputTokens, "duration_ms", time.Since(started).Milliseconds())
+	articlePending, err := p.writer.StageArticle(input.Article.ExternalID, input.Article.Slug, articleResult.Prompt, text, articleResult.Model)
 	if err != nil {
 		return articleStageOutput{}, p.fail(ctx, logger, input, "save_article", err)
 	}
@@ -327,7 +313,7 @@ func (p *Pipeline) runArticleAndInfo(ctx context.Context, input article.Generati
 	}
 	logger.Info("article saved", "stage", "article_generation", "model", articleResult.Model, "result_path", paths.ArticlePath)
 	diagnostics.LogStep(p.logger, "llm_article", "after", trace,
-		"prompt_fingerprint", diagnostics.Fingerprint(articleCall.Prompt),
+		"prompt_fingerprint", diagnostics.Fingerprint(articleResult.Prompt),
 		"response_fingerprint", diagnostics.Fingerprint(text),
 		"result_path", paths.ArticlePath,
 	)
@@ -337,18 +323,16 @@ func (p *Pipeline) runArticleAndInfo(ctx context.Context, input article.Generati
 		return articleStageOutput{}, p.fail(ctx, logger, input, "metadata_generation", err)
 	}
 	logger.Info("article info generation started", "stage", "info")
-	infoCall, err := p.router.Prepare(llm.Call{Stage: "info", ArticleID: input.Article.ID, Data: struct {
-		GeneratedStructure string
-	}{GeneratedStructure: structure}})
-	if err != nil {
-		return articleStageOutput{}, p.fail(ctx, logger, input, "metadata_generation", err)
-	}
 	diagnostics.LogStep(p.logger, "llm_info", "before", trace,
-		"prompt_fingerprint", diagnostics.Fingerprint(infoCall.Prompt),
+		"article_fingerprint", diagnostics.Fingerprint(text),
 	)
-	infoCtx, cancelInfo := context.WithTimeout(ctx, infoCall.Timeout)
-	infoResult, err := chat.Generate(infoCtx, infoCall.Prompt)
-	cancelInfo()
+	// Информация для публикации собирается отдельным вызовом: текст статьи передаётся
+	// в промпт явно, а не остаётся в истории общего чата. Стадия перестала зависеть
+	// от того, помнит ли провайдер предыдущее сообщение.
+	infoResult, err := p.router.Generate(ctx, llm.Call{Stage: "info", ArticleID: input.Article.ID, Data: struct {
+		GeneratedStructure string
+		GeneratedArticle   string
+	}{GeneratedStructure: structure, GeneratedArticle: text}})
 	if err != nil {
 		return articleStageOutput{}, p.fail(ctx, logger, input, "metadata_generation", err)
 	}
@@ -360,7 +344,7 @@ func (p *Pipeline) runArticleAndInfo(ctx context.Context, input article.Generati
 	if err := ctx.Err(); err != nil {
 		return articleStageOutput{}, p.fail(ctx, logger, input, "metadata_generation", err)
 	}
-	logger.Info("article info generated", "stage", "info", "model", infoResult.Model, "prompt_size", len([]rune(infoCall.Prompt)), "input_tokens", infoResult.InputTokens, "output_tokens", infoResult.OutputTokens, "duration_ms", time.Since(infoStarted).Milliseconds())
+	logger.Info("article info generated", "stage", "info", "model", infoResult.Model, "prompt_size", len([]rune(infoResult.Prompt)), "input_tokens", infoResult.InputTokens, "output_tokens", infoResult.OutputTokens, "duration_ms", time.Since(infoStarted).Milliseconds())
 	logger.Info("article info parsing started", "stage", "info")
 	parsedInfo, err := article.ParseArticleInfo(articleInfo)
 	if err != nil {
@@ -374,7 +358,7 @@ func (p *Pipeline) runArticleAndInfo(ctx context.Context, input article.Generati
 		logger.Info("article info parsed", "stage", "info")
 	}
 	if atomicDemo {
-		infoPending, stageErr := p.writer.StageArticleInfo(input.Article.ExternalID, input.Article.Slug, infoCall.Prompt, articleInfo)
+		infoPending, stageErr := p.writer.StageArticleInfo(input.Article.ExternalID, input.Article.Slug, infoResult.Prompt, articleInfo)
 		err = stageErr
 		if err != nil {
 			return articleStageOutput{}, p.fail(ctx, logger, input, "save_article_info_files", err)
@@ -392,69 +376,96 @@ func (p *Pipeline) runArticleAndInfo(ctx context.Context, input article.Generati
 	}
 	logger.Info("article info saved", "stage", "info")
 	diagnostics.LogStep(p.logger, "llm_info", "after", trace,
-		"prompt_fingerprint", diagnostics.Fingerprint(infoCall.Prompt),
+		"prompt_fingerprint", diagnostics.Fingerprint(infoResult.Prompt),
 		"response_fingerprint", diagnostics.Fingerprint(articleInfo),
 	)
 	logger.Info("article stage completed", "stage", "article_generation", "duration_ms", time.Since(started).Milliseconds(), "result_path", paths.ArticlePath)
 	return articleStageOutput{stageOutput: stageOutput{Text: text, Paths: paths}, Info: articleInfo}, nil
 }
 
-func (p *Pipeline) runReview(ctx context.Context, input article.GenerationInput, articleText string) (stageOutput, error) {
+// runReview выполняет ревью и возвращает чат, в котором оно выполнено: стадия fix
+// продолжает этот же чат и опирается на историю, а не на повторную передачу статьи.
+func (p *Pipeline) runReview(ctx context.Context, input article.GenerationInput, articleText string) (stageOutput, llm.Chat, error) {
 	started := time.Now()
 	logger := p.logger.With("article_id", input.Article.ID, "external_id", input.Article.ExternalID)
 	if err := ctx.Err(); err != nil {
-		return stageOutput{}, p.fail(ctx, logger, input, "article_review", err)
+		return stageOutput{}, nil, p.fail(ctx, logger, input, "article_review", err)
 	}
 	logger.Info("article review started", "stage", "article_review")
 	trace, err := p.traceLLMStage(ctx, logger, input, "llm_review", articleText)
 	if err != nil {
-		return stageOutput{}, p.fail(ctx, logger, input, "verify_article_identity", err)
+		return stageOutput{}, nil, p.fail(ctx, logger, input, "verify_article_identity", err)
 	}
-	result, err := p.router.Generate(ctx, llm.Call{Stage: "review", ArticleID: input.Article.ID, Data: struct{ Article string }{articleText}})
+	reviewCall, err := p.reviewCall(articleText)
 	if err != nil {
-		return stageOutput{}, p.fail(ctx, logger, input, "article_review", err)
+		return stageOutput{}, nil, p.fail(ctx, logger, input, "article_review", err)
+	}
+	chat, err := p.chatFactory.NewChat(ctx, input.Article.ID)
+	if err != nil {
+		return stageOutput{}, nil, p.fail(ctx, logger, input, "article_review", err)
+	}
+	result, err := chat.Generate(ctx, reviewCall.Prompt)
+	if err != nil {
+		_ = chat.Close()
+		return stageOutput{}, nil, p.fail(ctx, logger, input, "article_review", err)
 	}
 	text := strings.TrimSpace(result.Text)
 	if text == "" {
-		return stageOutput{}, p.fail(ctx, logger, input, "article_review", fmt.Errorf("review returned an empty response"))
+		_ = chat.Close()
+		return stageOutput{}, nil, p.fail(ctx, logger, input, "article_review", fmt.Errorf("review returned an empty response"))
 	}
 	if err := ctx.Err(); err != nil {
-		return stageOutput{}, p.fail(ctx, logger, input, "article_review", err)
+		_ = chat.Close()
+		return stageOutput{}, nil, p.fail(ctx, logger, input, "article_review", err)
 	}
-	pending, err := p.writer.StageReview(input.Article.ExternalID, input.Article.Slug, result.Prompt, text)
+	pending, err := p.writer.StageReview(input.Article.ExternalID, input.Article.Slug, reviewCall.Prompt, text)
 	if err != nil {
-		return stageOutput{}, p.fail(ctx, logger, input, "save_article_review", err)
+		_ = chat.Close()
+		return stageOutput{}, nil, p.fail(ctx, logger, input, "save_article_review", err)
 	}
 	defer pending.Abort()
 	paths := pending.Paths
 	if err := articleoutput.Commit(func() error {
 		return p.repository.SaveReviewPath(ctx, input.Article.ID, paths.ReviewPath)
 	}, pending); err != nil {
-		return stageOutput{}, p.fail(ctx, logger, input, "save_article_review_path", err)
+		_ = chat.Close()
+		return stageOutput{}, nil, p.fail(ctx, logger, input, "save_article_review_path", err)
 	}
-	logger.Info("article review completed", "stage", "article_review", "prompt_size", len([]rune(result.Prompt)), "input_tokens", result.InputTokens, "output_tokens", result.OutputTokens, "duration_ms", time.Since(started).Milliseconds(), "result_path", paths.ReviewPath)
+	logger.Info("article review completed", "stage", "article_review", "prompt_size", len([]rune(reviewCall.Prompt)), "input_tokens", result.InputTokens, "output_tokens", result.OutputTokens, "duration_ms", time.Since(started).Milliseconds(), "result_path", paths.ReviewPath)
 	diagnostics.LogStep(p.logger, "llm_review", "after", trace,
-		"prompt_fingerprint", diagnostics.Fingerprint(result.Prompt),
+		"prompt_fingerprint", diagnostics.Fingerprint(reviewCall.Prompt),
 		"response_fingerprint", diagnostics.Fingerprint(text),
 		"result_path", paths.ReviewPath,
 	)
-	return stageOutput{Text: text, Paths: paths}, nil
+	return stageOutput{Text: text, Paths: paths}, chat, nil
 }
 
-func (p *Pipeline) runFix(ctx context.Context, input article.GenerationInput, articleText, reviewText string) (stageOutput, error) {
+// reviewCall рендерит промпт ревью. Он же служит первым сообщением истории, когда стадия
+// fix выполняется отдельным прогоном.
+func (p *Pipeline) reviewCall(articleText string) (llm.PreparedCall, error) {
+	return p.router.Prepare(llm.Call{Stage: "review", Data: struct{ Article string }{articleText}})
+}
+
+// runFix продолжает чат ревью вторым сообщением. Промпт стадии больше не содержит статью
+// и ревью — они уже в истории этого чата, поэтому повторно не передаются.
+func (p *Pipeline) runFix(ctx context.Context, input article.GenerationInput, chat llm.Chat, articleText string) (stageOutput, error) {
 	started := time.Now()
 	logger := p.logger.With("article_id", input.Article.ID, "external_id", input.Article.ExternalID)
 	if err := ctx.Err(); err != nil {
 		return stageOutput{}, p.fail(ctx, logger, input, "article_fix", err)
 	}
 	logger.Info("article fix started", "stage", "article_fix")
-	trace, err := p.traceLLMStage(ctx, logger, input, "llm_fix", articleText+reviewText)
+	trace, err := p.traceLLMStage(ctx, logger, input, "llm_fix", articleText)
 	if err != nil {
 		return stageOutput{}, p.fail(ctx, logger, input, "verify_article_identity", err)
 	}
-	result, err := p.router.Generate(ctx, llm.Call{Stage: "fix", ArticleID: input.Article.ID, Data: struct {
-		Article, Review, Professions, Links string
-	}{articleText, reviewText, input.Professions, input.Links}})
+	fixCall, err := p.router.Prepare(llm.Call{Stage: "fix", Data: struct {
+		Professions, Links string
+	}{input.Professions, input.Links}})
+	if err != nil {
+		return stageOutput{}, p.fail(ctx, logger, input, "article_fix", err)
+	}
+	result, err := chat.Generate(ctx, fixCall.Prompt)
 	if err != nil {
 		return stageOutput{}, p.fail(ctx, logger, input, "article_fix", err)
 	}
@@ -465,7 +476,7 @@ func (p *Pipeline) runFix(ctx context.Context, input article.GenerationInput, ar
 	if err := ctx.Err(); err != nil {
 		return stageOutput{}, p.fail(ctx, logger, input, "article_fix", err)
 	}
-	pending, err := p.writer.StageFixedArticle(input.Article.ExternalID, input.Article.Slug, result.Prompt, text)
+	pending, err := p.writer.StageFixedArticle(input.Article.ExternalID, input.Article.Slug, fixCall.Prompt, text)
 	if err != nil {
 		return stageOutput{}, p.fail(ctx, logger, input, "save_fixed_article", err)
 	}
@@ -476,9 +487,9 @@ func (p *Pipeline) runFix(ctx context.Context, input article.GenerationInput, ar
 	}, pending); err != nil {
 		return stageOutput{}, p.fail(ctx, logger, input, "save_fixed_article_path", err)
 	}
-	logger.Info("article fix completed", "stage", "article_fix", "prompt_size", len([]rune(result.Prompt)), "input_tokens", result.InputTokens, "output_tokens", result.OutputTokens, "duration_ms", time.Since(started).Milliseconds(), "result_path", paths.FixedArticlePath)
+	logger.Info("article fix completed", "stage", "article_fix", "prompt_size", len([]rune(fixCall.Prompt)), "input_tokens", result.InputTokens, "output_tokens", result.OutputTokens, "duration_ms", time.Since(started).Milliseconds(), "result_path", paths.FixedArticlePath)
 	diagnostics.LogStep(p.logger, "llm_fix", "after", trace,
-		"prompt_fingerprint", diagnostics.Fingerprint(result.Prompt),
+		"prompt_fingerprint", diagnostics.Fingerprint(fixCall.Prompt),
 		"response_fingerprint", diagnostics.Fingerprint(text),
 		"result_path", paths.FixedArticlePath,
 	)
@@ -594,7 +605,12 @@ func (p *Pipeline) RunReviewByExternalID(ctx context.Context, externalID string)
 	if err := p.repository.BeginGenerationStage(ctx, input.Article.ID, "review"); err != nil {
 		return PipelineOutput{}, p.fail(ctx, p.stageLogger(input), input, "begin_review", err)
 	}
-	output, err := p.runReview(ctx, input, articleText)
+	output, chat, err := p.runReview(ctx, input, articleText)
+	if chat != nil {
+		if closeErr := chat.Close(); closeErr != nil {
+			p.stageLogger(input).Warn("не удалось закрыть чат ревью", "stage", "article_review", "error", closeErr)
+		}
+	}
 	return PipelineOutput{Paths: output.Paths}, err
 }
 
@@ -614,8 +630,29 @@ func (p *Pipeline) RunFixByExternalID(ctx context.Context, externalID string) (P
 	if err := p.repository.BeginGenerationStage(ctx, input.Article.ID, "fix"); err != nil {
 		return PipelineOutput{}, p.fail(ctx, p.stageLogger(input), input, "begin_fix", err)
 	}
-	output, err := p.runFix(ctx, input, articleText, reviewText)
+	// Отдельный прогон стадии fix продолжает тот же чат: история восстанавливается из
+	// сохранённых артефактов, без повторного запроса ревью у модели.
+	chat, err := p.resumeReviewChat(ctx, input, articleText, reviewText)
+	if err != nil {
+		return PipelineOutput{}, p.fail(ctx, p.stageLogger(input), input, "article_fix", err)
+	}
+	output, err := p.runFix(ctx, input, chat, articleText)
+	if closeErr := chat.Close(); closeErr != nil {
+		p.stageLogger(input).Warn("не удалось закрыть чат ревью", "stage", "article_fix", "error", closeErr)
+	}
 	return PipelineOutput{Paths: output.Paths}, err
+}
+
+// resumeReviewChat восстанавливает чат ревью из сохранённых статьи и ревью.
+func (p *Pipeline) resumeReviewChat(ctx context.Context, input article.GenerationInput, articleText, reviewText string) (llm.Chat, error) {
+	reviewCall, err := p.reviewCall(articleText)
+	if err != nil {
+		return nil, err
+	}
+	return p.chatFactory.NewChatWithHistory(ctx, input.Article.ID,
+		llm.Message{Role: "user", Content: reviewCall.Prompt},
+		llm.Message{Role: "assistant", Content: reviewText},
+	)
 }
 
 func (p *Pipeline) RunHTMLByExternalID(ctx context.Context, externalID string) (PipelineOutput, error) {
