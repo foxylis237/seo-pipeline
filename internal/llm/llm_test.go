@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"strings"
 	"testing"
 	"time"
@@ -344,5 +345,98 @@ func TestStageChatLogsArticleIDForEveryStage(t *testing.T) {
 	}
 	if strings.Contains(output, `"article_id":0`) {
 		t.Fatalf("chat stage was logged without an article: %s", output)
+	}
+}
+
+func TestFallbackOnlyOnTechnicalProviderFailures(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		fallback bool
+	}{
+		{name: "исчерпана квота", err: NewStatusError(429, "quota exceeded"), fallback: true},
+		{name: "превышен лимит запросов", err: NewStatusError(429, "rate limit exceeded"), fallback: true},
+		{name: "провайдер недоступен", err: NewStatusError(503, "service unavailable"), fallback: true},
+		{name: "шлюз не отвечает", err: NewStatusError(504, ""), fallback: true},
+		{name: "истёк дедлайн", err: context.DeadlineExceeded, fallback: true},
+		{name: "сетевая ошибка", err: &net.DNSError{IsTimeout: true}, fallback: true},
+		{name: "ошибка разбора ответа", err: errors.New("не удалось разобрать ответ модели"), fallback: false},
+		{name: "ошибка бизнес-валидации", err: errors.New("HTML не содержит заголовка или абзаца"), fallback: false},
+		{name: "отказ авторизации", err: NewStatusError(401, ""), fallback: true},
+		{name: "запрет доступа", err: NewStatusError(403, "deepseek_account_unavailable: account_blocked"), fallback: true},
+		{name: "кончились кредиты", err: NewStatusError(402, ""), fallback: true},
+		{name: "неверный запрос", err: NewStatusError(400, "bad request"), fallback: false},
+		{name: "внутренняя ошибка провайдера", err: NewStatusError(500, "internal"), fallback: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := isFallbackEligible(test.err); got != test.fallback {
+				t.Fatalf("isFallbackEligible(%v) = %t, want %t", test.err, got, test.fallback)
+			}
+		})
+	}
+}
+
+func TestRouterFallsBackToSecondProviderOnQuota(t *testing.T) {
+	temperature := 0.3
+	primary := &fakeClient{errors: []error{NewStatusError(429, "quota exceeded")}}
+	reserve := &fakeClient{}
+	var logs bytes.Buffer
+	router := NewRouter(config.LLMConfig{
+		Providers: map[string]config.LLMProviderConfig{
+			"gemini":       {Type: "gemini", APIKeyEnv: "TEST"},
+			"deepseek_web": {Type: "deepseek_web"},
+		},
+		Stages: map[string]config.LLMStageConfig{"article": {
+			PromptTemplate: "{{.Title}}", Temperature: &temperature, MaxTokens: 100, Timeout: time.Second,
+			Targets: []config.LLMTargetConfig{
+				{Provider: "gemini", Model: "gemini-test"},
+				{Provider: "deepseek_web", Model: "deepseek-web"},
+			},
+		}},
+	}, map[string]Client{"gemini": primary, "deepseek_web": reserve}, slog.New(slog.NewTextHandler(&logs, nil)))
+	router.sleep = func(context.Context, time.Duration) error { return nil }
+
+	response, err := router.Generate(context.Background(), Call{
+		Stage: "article", ArticleID: 2, Data: struct{ Title string }{"Тема"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Provider != "deepseek_web" || response.Model != "deepseek-web" {
+		t.Fatalf("ответ пришёл от %s/%s", response.Provider, response.Model)
+	}
+	output := logs.String()
+	for _, want := range []string{
+		`msg="LLM fallback selected"`, "article_id=2", "stage=article",
+		"provider=deepseek_web", "target_index=1", "reason=provider_fallback", "failed_provider=gemini",
+	} {
+		if !strings.Contains(output, want) {
+			t.Errorf("в логе нет %q:\n%s", want, output)
+		}
+	}
+}
+
+func TestRouterKeepsProviderOnBusinessError(t *testing.T) {
+	temperature := 0.3
+	primary := &fakeClient{errors: []error{errors.New("ответ не содержит HTML-тегов")}}
+	reserve := &fakeClient{}
+	router := NewRouter(config.LLMConfig{
+		Providers: map[string]config.LLMProviderConfig{"gemini": {Type: "gemini"}, "deepseek_web": {Type: "deepseek_web"}},
+		Stages: map[string]config.LLMStageConfig{"html": {
+			PromptTemplate: "{{.Title}}", Temperature: &temperature, MaxTokens: 100, Timeout: time.Second,
+			Targets: []config.LLMTargetConfig{
+				{Provider: "gemini", Model: "gemini-test"},
+				{Provider: "deepseek_web", Model: "deepseek-web"},
+			},
+		}},
+	}, map[string]Client{"gemini": primary, "deepseek_web": reserve}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	router.sleep = func(context.Context, time.Duration) error { return nil }
+
+	if _, err := router.Generate(context.Background(), Call{Stage: "html", Data: struct{ Title string }{"Тема"}}); err == nil {
+		t.Fatal("ошибка бизнес-валидации не остановила стадию")
+	}
+	if reserve.calls != 0 {
+		t.Fatalf("резервный провайдер вызван %d раз при ошибке валидации", reserve.calls)
 	}
 }

@@ -7,6 +7,12 @@ const (
 	answerSelector   = `[data-message-author-role="assistant"], [data-role="assistant"], .ds-markdown`
 	stopSelector     = `button[aria-label*="stop" i], button[title*="stop" i], [role="button"][aria-label*="stop" i], [data-testid*="stop" i]`
 	loginSelector    = `a[href*="sign_in"], a[href*="login"], form input[type="password"]`
+
+	// blockedSelector перечисляет разметку страниц проверки и капчи. Используется только для
+	// распознавания состояния — ничего не обходит и не подменяет.
+	blockedSelector = `#challenge-running, #cf-challenge-running, #cf-wrapper, .cf-browser-verification, .cf-error-title, ` +
+		`iframe[src*="challenges.cloudflare.com"], .cf-turnstile, iframe[src*="recaptcha"], iframe[src*="hcaptcha"], ` +
+		`.g-recaptcha, .h-captcha, #captcha`
 )
 
 const visibleElementJS = `(selector) => Array.from(document.querySelectorAll(selector)).some((element) => {
@@ -26,6 +32,31 @@ const chatReadyJS = `(options) => {
   if (path.includes("/sign_in") || path.includes("/login")) return "expired";
   if (Array.from(document.querySelectorAll(options.loginSelector)).some(visible)) return "expired";
   return false;
+}`
+
+// blockedStateJS возвращает причину недоступности аккаунта или пустую строку.
+//
+// Пока поле ввода видно, страница считается рабочей: текст ответа модели может содержать
+// любые слова, и принимать его за блокировку нельзя.
+const blockedStateJS = `(options) => {
+  const visible = (element) => {
+    const style = window.getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
+  };
+  if (Array.from(document.querySelectorAll(options.composerSelector)).some(visible)) return "";
+  if (Array.from(document.querySelectorAll(options.blockedSelector)).some(visible)) return "challenge_or_captcha";
+  const text = (document.body ? document.body.innerText || "" : "").slice(0, 4000).toLowerCase();
+  const markers = [
+    ["account_blocked", ["account has been blocked", "account is blocked", "account has been suspended", "account is suspended", "аккаунт заблокирован", "учетная запись заблокирована"]],
+    ["terms_violation", ["violation of our terms", "violates our terms", "нарушение правил", "нарушение условий"]],
+    ["access_restricted", ["access denied", "access restricted", "you do not have access", "доступ запрещен", "доступ запрещён", "доступ ограничен"]],
+    ["challenge_or_captcha", ["verify you are human", "verifying you are human", "checking your browser", "unusual traffic", "проверка браузера", "подтвердите, что вы человек"]],
+  ];
+  for (const [reason, phrases] of markers) {
+    if (phrases.some((phrase) => text.includes(phrase))) return reason;
+  }
+  return "";
 }`
 
 // copyLastAnswerJS нажимает кнопку копирования последнего ответа.

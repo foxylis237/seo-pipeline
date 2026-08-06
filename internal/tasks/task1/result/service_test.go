@@ -48,6 +48,7 @@ func TestBuildUsesStructuredMetadataOrderEmptyHTMLAndOverwrites(t *testing.T) {
 		Article:  article.Article{ID: 7, ExternalID: "37", Title: "Название", Slug: "image-slug"},
 		Category: "Рубрика", Tags: "ОТДЕЛЬНЫЕ МЕТКИ", TLDR: "ОТДЕЛЬНЫЙ TLDR", AdditionalInfo: "НЕРАСПОЗНАННЫЙ ТЕКСТ",
 		Keyword:     "Профессия",
+		Header:      "H1 статьи",
 		FAQ:         "Вопрос: Первый вопрос?\nОтвет: Первый ответ.\n\nВопрос: Второй вопрос?\nОтвет: Второй ответ.",
 		ArticlePath: "37-tema/generated/article.txt", HTMLPath: "37-tema/missing.html",
 	}
@@ -90,7 +91,7 @@ func TestBuildUsesStructuredMetadataOrderEmptyHTMLAndOverwrites(t *testing.T) {
 	}
 	assertResultField(t, text, "SEO-заголовок", "Название")
 	assertResultField(t, text, "Название профессии", "Профессия")
-	assertResultField(t, text, "Название картинки", "Название")
+	assertResultField(t, text, "Название картинки", "H1 статьи")
 	assertResultField(t, text, "URL картинки", "image-slug")
 	if strings.Contains(text, "9 мин.") {
 		t.Fatal("reading time contains a trailing dot")

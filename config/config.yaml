@@ -17,10 +17,11 @@ llm:
       headless: true
 
   stages:
+    # Провайдер задаётся отдельно для каждой стадии. Второй target — резерв: роутер
+    # переходит к нему только при технической ошибке первого (квота, лимит, 5xx,
+    # таймаут, сеть), но не при ошибке разбора или валидации ответа.
     structure:
-      # ВРЕМЕННО: весь пайплайн переключён на DeepSeek Web для тестового прогона.
-      # Вернуть две строки gemini/openrouter, см. отчёт.
-      targets: &default_targets
+      targets:
         - { provider: deepseek_web, model: deepseek-web }
       prompt: tasks/task_1/prompts/structure.txt
       temperature: 0.3
@@ -28,35 +29,46 @@ llm:
       timeout: 120s
 
     article:
-      targets: *default_targets
+      targets:
+        - { provider: gemini, model: "${GEMINI_MODEL}" }
+        - { provider: deepseek_web, model: deepseek-web }
       prompt: tasks/task_1/prompts/article.txt
       temperature: 0.7
       max_tokens: 10000
       timeout: 180s
 
     info:
-      targets: *default_targets
+      targets:
+        - { provider: deepseek_web, model: deepseek-web }
       prompt: tasks/task_1/prompts/article_info.txt
       temperature: 0.2
       max_tokens: 4000
       timeout: 180s
 
     review:
-      targets: *default_targets
+      targets:
+        - { provider: gemini, model: "${GEMINI_MODEL}" }
+        - { provider: deepseek_web, model: deepseek-web }
       prompt: tasks/task_1/prompts/review.txt
       temperature: 0.2
       max_tokens: 5000
       timeout: 120s
 
+    # fix продолжает чат, начатый на стадии review, и идёт к тому же провайдеру, который
+    # ответил на review. Перебор targets здесь не выполняется — список нужен только потому,
+    # что валидация конфигурации требует хотя бы один target у каждой стадии.
     fix:
-      targets: *default_targets
+      targets:
+        - { provider: gemini, model: "${GEMINI_MODEL}" }
+        - { provider: deepseek_web, model: deepseek-web }
       prompt: tasks/task_1/prompts/fix_article.txt
       temperature: 0.4
       max_tokens: 10000
       timeout: 300s
 
     html:
-      targets: *default_targets
+      targets:
+        - { provider: deepseek_web, model: deepseek-web }
       prompt: tasks/task_1/prompts/html.txt
       temperature: 0.1
       max_tokens: 12000

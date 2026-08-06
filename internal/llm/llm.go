@@ -190,7 +190,14 @@ func (r *Router) generatePrompt(ctx context.Context, call Call, prompt string) (
 		if !isFallbackEligible(targetErr) || targetIndex == len(stage.Targets)-1 {
 			break
 		}
-		r.logger.Warn("LLM fallback selected", "stage", call.Stage, "provider", target.Provider, "model", target.Model, "target_index", targetIndex, "reason", errorTypeOf(targetErr))
+		// Логируем провайдера, на которого переходим: до правки в строке стоял тот, что
+		// уже отказал, и по логу было не понять, кто выполнил стадию.
+		next := stage.Targets[targetIndex+1]
+		r.logger.Warn("LLM fallback selected",
+			"article_id", call.ArticleID, "stage", call.Stage,
+			"provider", next.Provider, "model", next.Model, "target_index", targetIndex+1,
+			"reason", "provider_fallback", "failed_provider", target.Provider,
+			"failed_model", target.Model, "error_type", errorTypeOf(targetErr))
 	}
 	return RoutedResponse{}, fmt.Errorf("LLM stage %q failed for all attempted targets: %w", call.Stage, errors.Join(failures...))
 }
@@ -209,12 +216,26 @@ func (f *StageChatFactory) NewChat(_ context.Context, articleID int64) (Chat, er
 	return &stageChat{factory: f, articleID: articleID}, nil
 }
 
+// NewChatWithHistory creates a chat that already contains the previous messages of the same
+// article. Возобновлённая стадия видит тот же контекст, что и продолжение живого чата, и при
+// этом не требует повторного обращения к модели за уже полученным ответом.
+func (f *StageChatFactory) NewChatWithHistory(_ context.Context, articleID int64, history ...Message) (Chat, error) {
+	return &stageChat{
+		factory: f, articleID: articleID,
+		history: append([]Message(nil), history...),
+		next:    len(history) / 2,
+	}, nil
+}
+
 type stageChat struct {
 	factory   *StageChatFactory
 	articleID int64
 	next      int
 	history   []Message
 	closed    bool
+	// bound — target, ответивший на первое сообщение чата. Последующие стадии идут к нему же:
+	// продолжение диалога не должно попадать к другой модели, чем его начало.
+	bound *config.LLMTargetConfig
 }
 type Message struct{ Role, Content string }
 
@@ -235,15 +256,38 @@ func (c *stageChat) Generate(ctx context.Context, prompt string) (Response, erro
 		fmt.Fprintf(&transcript, "user:\n%s", prompt)
 	}
 	stage := c.factory.stages[c.next]
-	result, err := c.factory.router.generatePrompt(ctx, Call{Stage: stage, ArticleID: c.articleID}, transcript.String())
+	call := Call{Stage: stage, ArticleID: c.articleID}
+	var result RoutedResponse
+	var err error
+	if c.bound != nil {
+		result, err = c.factory.router.generateOnTarget(ctx, call, transcript.String(), *c.bound)
+	} else {
+		result, err = c.factory.router.generatePrompt(ctx, call, transcript.String())
+	}
 	if err != nil {
 		return Response{}, err
+	}
+	if c.bound == nil {
+		c.bound = &config.LLMTargetConfig{Provider: result.Provider, Model: result.Model}
+		c.factory.router.logger.Info("LLM chat bound to provider",
+			"article_id", c.articleID, "stage", stage, "provider", result.Provider, "model", result.Model)
 	}
 	c.history = append(c.history, Message{Role: "user", Content: prompt}, Message{Role: "assistant", Content: result.Text})
 	c.next++
 	return result.Response, nil
 }
+
 func (c *stageChat) Close() error { c.closed = true; c.history = nil; return nil }
+
+// generateOnTarget выполняет стадию на заранее выбранном target, без перебора остальных.
+// Повторы внутри самого target сохраняются, fallback на другого провайдера — нет.
+func (r *Router) generateOnTarget(ctx context.Context, call Call, prompt string, target config.LLMTargetConfig) (RoutedResponse, error) {
+	stage, found := r.config.Stages[call.Stage]
+	if !found {
+		return RoutedResponse{}, fmt.Errorf("LLM stage %q is not configured", call.Stage)
+	}
+	return r.generateTarget(ctx, call, prompt, stage, target, 0)
+}
 
 func (r *Router) generateTarget(ctx context.Context, call Call, prompt string, stage config.LLMStageConfig, target config.LLMTargetConfig, targetIndex int) (RoutedResponse, error) {
 	client, found := r.clients[target.Provider]
@@ -285,11 +329,33 @@ func (r *Router) generateTarget(ctx context.Context, call Call, prompt string, s
 		if attempt == 3 || !retryable {
 			return RoutedResponse{}, routedError(call.Stage, target.Provider, target.Model, requestErr)
 		}
-		if err := r.sleep(stageCtx, r.baseDelay*time.Duration(1<<(attempt-1))); err != nil {
+		if err := r.sleep(stageCtx, r.retryDelay(target.Provider, attempt)); err != nil {
 			return RoutedResponse{}, fmt.Errorf("LLM stage %q deadline exceeded before retry: %w", call.Stage, err)
 		}
 	}
 	return RoutedResponse{}, fmt.Errorf("LLM target failed")
+}
+
+// browserProviderType — тип провайдера, работающего через реальный браузер. Его повторы
+// разносятся во времени сильнее остальных: за частоту обращений блокируют аккаунт.
+const browserProviderType = "deepseek_web"
+
+// browserRetryDelays задаёт паузы перед повторами для браузерных провайдеров.
+var browserRetryDelays = []time.Duration{5 * time.Second, 15 * time.Second, 30 * time.Second}
+
+// retryDelay возвращает паузу перед следующей попыткой того же target.
+func (r *Router) retryDelay(provider string, attempt int) time.Duration {
+	if r.config.Providers[provider].Type == browserProviderType {
+		index := attempt - 1
+		if index >= len(browserRetryDelays) {
+			index = len(browserRetryDelays) - 1
+		}
+		if index < 0 {
+			index = 0
+		}
+		return browserRetryDelays[index]
+	}
+	return r.baseDelay * time.Duration(1<<(attempt-1))
 }
 
 func isFallbackEligible(err error) bool {
@@ -298,7 +364,13 @@ func isFallbackEligible(err error) bool {
 	}
 	var statusErr *StatusError
 	if errors.As(err, &statusErr) {
-		return statusErr.Type == ErrorTypeQuotaExhausted || statusErr.Type == ErrorTypeRateLimit || statusErr.Code == 502 || statusErr.Code == 503 || statusErr.Code == 504
+		switch statusErr.Type {
+		// Отказ авторизации и исчерпанная оплата не лечатся повтором у того же провайдера,
+		// но резервный провайдер от них не страдает — переключаемся, если он настроен.
+		case ErrorTypeQuotaExhausted, ErrorTypeRateLimit, ErrorTypeUnauthorized, ErrorTypeCreditsExhausted:
+			return true
+		}
+		return statusErr.Code == 502 || statusErr.Code == 503 || statusErr.Code == 504
 	}
 	var netErr net.Error
 	return errors.As(err, &netErr) && (netErr.Timeout() || netErr.Temporary())

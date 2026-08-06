@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -32,12 +31,20 @@ type recordingChatFactory struct {
 	chats      int
 	closed     int
 	articleIDs []int64
+	history    []llm.Message
 }
 
 func (f *recordingChatFactory) NewChat(_ context.Context, articleID int64) (llm.Chat, error) {
 	f.chats++
 	f.articleIDs = append(f.articleIDs, articleID)
 	return &recordingChat{factory: f}, nil
+}
+
+func (f *recordingChatFactory) NewChatWithHistory(_ context.Context, articleID int64, history ...llm.Message) (llm.Chat, error) {
+	f.chats++
+	f.articleIDs = append(f.articleIDs, articleID)
+	f.history = append([]llm.Message(nil), history...)
+	return &recordingChat{factory: f, next: len(history) / 2}, nil
 }
 
 type recordingChat struct {
@@ -89,8 +96,8 @@ func (c *recordingChat) Close() error {
 
 func successfulChatFactory() *recordingChatFactory {
 	return &recordingChatFactory{results: []llm.Response{
-		{Text: "Исходная статья", Model: "gemini-test", InputTokens: 10, OutputTokens: 20},
-		{Text: "Метки: Профессия, Обучение, Как стать\nTLDR:\nИтог.\nFAQ:\nВопрос: Как?\nОтвет: Так.", Model: "gemini-test"},
+		{Text: "Замечания review", Model: "gemini-test", InputTokens: 10, OutputTokens: 20},
+		{Text: "Исправленная статья", Model: "gemini-test"},
 	}}
 }
 
@@ -111,9 +118,9 @@ func testGenerationRouter(client *fakeLLMClient, logger *slog.Logger) *llm.Route
 		case "article":
 			prompt = "article|{{.Title}}|{{.Keywords}}|{{.LSIWords}}|{{.GeneratedStructure}}"
 		case "fix":
-			prompt = "fix|{{.Article}}|{{.Review}}|{{.Professions}}|{{.Links}}"
+			prompt = "fix|{{.Professions}}|{{.Links}}"
 		case "info":
-			prompt = "info from current chat|{{.GeneratedStructure}}"
+			prompt = "info|{{.GeneratedStructure}}|{{.GeneratedArticle}}"
 		}
 		stages[stage] = config.LLMStageConfig{
 			Provider: "fake", Model: stage, PromptTemplate: prompt,
@@ -282,10 +289,10 @@ func TestDemoGenerateUsesOneChatSkipsHTMLAndKeepsMetadataStage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if chatFactory.chats != 1 || len(chatFactory.prompts) != 2 {
-		t.Fatalf("chats=%d prompts=%d, want one chat and two prompts", chatFactory.chats, len(chatFactory.prompts))
+	if chatFactory.chats != 0 {
+		t.Fatalf("chats=%d, ожидались отдельные вызовы роутера", chatFactory.chats)
 	}
-	if len(client.calls) != 1 || client.calls[0] != "structure" || repository.reviewPath != "" || repository.htmlPath != "" {
+	if strings.Join(client.calls, ",") != "structure,article,info" || repository.reviewPath != "" || repository.htmlPath != "" {
 		t.Fatalf("demo stages: calls=%v review=%q html=%q", client.calls, repository.reviewPath, repository.htmlPath)
 	}
 	if !repository.demoCompleted || repository.completionCalls != 1 || repository.articleInfo == "" || builder.calls != 1 || output.Paths.ResultPath == "" {
@@ -352,8 +359,9 @@ func TestDemoUnrecognizedInfoIsSavedAndDoesNotFail(t *testing.T) {
 	input := article.GenerationInput{Article: article.Article{ID: 7, ExternalID: "37", Title: "Тема", Slug: "tema"}}
 	repository := &fakePipelineRepository{input: input}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	chatFactory := &recordingChatFactory{results: []llm.Response{{Text: "Статья", Model: "test"}, {Text: "неверный info", Model: "test"}}}
-	pipeline := NewPipeline(repository, testGenerationRouter(successfulPipelineClient(), logger), chatFactory, articleoutput.NewWriter(t.TempDir()), logger, newFakeResultBuilder(t, nil))
+	client := successfulPipelineClient()
+	client.responses["info"] = llm.Response{Text: "неверный info"}
+	pipeline := NewPipeline(repository, testGenerationRouter(client, logger), successfulChatFactory(), articleoutput.NewWriter(t.TempDir()), logger, newFakeResultBuilder(t, nil))
 
 	_, err := pipeline.RunDemoByExternalID(context.Background(), "37")
 	if err != nil || !repository.demoCompleted || repository.savedError != nil || repository.articleInfo != "неверный info" {
@@ -412,15 +420,25 @@ func TestPipelineRunsRoutedStagesInOrderWithMinimalData(t *testing.T) {
 	if repository.reviewPath != "37-tema/generated/review.txt" || repository.fixedArticlePath != "37-tema/generated/fixed_article.txt" || repository.htmlPath != "37-tema/article.html" {
 		t.Fatalf("review/fix/html paths = %q, %q, %q", repository.reviewPath, repository.fixedArticlePath, repository.htmlPath)
 	}
-	wantOrder := []string{"structure", "review", "fix", "html"}
+	wantOrder := []string{"structure", "article", "info", "html"}
 	if strings.Join(client.calls, ",") != strings.Join(wantOrder, ",") {
 		t.Fatalf("stage order = %v", client.calls)
 	}
-	if chatFactory.chats != 1 || chatFactory.closed != 1 || len(chatFactory.prompts) != 2 {
-		t.Fatalf("article chat: chats=%d closed=%d prompts=%d", chatFactory.chats, chatFactory.closed, len(chatFactory.prompts))
+	// info — отдельный вызов, а review и fix идут одним чатом.
+	if chatFactory.chats != 1 || len(chatFactory.prompts) != 2 {
+		t.Fatalf("чат review+fix: создано %d, сообщений %d", chatFactory.chats, len(chatFactory.prompts))
 	}
-	if !strings.Contains(chatFactory.prompts[0], "H1: Тема") || strings.Contains(chatFactory.prompts[1], "Исходная статья") {
-		t.Fatalf("shared chat prompts = %#v", chatFactory.prompts)
+	if !strings.Contains(chatFactory.prompts[0], "Исходная статья") {
+		t.Fatalf("ревью не получило статью: %q", chatFactory.prompts[0])
+	}
+	if strings.Contains(chatFactory.prompts[1], "Исходная статья") || strings.Contains(chatFactory.prompts[1], "Замечания review") {
+		t.Fatalf("fix повторно получил статью или ревью: %q", chatFactory.prompts[1])
+	}
+	if !strings.Contains(client.requests["article"].Prompt, "H1: Тема") {
+		t.Fatalf("промпт article = %q", client.requests["article"].Prompt)
+	}
+	if !strings.Contains(client.requests["info"].Prompt, "Исходная статья") {
+		t.Fatalf("промпт info не содержит текста статьи: %q", client.requests["info"].Prompt)
 	}
 	if repository.articleInfo == "" {
 		t.Fatal("article info was not saved to PostgreSQL repository")
@@ -428,13 +446,19 @@ func TestPipelineRunsRoutedStagesInOrderWithMinimalData(t *testing.T) {
 	if repository.completionCalls != 1 || resultBuilder.calls != 1 {
 		t.Fatalf("completion calls = %d, result calls = %d; want 1 and 1", repository.completionCalls, resultBuilder.calls)
 	}
-	if got := client.requests["review"].Prompt; !strings.Contains(got, "Исходная статья") || strings.Contains(got, "ключ") {
+	if got := chatFactory.prompts[0]; !strings.Contains(got, "Исходная статья") || strings.Contains(got, "ключ") {
 		t.Fatalf("review prompt = %q", got)
 	}
-	fixPrompt := client.requests["fix"].Prompt
-	for _, required := range []string{"Исходная статья", "Замечания review", input.Professions, input.Links} {
+	// Сообщение fix несёт только перелинковку: статья и ревью остаются в истории чата.
+	fixPrompt := chatFactory.prompts[1]
+	for _, required := range []string{input.Professions, input.Links} {
 		if !strings.Contains(fixPrompt, required) {
 			t.Fatalf("fix prompt does not contain %q: %q", required, fixPrompt)
+		}
+	}
+	for _, forbidden := range []string{"Исходная статья", "Замечания review"} {
+		if strings.Contains(fixPrompt, forbidden) {
+			t.Fatalf("fix prompt повторно содержит %q: %q", forbidden, fixPrompt)
 		}
 	}
 	htmlPrompt := client.requests["html"].Prompt
@@ -484,7 +508,7 @@ func assertFullPipelineResultFailure(t *testing.T, resultErr error) {
 	if repository.savedError == nil || builder.calls != 1 {
 		t.Fatalf("saved error = %v, result calls = %d", repository.savedError, builder.calls)
 	}
-	if strings.Join(client.calls, ",") != "structure,review,fix,html" {
+	if strings.Join(client.calls, ",") != "structure,article,info,html" {
 		t.Fatalf("stages after result error = %v", client.calls)
 	}
 }
@@ -493,14 +517,15 @@ func TestPipelineStopsAfterStageError(t *testing.T) {
 	root := t.TempDir()
 	repository := &fakePipelineRepository{input: pipelineTestInput()}
 	client := successfulPipelineClient()
-	client.errors["fix"] = errors.New("fix failed")
+	chatFactory := successfulChatFactory()
+	chatFactory.errAt = 2
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	pipeline := NewPipeline(repository, testGenerationRouter(client, logger), successfulChatFactory(), articleoutput.NewWriter(root), logger)
+	pipeline := NewPipeline(repository, testGenerationRouter(client, logger), chatFactory, articleoutput.NewWriter(root), logger)
 
 	if _, err := pipeline.RunByExternalID(context.Background(), "37"); err == nil {
 		t.Fatal("pipeline error = nil")
 	}
-	if strings.Join(client.calls, ",") != "structure,review,fix" {
+	if strings.Join(client.calls, ",") != "structure,article,info" {
 		t.Fatalf("calls after error = %v", client.calls)
 	}
 	if repository.fixedArticlePath != "" || repository.htmlPath != "" || repository.savedError == nil {
@@ -512,9 +537,9 @@ func TestPipelineDoesNotSaveEmptyReview(t *testing.T) {
 	root := t.TempDir()
 	repository := &fakePipelineRepository{input: pipelineTestInput()}
 	client := successfulPipelineClient()
-	client.responses["review"] = llm.Response{Text: " \n"}
+	chatFactory := &recordingChatFactory{results: []llm.Response{{Text: " \n", Model: "test"}}}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	pipeline := NewPipeline(repository, testGenerationRouter(client, logger), successfulChatFactory(), articleoutput.NewWriter(root), logger)
+	pipeline := NewPipeline(repository, testGenerationRouter(client, logger), chatFactory, articleoutput.NewWriter(root), logger)
 
 	if _, err := pipeline.RunByExternalID(context.Background(), "37"); err == nil {
 		t.Fatal("pipeline error = nil")
@@ -522,7 +547,7 @@ func TestPipelineDoesNotSaveEmptyReview(t *testing.T) {
 	if repository.reviewPath != "" || repository.fixedArticlePath != "" || repository.htmlPath != "" {
 		t.Fatalf("empty result was saved: review=%q fixed=%q html=%q", repository.reviewPath, repository.fixedArticlePath, repository.htmlPath)
 	}
-	if strings.Join(client.calls, ",") != "structure,review" {
+	if strings.Join(client.calls, ",") != "structure,article,info" {
 		t.Fatalf("calls after empty result = %v", client.calls)
 	}
 }
@@ -544,15 +569,24 @@ func TestRunFixByExternalIDCallsOnlyFixAndSavesResult(t *testing.T) {
 	}
 	repository := &fakePipelineRepository{savedInput: savedPipelineInput(paths)}
 	client := successfulPipelineClient()
+	chatFactory := successfulChatFactory()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	pipeline := NewPipeline(repository, testGenerationRouter(client, logger), successfulChatFactory(), writer, logger)
+	pipeline := NewPipeline(repository, testGenerationRouter(client, logger), chatFactory, writer, logger)
 
 	output, err := pipeline.RunFixByExternalID(context.Background(), "37")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(client.calls, ",") != "fix" || strings.Join(repository.begunStages, ",") != "fix" {
+	if len(client.calls) != 0 || strings.Join(repository.begunStages, ",") != "fix" {
 		t.Fatalf("calls=%v begun=%v", client.calls, repository.begunStages)
+	}
+	// История восстановлена из сохранённых артефактов: запрос ревью со статьёй и ответ ревью.
+	if len(chatFactory.history) != 2 || !strings.Contains(chatFactory.history[0].Content, "Сохранённая статья") ||
+		chatFactory.history[1].Content != "Сохранённое review" {
+		t.Fatalf("история чата = %+v", chatFactory.history)
+	}
+	if strings.Contains(chatFactory.prompts[0], "Сохранённая статья") {
+		t.Fatalf("fix повторно получил статью: %q", chatFactory.prompts[0])
 	}
 	if output.Paths.FixedArticlePath == "" || repository.fixedArticlePath != output.Paths.FixedArticlePath {
 		t.Fatalf("fixed result paths = %+v, %q", output.Paths, repository.fixedArticlePath)
@@ -573,14 +607,18 @@ func TestRunReviewByExternalIDCallsOnlyReviewAndSavesResult(t *testing.T) {
 	repository := &fakePipelineRepository{savedInput: savedPipelineInput(paths)}
 	client := successfulPipelineClient()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	pipeline := NewPipeline(repository, testGenerationRouter(client, logger), successfulChatFactory(), writer, logger)
+	chatFactory := successfulChatFactory()
+	pipeline := NewPipeline(repository, testGenerationRouter(client, logger), chatFactory, writer, logger)
 
 	output, err := pipeline.RunReviewByExternalID(context.Background(), "37")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(client.calls, ",") != "review" || strings.Join(repository.begunStages, ",") != "review" {
+	if len(client.calls) != 0 || strings.Join(repository.begunStages, ",") != "review" {
 		t.Fatalf("calls=%v begun=%v", client.calls, repository.begunStages)
+	}
+	if chatFactory.chats != 1 || !strings.Contains(chatFactory.prompts[0], "Сохранённая статья") {
+		t.Fatalf("ревью не создало чат со статьёй: chats=%d prompts=%v", chatFactory.chats, chatFactory.prompts)
 	}
 	if output.Paths.ReviewPath == "" || repository.reviewPath != output.Paths.ReviewPath || repository.fixedArticlePath != "" {
 		t.Fatalf("review result paths = %+v, review=%q fixed=%q", output.Paths, repository.reviewPath, repository.fixedArticlePath)
@@ -617,7 +655,7 @@ func TestRunHTMLByExternalIDCallsOnlyHTMLAndSavesResult(t *testing.T) {
 	}
 }
 
-func TestRunArticleByExternalIDGeneratesArticleAndInfoInOneChat(t *testing.T) {
+func TestRunArticleByExternalIDGeneratesArticleAndInfoAsSeparateCalls(t *testing.T) {
 	root := t.TempDir()
 	writer := articleoutput.NewWriter(root)
 	paths, err := writer.SaveStructure("37", "tema", "structure prompt", "Сохранённая структура")
@@ -635,20 +673,20 @@ func TestRunArticleByExternalIDGeneratesArticleAndInfoInOneChat(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(client.calls) != 0 || strings.Join(repository.begunStages, ",") != "article" {
+	if strings.Join(client.calls, ",") != "article,info" || strings.Join(repository.begunStages, ",") != "article" {
 		t.Fatalf("calls=%v begun=%v", client.calls, repository.begunStages)
 	}
-	if chatFactory.chats != 1 || chatFactory.closed != 1 || len(chatFactory.prompts) != 2 {
-		t.Fatalf("chat: created=%d closed=%d prompts=%d", chatFactory.chats, chatFactory.closed, len(chatFactory.prompts))
+	if chatFactory.chats != 0 {
+		t.Fatalf("использован общий чат: chats=%d", chatFactory.chats)
 	}
-	if !reflect.DeepEqual(chatFactory.articleIDs, []int64{input.Article.ID}) {
-		t.Fatalf("chat article ids = %v, want [%d]", chatFactory.articleIDs, input.Article.ID)
+	if !strings.Contains(client.requests["info"].Prompt, client.responses["article"].Text) {
+		t.Fatalf("info не получил текст статьи: %q", client.requests["info"].Prompt)
 	}
-	if !strings.Contains(chatFactory.prompts[0], "Сохранённая структура") {
-		t.Fatalf("article prompt = %q", chatFactory.prompts[0])
+	if !strings.Contains(client.requests["article"].Prompt, "Сохранённая структура") {
+		t.Fatalf("article prompt = %q", client.requests["article"].Prompt)
 	}
-	if strings.Contains(chatFactory.prompts[1], "Исходная статья") || !strings.Contains(chatFactory.prompts[1], "Сохранённая структура") {
-		t.Fatalf("info prompt has incorrect context: %q", chatFactory.prompts[1])
+	if !strings.Contains(client.requests["info"].Prompt, "Сохранённая структура") {
+		t.Fatalf("info prompt has incorrect context: %q", client.requests["info"].Prompt)
 	}
 	if output.Paths.ArticlePath == "" || repository.articlePath != output.Paths.ArticlePath {
 		t.Fatalf("article result paths = %+v, %q", output.Paths, repository.articlePath)
@@ -671,17 +709,17 @@ func TestRunArticleByExternalIDSavesErrorWhenInfoFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	repository := &fakePipelineRepository{input: pipelineTestInput(), savedInput: savedPipelineInput(paths)}
-	chatFactory := successfulChatFactory()
-	chatFactory.errAt = 2
+	client := successfulPipelineClient()
+	client.errors["info"] = errors.New("info stage failed")
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	pipeline := NewPipeline(repository, testGenerationRouter(successfulPipelineClient(), logger), chatFactory, writer, logger)
+	pipeline := NewPipeline(repository, testGenerationRouter(client, logger), successfulChatFactory(), writer, logger)
 
 	_, err = pipeline.RunArticleByExternalID(context.Background(), "37")
 	if err == nil || repository.savedError == nil {
 		t.Fatalf("error=%v saved_error=%v", err, repository.savedError)
 	}
-	if repository.articlePath == "" || repository.articleInfo != "" || chatFactory.closed != 1 {
-		t.Fatalf("article_path=%q info=%q closed=%d", repository.articlePath, repository.articleInfo, chatFactory.closed)
+	if repository.articlePath == "" || repository.articleInfo != "" {
+		t.Fatalf("article_path=%q info=%q", repository.articlePath, repository.articleInfo)
 	}
 }
 
@@ -790,5 +828,81 @@ func TestRunStructureByExternalIDStopsWhenArticleIsAnotherOne(t *testing.T) {
 
 	if _, err := pipeline.RunStructureByExternalID(context.Background(), "38"); err == nil {
 		t.Fatal("загружена чужая статья, но ошибки нет")
+	}
+}
+
+func TestReviewAndFixShareOneChatWithHistory(t *testing.T) {
+	root := t.TempDir()
+	writer := articleoutput.NewWriter(root)
+	repository := &fakePipelineRepository{input: pipelineTestInput()}
+	client := successfulPipelineClient()
+	chatFactory := successfulChatFactory()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	pipeline := NewPipeline(repository, testGenerationRouter(client, logger), chatFactory, writer, logger, newFakeResultBuilder(t, nil))
+
+	if _, err := pipeline.RunByExternalID(context.Background(), "37"); err != nil {
+		t.Fatal(err)
+	}
+	if chatFactory.chats != 1 {
+		t.Fatalf("создано чатов: %d, ожидался один на review и fix", chatFactory.chats)
+	}
+	if len(chatFactory.prompts) != 2 {
+		t.Fatalf("сообщений в чате: %d, ожидались review и fix", len(chatFactory.prompts))
+	}
+	if chatFactory.closed != 1 {
+		t.Fatalf("чат закрыт %d раз", chatFactory.closed)
+	}
+	// Первое сообщение несёт статью, второе — только данные перелинковки.
+	if !strings.Contains(chatFactory.prompts[0], "Исходная статья") {
+		t.Fatalf("review не получил статью: %q", chatFactory.prompts[0])
+	}
+	if strings.Contains(chatFactory.prompts[1], "Исходная статья") {
+		t.Fatalf("fix повторно получил статью: %q", chatFactory.prompts[1])
+	}
+	// Ни review, ни fix не должны идти отдельными вызовами роутера.
+	for _, stage := range client.calls {
+		if stage == "review" || stage == "fix" {
+			t.Fatalf("стадия %s выполнена вне чата: %v", stage, client.calls)
+		}
+	}
+}
+
+func TestResumedFixContinuesReviewChatWithoutExtraCall(t *testing.T) {
+	root := t.TempDir()
+	writer := articleoutput.NewWriter(root)
+	articlePaths, err := writer.SaveArticle("37", "tema", "article prompt", "Сохранённая статья", "model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reviewPaths, err := writer.SaveReview("37", "tema", "review prompt", "Сохранённое ревью")
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := savedPipelineInput(articlePaths)
+	saved.ReviewPath = reviewPaths.ReviewPath
+	repository := &fakePipelineRepository{savedInput: saved}
+	client := successfulPipelineClient()
+	chatFactory := successfulChatFactory()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	pipeline := NewPipeline(repository, testGenerationRouter(client, logger), chatFactory, writer, logger)
+
+	if _, err := pipeline.RunFixByExternalID(context.Background(), "37"); err != nil {
+		t.Fatal(err)
+	}
+	if len(chatFactory.history) != 2 {
+		t.Fatalf("история чата = %+v, ожидались запрос ревью и ответ", chatFactory.history)
+	}
+	if chatFactory.history[0].Role != "user" || !strings.Contains(chatFactory.history[0].Content, "Сохранённая статья") {
+		t.Fatalf("первое сообщение истории = %+v", chatFactory.history[0])
+	}
+	if chatFactory.history[1].Role != "assistant" || chatFactory.history[1].Content != "Сохранённое ревью" {
+		t.Fatalf("второе сообщение истории = %+v", chatFactory.history[1])
+	}
+	// Ревью не запрашивается у модели повторно: в чат уходит только сообщение fix.
+	if len(chatFactory.prompts) != 1 {
+		t.Fatalf("сообщений отправлено %d, ожидалось одно", len(chatFactory.prompts))
+	}
+	if len(client.calls) != 0 {
+		t.Fatalf("лишние вызовы роутера: %v", client.calls)
 	}
 }
