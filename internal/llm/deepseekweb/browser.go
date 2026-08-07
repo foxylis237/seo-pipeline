@@ -4,10 +4,19 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"syscall"
 
 	"github.com/mxschmitt/playwright-go"
 )
+
+// profileLockName защищает persistent-профиль от двух одновременных процессов.
+// Имя используется и при запуске браузера, и при очистке профиля перед ручным входом.
+const profileLockName = ".seo-pipeline.lock"
+
+func profileLockPath(profileDir string) string {
+	return filepath.Join(profileDir, profileLockName)
+}
 
 type browserSession struct {
 	pw      *playwright.Playwright
@@ -23,8 +32,7 @@ func launchBrowser(profileDir string, headless bool) (*browserSession, error) {
 	if err := os.Chmod(profileDir, 0o700); err != nil {
 		return nil, fmt.Errorf("protect DeepSeek persistent browser profile: %w", err)
 	}
-	lockPath := profileDir + "/.seo-pipeline.lock"
-	profile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
+	profile, err := os.OpenFile(profileLockPath(profileDir), os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("open DeepSeek browser profile lock: %w", err)
 	}

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -98,15 +99,41 @@ FAQ:
 Ответ: Нет, используются только локальные тестовые данные.`
 )
 
+// dryRunStageSet подменяет модель каждого target на локальную заглушку, сохраняя провайдеров.
+//
+// Подменяется именно Targets: раньше dry-run писал в stage.Model, которого роутер не читает,
+// и заглушка получала настоящее имя модели. Копия делается целиком — разрешённая схема
+// используется и отчётом, и её нельзя портить на месте.
+func dryRunStageSet(source config.LLMConfig) config.LLMConfig {
+	stages := make(map[string]config.LLMStageConfig, len(source.Stages))
+	for name, stage := range source.Stages {
+		targets := make([]config.LLMTargetConfig, len(stage.Targets))
+		for index, target := range stage.Targets {
+			targets[index] = config.LLMTargetConfig{Provider: target.Provider, Model: dryRunModelPrefix + name}
+		}
+		stage.Targets = targets
+		stages[name] = stage
+	}
+	return config.LLMConfig{Providers: source.Providers, Stages: stages}
+}
+
 func dryRunStageResponses() map[string]string {
 	return map[string]string{
 		"structure": "H1 - Тестовая статья\nH2 - Основной раздел\nH2 - FAQ",
+		"article":   dryRunArticle,
+		"info":      dryRunInfo,
 		"review":    "Структура и содержание подходят для локальной проверки. Критичных замечаний нет.",
 		"fix":       strings.ReplaceAll(dryRunArticle, "[[ARTICLE_COMPLETE]]", "") + "\n\n[[ARTICLE_COMPLETE]]",
 		"html":      "<h1>Тестовая статья</h1>\n<h2>Основной раздел</h2>\n<p>Локальная проверка SEO-пайплайна без внешних запросов.</p>",
 	}
 }
 
+// runDryRun — безопасная проверка перед дорогим прогоном.
+//
+// Сначала печатается разрешённая маршрутизация: тем же резолвером, что и в бою, поэтому отчёт
+// показывает схему, которая действительно будет выбрана. Затем эта же схема прогоняется
+// целиком на локальной заглушке. Внешних запросов нет ни на одном шаге: доступность
+// провайдеров определяется по маркерам и окружению, а не обращением к ним.
 func runDryRun(
 	ctx context.Context,
 	articleRepository *repository.ArticleRepository,
@@ -114,15 +141,24 @@ func runDryRun(
 	logger *slog.Logger,
 	writer *articleoutput.Writer,
 	resultService *resultassembly.Service,
+	report io.Writer,
 ) error {
+	// Учётные данные не требуются: отчёт обязан назвать причину недоступности провайдера,
+	// а не упасть на ней.
+	stages, err := loadStageConfigs(logger, false)
+	if err != nil {
+		return fmt.Errorf("dry-run load LLM config: %w", err)
+	}
+	routing := newLLMResolver(stages, newGeminiAvailability()).Resolve()
+	if err := writeRoutingReport(report, routing); err != nil {
+		return fmt.Errorf("dry-run write routing report: %w", err)
+	}
+
 	inputs, err := importer.ReadArticles(cfg.InputFilePath)
 	if err != nil {
 		return fmt.Errorf("dry-run read Excel: %w", err)
 	}
-	llmConfig, err := config.LoadLLMConfigForDryRun("config/config.yaml")
-	if err != nil {
-		return fmt.Errorf("dry-run load LLM config: %w", err)
-	}
+	llmConfig := dryRunStageSet(routing.Config)
 	if filepath.Base(filepath.Clean(cfg.OutputDir)) != "dry-run" {
 		return fmt.Errorf("refuse to clean unsafe dry-run output directory %q", cfg.OutputDir)
 	}
@@ -136,10 +172,6 @@ func runDryRun(
 	clients := make(map[string]llm.Client, len(llmConfig.Providers))
 	for name := range llmConfig.Providers {
 		clients[name] = stub
-	}
-	for name, stage := range llmConfig.Stages {
-		stage.Model = dryRunModelPrefix + name
-		llmConfig.Stages[name] = stage
 	}
 	router := llm.NewRouter(llmConfig, clients, logger)
 	pipeline := generation.NewPipeline(articleRepository, router, stub, writer, logger, resultService)

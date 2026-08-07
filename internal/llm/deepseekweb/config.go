@@ -12,7 +12,14 @@ import (
 const (
 	defaultOperationTimeout = 30 * time.Second
 	defaultLoginTimeout     = 30 * time.Minute
-	responseStableFor       = 4 * time.Second
+	// responseSettledFor — сколько текст должен не меняться, когда под ответом уже
+	// отрисована панель действий. Панель появляется только после конца генерации, поэтому
+	// длинного ожидания здесь не нужно.
+	responseSettledFor = 2 * time.Second
+	// responseStableFor — запасной признак на случай, если панель действий не опознана.
+	// Прежние 4 s принимали за конец ответа обычную паузу стрима: статья сохранялась
+	// обрезанной на полуслове, а следующий промпт уходил в поле во время генерации.
+	responseStableFor = 25 * time.Second
 	// defaultResponseTimeout ограничивает ожидание ответа, когда у контекста нет своего
 	// дедлайна: прямой вызов Generate с context.Background() иначе получал 1 мс.
 	defaultResponseTimeout = 5 * time.Minute
@@ -25,10 +32,10 @@ const (
 	clipboardPollInterval = 200 * time.Millisecond
 
 	// minRequestInterval и requestJitter задают паузу между двумя запросами к веб-интерфейсу:
-	// 30 s плюс случайные 0–20 s. Случайность здесь не маскирует автоматизацию, а убирает
+	// 20 s плюс случайные 0–40 s. Случайность здесь не маскирует автоматизацию, а убирает
 	// ровный машинный ритм, по которому нагрузка выглядит агрессивной.
-	minRequestInterval = 30 * time.Second
-	requestJitter      = 20 * time.Second
+	minRequestInterval = 20 * time.Second
+	requestJitter      = 40 * time.Second
 
 	// blockCooldown — на сколько клиент перестаёт открывать браузер после того, как увидел
 	// страницу блокировки. Реальные блокировки длятся дольше, но ложное срабатывание на

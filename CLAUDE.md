@@ -61,8 +61,9 @@ EDA и Vertical Slice сейчас не внедряем, но решения н
 
 - **`TEST_DATABASE_URL` нигде не задан**, поэтому все 15 тестов `internal/tasks/task1/repository`
   молча пропускаются, а покрытие слоя данных — 0%. `make test` при этом зелёный.
-- **`make task-1 dry-run` не работает**: `dry_run.go` подменяет `stage.Model`, а роутер читает
-  `stage.Targets[i].Model`. На чистом клоне падает раньше — из-за пустого `GEMINI_MODEL`.
+- **`make task-1 dry-run` печатает разрешённую маршрутизацию перед прогоном** — режим,
+  доступность провайдеров и провайдера каждой стадии. Схему выбирает тот же резолвер, что и
+  в бою, поэтому отчёт показывает не «как настроено», а «как пойдёт».
 - **`.env` ожидается на уровень выше корня проекта** (`../.env`), переопределяется `ENV_FILE`.
 - **`go.mod` требует Go 1.25.0**, локально 1.24.4 — тулчейн подгружается автоматически.
 - **`make test-race` покрывает только `./internal/tasks/task1/...`**, а конкурентность живёт
@@ -97,7 +98,8 @@ EDA и Vertical Slice сейчас не внедряем, но решения н
   `expectedSchema` на миграцию, контекст при старте, защита `data/` и `tasks/*/output/`).
 - Процедуры — `/` (skills). Начать с `/grill` для нетривиальной задачи и `/ship` перед коммитом.
   Архитектурный разбор области — `/arch-review`. Проектные процедуры: `/stage-add`,
-  `/db-check`, `/selector-fix`, `/prompt-tune`, `/prod-ready`.
+  `/db-check`, `/selector-fix`, `/prompt-tune`, `/prod-ready`. Когда какой вызывать и как
+  ставить задачу — `docs/WORKING-WITH-CLAUDE.md`.
 - Диагностика прогона — в каталоге самой статьи: `<external_id>-<slug>/prepare/`
   (`input.json`, `keysso.json`, `arsenkin.json`, `prepare-report.json`) и
   `<external_id>-<slug>/logs/<операция>.log`. Пишет приложение, `tee` не нужен.

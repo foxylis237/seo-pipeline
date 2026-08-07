@@ -19,6 +19,13 @@ type Request struct {
 	Model       string
 	Temperature float64
 	MaxTokens   int
+	// ArticleID позволяет провайдеру держать один диалог на статью вместо нового на
+	// каждую стадию. Провайдеры без такого режима поле игнорируют.
+	ArticleID int64
+	// SingleChat включает режим одного диалога на статью. Свойство запроса, а не клиента:
+	// один и тот же браузерный клиент обслуживает обе схемы стадий, и в схеме Gemini этот
+	// режим не нужен.
+	SingleChat bool
 }
 
 type Response struct {
@@ -140,12 +147,10 @@ type RoutedResponse struct {
 	Model    string
 }
 
-// PreparedCall contains a rendered stage prompt and its configured routing data.
+// PreparedCall contains a rendered stage prompt. Маршрутные поля отсюда убраны: их никто не
+// читал, а держать копию маршрутизации рядом с промптом значит заводить второй её источник.
 type PreparedCall struct {
-	Prompt   string
-	Provider string
-	Model    string
-	Timeout  time.Duration
+	Prompt string
 }
 
 type Router struct {
@@ -178,7 +183,7 @@ func (r *Router) generatePrompt(ctx context.Context, call Call, prompt string) (
 		return RoutedResponse{}, fmt.Errorf("LLM stage %q is not configured", call.Stage)
 	}
 	if len(stage.Targets) == 0 {
-		stage.Targets = []config.LLMTargetConfig{{Provider: stage.Provider, Model: stage.Model}}
+		return RoutedResponse{}, fmt.Errorf("LLM stage %q has no configured targets", call.Stage)
 	}
 	var failures []error
 	for targetIndex, target := range stage.Targets {
@@ -247,9 +252,12 @@ func (c *stageChat) Generate(ctx context.Context, prompt string) (Response, erro
 		return Response{}, fmt.Errorf("LLM chat has no configured stage for message %d", c.next+1)
 	}
 	var transcript strings.Builder
-	if len(c.history) == 0 {
+	switch {
+	case len(c.history) == 0 || c.keepsContext():
+		// Провайдер, который держит один диалог на статью, уже видит предыдущие стадии как
+		// историю. Повторная склейка транскрипта отправила бы тот же текст второй раз.
 		transcript.WriteString(prompt)
-	} else {
+	default:
 		for _, message := range c.history {
 			fmt.Fprintf(&transcript, "%s:\n%s\n\n", message.Role, message.Content)
 		}
@@ -279,6 +287,14 @@ func (c *stageChat) Generate(ctx context.Context, prompt string) (Response, erro
 
 func (c *stageChat) Close() error { c.closed = true; c.history = nil; return nil }
 
+// keepsContext сообщает, хранит ли выбранный провайдер историю диалога на своей стороне.
+func (c *stageChat) keepsContext() bool {
+	if c.bound == nil {
+		return false
+	}
+	return c.factory.router.config.Providers[c.bound.Provider].SingleChatPerArticle
+}
+
 // generateOnTarget выполняет стадию на заранее выбранном target, без перебора остальных.
 // Повторы внутри самого target сохраняются, fallback на другого провайдера — нет.
 func (r *Router) generateOnTarget(ctx context.Context, call Call, prompt string, target config.LLMTargetConfig) (RoutedResponse, error) {
@@ -294,7 +310,19 @@ func (r *Router) generateTarget(ctx context.Context, call Call, prompt string, s
 	if !found {
 		return RoutedResponse{}, fmt.Errorf("LLM provider %q is not registered", target.Provider)
 	}
-	request := Request{Prompt: prompt, Model: target.Model, Temperature: *stage.Temperature, MaxTokens: stage.MaxTokens}
+	request := Request{
+		Prompt: prompt, Model: target.Model, Temperature: *stage.Temperature, MaxTokens: stage.MaxTokens,
+		ArticleID: call.ArticleID, SingleChat: r.config.Providers[target.Provider].SingleChatPerArticle,
+	}
+	// Самоограничение провайдера выдерживается до наложения таймаута стадии: пауза между
+	// запросами — не работа модели, и вычитать её из бюджета генерации нельзя.
+	if pacer, ok := client.(interface {
+		WaitBeforeRequest(context.Context) error
+	}); ok {
+		if err := pacer.WaitBeforeRequest(ctx); err != nil {
+			return RoutedResponse{}, fmt.Errorf("LLM stage %q pacing: %w", call.Stage, err)
+		}
+	}
 	stageCtx, cancel := context.WithTimeout(ctx, stage.Timeout)
 	defer cancel()
 	for attempt := 1; attempt <= 3; attempt++ {
@@ -395,7 +423,7 @@ func (r *Router) Prepare(call Call) (PreparedCall, error) {
 	if strings.TrimSpace(prompt.String()) == "" {
 		return PreparedCall{}, fmt.Errorf("LLM stage %q rendered an empty prompt", call.Stage)
 	}
-	return PreparedCall{Prompt: prompt.String(), Provider: stage.Provider, Model: stage.Model, Timeout: stage.Timeout}, nil
+	return PreparedCall{Prompt: prompt.String()}, nil
 }
 
 func (r *Router) startHeartbeat(ctx context.Context, call Call, provider, model string, attempt int, started time.Time) func() {

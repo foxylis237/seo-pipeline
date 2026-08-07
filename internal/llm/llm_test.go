@@ -148,8 +148,8 @@ func TestRouterSelectsModelsIndependentlyPerStage(t *testing.T) {
 	reviewClient := &fakeClient{}
 	temperature := 0.3
 	cfg := config.LLMConfig{Stages: map[string]config.LLMStageConfig{
-		"structure": {Provider: "gemini", Model: "gemini-model", PromptTemplate: "{{.Title}}", Temperature: &temperature, MaxTokens: 100, Timeout: time.Second},
-		"review":    {Provider: "openrouter", Model: "free-model", PromptTemplate: "{{.Title}}", Temperature: &temperature, MaxTokens: 200, Timeout: time.Second},
+		"structure": {Targets: []config.LLMTargetConfig{{Provider: "gemini", Model: "gemini-model"}}, PromptTemplate: "{{.Title}}", Temperature: &temperature, MaxTokens: 100, Timeout: time.Second},
+		"review":    {Targets: []config.LLMTargetConfig{{Provider: "openrouter", Model: "free-model"}}, PromptTemplate: "{{.Title}}", Temperature: &temperature, MaxTokens: 200, Timeout: time.Second},
 	}}
 	router := NewRouter(cfg, map[string]Client{"gemini": structureClient, "openrouter": reviewClient}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if _, err := router.Generate(context.Background(), Call{Stage: "structure", Data: struct{ Title string }{"Structure"}}); err != nil {
@@ -269,7 +269,7 @@ func TestRouterLogsSafeLimitDiagnostics(t *testing.T) {
 	router := NewRouter(config.LLMConfig{
 		Providers: map[string]config.LLMProviderConfig{"selected": {Type: "openai_compatible", APIKeyEnv: "TEST"}},
 		Stages: map[string]config.LLMStageConfig{"structure": {
-			Provider: "selected", Model: "configured-model", PromptTemplate: "Title: {{.Title}}",
+			Targets: []config.LLMTargetConfig{{Provider: "selected", Model: "configured-model"}}, PromptTemplate: "Title: {{.Title}}",
 			Temperature: &temperature, MaxTokens: 100, Timeout: time.Second,
 		}},
 	}, map[string]Client{"selected": client}, slog.New(slog.NewJSONHandler(&logs, nil)))
@@ -305,7 +305,7 @@ func testRouter(client Client) *Router {
 	router := NewRouter(config.LLMConfig{
 		Providers: map[string]config.LLMProviderConfig{"selected": {Type: "gemini", APIKeyEnv: "TEST"}},
 		Stages: map[string]config.LLMStageConfig{"structure": {
-			Provider: "selected", Model: "configured-model", PromptTemplate: "Title: {{.Title}}",
+			Targets: []config.LLMTargetConfig{{Provider: "selected", Model: "configured-model"}}, PromptTemplate: "Title: {{.Title}}",
 			Temperature: &temperature, MaxTokens: 100, Timeout: time.Second,
 		}},
 	}, map[string]Client{"selected": client}, slog.New(slog.NewTextHandler(io.Discard, nil)))
@@ -320,9 +320,9 @@ func TestStageChatLogsArticleIDForEveryStage(t *testing.T) {
 	router := NewRouter(config.LLMConfig{
 		Providers: map[string]config.LLMProviderConfig{"selected": {Type: "openai_compatible", APIKeyEnv: "TEST"}},
 		Stages: map[string]config.LLMStageConfig{
-			"article": {Provider: "selected", Model: "configured-model", PromptTemplate: "{{.Title}}",
+			"article": {Targets: []config.LLMTargetConfig{{Provider: "selected", Model: "configured-model"}}, PromptTemplate: "{{.Title}}",
 				Temperature: &temperature, MaxTokens: 100, Timeout: time.Second},
-			"info": {Provider: "selected", Model: "configured-model", PromptTemplate: "{{.Title}}",
+			"info": {Targets: []config.LLMTargetConfig{{Provider: "selected", Model: "configured-model"}}, PromptTemplate: "{{.Title}}",
 				Temperature: &temperature, MaxTokens: 100, Timeout: time.Second},
 		},
 	}, map[string]Client{"selected": client}, slog.New(slog.NewJSONHandler(&logs, nil)))

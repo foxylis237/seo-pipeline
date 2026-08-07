@@ -44,8 +44,8 @@ func TestPacingIntervalStaysWithinRange(t *testing.T) {
 	for _, random := range []int64{0, int64(requestJitter) / 2, int64(requestJitter) - 1} {
 		pace := pacing{minInterval: minRequestInterval, jitter: requestJitter, random: func(int64) int64 { return random }}
 		interval := pace.interval()
-		if interval < 30*time.Second || interval > 50*time.Second {
-			t.Fatalf("interval = %v, want between 30s and 50s", interval)
+		if interval < 20*time.Second || interval > 60*time.Second {
+			t.Fatalf("interval = %v, want between 20s and 60s", interval)
 		}
 	}
 }
@@ -65,7 +65,7 @@ func TestFirstRequestIsNotThrottled(t *testing.T) {
 	clock := time.Date(2026, 8, 6, 12, 0, 0, 0, time.UTC)
 	var slept []time.Duration
 	client := testClient(t, t.TempDir(), &clock, 0, &slept)
-	if err := client.waitBeforeRequest(context.Background()); err != nil {
+	if err := client.WaitBeforeRequest(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if len(slept) != 0 {
@@ -76,12 +76,12 @@ func TestFirstRequestIsNotThrottled(t *testing.T) {
 func TestSecondRequestWaitsRemainingInterval(t *testing.T) {
 	clock := time.Date(2026, 8, 6, 12, 0, 0, 0, time.UTC)
 	var slept []time.Duration
-	// random = 10s ⇒ целевой интервал 40s.
-	client := testClient(t, t.TempDir(), &clock, int64(10*time.Second), &slept)
+	// random = 20s ⇒ целевой интервал 40s.
+	client := testClient(t, t.TempDir(), &clock, int64(20*time.Second), &slept)
 	client.markRequestFinished()
 
 	clock = clock.Add(15 * time.Second)
-	if err := client.waitBeforeRequest(context.Background()); err != nil {
+	if err := client.WaitBeforeRequest(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if len(slept) != 1 || slept[0] != 25*time.Second {
@@ -96,7 +96,7 @@ func TestRequestIsNotThrottledAfterLongPause(t *testing.T) {
 	client.markRequestFinished()
 
 	clock = clock.Add(2 * time.Minute)
-	if err := client.waitBeforeRequest(context.Background()); err != nil {
+	if err := client.WaitBeforeRequest(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if len(slept) != 0 {
@@ -111,15 +111,15 @@ func TestThrottleStopsOnCancelledContext(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := client.waitBeforeRequest(ctx); !errors.Is(err, context.Canceled) {
+	if err := client.WaitBeforeRequest(ctx); !errors.Is(err, context.Canceled) {
 		t.Fatalf("error = %v, want context.Canceled", err)
 	}
 }
 
 func TestThrottleUsesRealSleepByDefault(t *testing.T) {
 	pace := defaultPacing()
-	if pace.minInterval != 30*time.Second || pace.jitter != 20*time.Second {
-		t.Fatalf("pacing = %v/%v, want 30s/20s", pace.minInterval, pace.jitter)
+	if pace.minInterval != 20*time.Second || pace.jitter != 40*time.Second {
+		t.Fatalf("pacing = %v/%v, want 20s/40s", pace.minInterval, pace.jitter)
 	}
 	started := time.Now()
 	if err := pace.sleep(context.Background(), 20*time.Millisecond); err != nil {

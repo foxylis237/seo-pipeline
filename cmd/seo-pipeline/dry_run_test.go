@@ -8,9 +8,11 @@ import (
 	"github.com/foxylis237/seo-pipeline/internal/llm"
 )
 
+// Заглушка обязана отвечать на каждую стадию пайплайна. Стадии article и info в ней
+// отсутствовали, и это не всплывало: офлайн-прогон падал раньше, на подмене модели.
 func TestDryRunClientProvidesEveryStatelessStage(t *testing.T) {
 	client := dryRunClient{}
-	for _, stage := range []string{"structure", "review", "fix", "html"} {
+	for _, stage := range pipelineStageOrder {
 		response, err := client.Generate(context.Background(), llm.Request{Prompt: "rendered prompt", Model: dryRunModelPrefix + stage})
 		if err != nil {
 			t.Fatalf("stage %s: %v", stage, err)

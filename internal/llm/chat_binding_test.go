@@ -155,3 +155,138 @@ func TestNonBrowserProviderKeepsShortExponentialBackoff(t *testing.T) {
 		t.Fatalf("retryDelay для незарегистрированного провайдера = %v, want 200ms", got)
 	}
 }
+
+// singleChatRouter повторяет DeepSeek-only режим: один провайдер, который сам держит контекст.
+func singleChatRouter(t *testing.T, client *fakeClient) *Router {
+	t.Helper()
+	temperature := 0.3
+	stage := config.LLMStageConfig{
+		PromptTemplate: "{{.Text}}", Temperature: &temperature, MaxTokens: 100, Timeout: 5 * time.Second,
+		Targets: []config.LLMTargetConfig{{Provider: "deepseek", Model: "deepseek-web"}},
+	}
+	stages := map[string]config.LLMStageConfig{"review": stage, "fix": stage}
+	return NewRouter(config.LLMConfig{
+		Providers: map[string]config.LLMProviderConfig{
+			"deepseek": {Type: "deepseek_web", SingleChatPerArticle: true},
+		},
+		Stages: stages,
+	}, map[string]Client{"deepseek": client}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+}
+
+func TestSingleChatProviderReceivesOnlyNewPrompt(t *testing.T) {
+	client := &fakeClient{responses: []Response{{Text: "результат ревью"}}}
+	router := singleChatRouter(t, client)
+
+	chat, err := router.NewStageChatFactory("review", "fix").NewChat(context.Background(), 42)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := chat.Generate(context.Background(), "review prompt"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := chat.Generate(context.Background(), "fix prompt"); err != nil {
+		t.Fatal(err)
+	}
+	// Контекст держит сам провайдер, поэтому склеенный транскрипт отправлять нельзя.
+	if client.request.Prompt != "fix prompt" {
+		t.Fatalf("prompt = %q, want ровно \"fix prompt\" без истории", client.request.Prompt)
+	}
+	for _, unwanted := range []string{"review prompt", "результат ревью", "assistant:"} {
+		if strings.Contains(client.request.Prompt, unwanted) {
+			t.Fatalf("история попала в промпт повторно: %q", client.request.Prompt)
+		}
+	}
+}
+
+func TestStatelessProviderStillReceivesTranscript(t *testing.T) {
+	client := &fakeClient{responses: []Response{{Text: "результат ревью"}}}
+	router := singleChatRouter(t, client)
+	// Тот же чат, но провайдер контекст не держит.
+	providers := router.config.Providers["deepseek"]
+	providers.SingleChatPerArticle = false
+	router.config.Providers["deepseek"] = providers
+
+	chat, err := router.NewStageChatFactory("review", "fix").NewChat(context.Background(), 42)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, prompt := range []string{"review prompt", "fix prompt"} {
+		if _, err := chat.Generate(context.Background(), prompt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, expected := range []string{"review prompt", "результат ревью", "fix prompt"} {
+		if !strings.Contains(client.request.Prompt, expected) {
+			t.Fatalf("транскрипт не содержит %q: %q", expected, client.request.Prompt)
+		}
+	}
+}
+
+func TestArticleIDReachesProvider(t *testing.T) {
+	client := &fakeClient{}
+	router := singleChatRouter(t, client)
+	if _, err := router.generatePrompt(context.Background(), Call{Stage: "review", ArticleID: 99}, "prompt"); err != nil {
+		t.Fatal(err)
+	}
+	if client.request.ArticleID != 99 {
+		t.Fatalf("request.ArticleID = %d, want 99: провайдер не сможет держать чат на статью", client.request.ArticleID)
+	}
+}
+
+// pacedClient повторяет провайдера с самоограничением: он ждёт перед запросом.
+type pacedClient struct {
+	fakeClient
+	pause          time.Duration
+	paceCalls      int
+	pacedUnderTerm bool
+}
+
+func (c *pacedClient) WaitBeforeRequest(ctx context.Context) error {
+	c.paceCalls++
+	if _, found := ctx.Deadline(); found {
+		c.pacedUnderTerm = true
+	}
+	timer := time.NewTimer(c.pause)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func TestProviderPauseDoesNotConsumeStageTimeout(t *testing.T) {
+	client := &pacedClient{pause: 80 * time.Millisecond}
+	temperature := 0.3
+	router := NewRouter(config.LLMConfig{
+		Providers: map[string]config.LLMProviderConfig{"deepseek": {Type: "deepseek_web"}},
+		Stages: map[string]config.LLMStageConfig{"structure": {
+			PromptTemplate: "{{.Text}}", Temperature: &temperature, MaxTokens: 100,
+			Timeout: 100 * time.Millisecond,
+			Targets: []config.LLMTargetConfig{{Provider: "deepseek", Model: "deepseek-web"}},
+		}},
+	}, map[string]Client{"deepseek": client}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	started := time.Now()
+	if _, err := router.generatePrompt(context.Background(), Call{Stage: "structure", ArticleID: 1}, "prompt"); err != nil {
+		t.Fatalf("пауза съела бюджет стадии: %v", err)
+	}
+	// Пауза 80ms при бюджете стадии 100ms: если бы она вычиталась из бюджета, на генерацию
+	// осталось бы 20ms и запрос не успел бы. Общее время обязано превысить сам бюджет.
+	if elapsed := time.Since(started); elapsed < 80*time.Millisecond {
+		t.Fatalf("пауза не выдержана: %v", elapsed)
+	}
+	if client.paceCalls != 1 {
+		t.Fatalf("WaitBeforeRequest вызван %d раз, want 1", client.paceCalls)
+	}
+	if client.pacedUnderTerm {
+		t.Fatal("пауза выдерживалась под дедлайном стадии")
+	}
+	if len(client.deadlines) != 1 {
+		t.Fatalf("Generate вызван %d раз, want 1", len(client.deadlines))
+	}
+	if remaining := time.Until(client.deadlines[0]); remaining <= 0 {
+		t.Fatalf("на генерацию не осталось бюджета: %v", remaining)
+	}
+}

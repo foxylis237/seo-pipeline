@@ -17,9 +17,10 @@ llm:
       headless: true
 
   stages:
-    # Провайдер задаётся отдельно для каждой стадии. Второй target — резерв: роутер
-    # переходит к нему только при технической ошибке первого (квота, лимит, 5xx,
-    # таймаут, сеть), но не при ошибке разбора или валидации ответа.
+    # Режим Gemini: article, review и fix идут только через Gemini, без резерва на
+    # DeepSeek. Смешивать провайдеров внутри одной статьи нельзя — когда токены Gemini
+    # заканчиваются, статья целиком генерируется в DeepSeek-only режиме
+    # (LLM_MODE=deepseek, наложение config/config.deepseek.yaml).
     structure:
       targets:
         - { provider: deepseek_web, model: deepseek-web }
@@ -31,7 +32,6 @@ llm:
     article:
       targets:
         - { provider: gemini, model: "${GEMINI_MODEL}" }
-        - { provider: deepseek_web, model: deepseek-web }
       prompt: tasks/task_1/prompts/article.txt
       temperature: 0.7
       max_tokens: 10000
@@ -48,7 +48,6 @@ llm:
     review:
       targets:
         - { provider: gemini, model: "${GEMINI_MODEL}" }
-        - { provider: deepseek_web, model: deepseek-web }
       prompt: tasks/task_1/prompts/review.txt
       temperature: 0.2
       max_tokens: 5000
@@ -60,7 +59,6 @@ llm:
     fix:
       targets:
         - { provider: gemini, model: "${GEMINI_MODEL}" }
-        - { provider: deepseek_web, model: deepseek-web }
       prompt: tasks/task_1/prompts/fix_article.txt
       temperature: 0.4
       max_tokens: 10000

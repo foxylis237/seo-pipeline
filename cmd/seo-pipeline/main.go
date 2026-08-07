@@ -15,9 +15,6 @@ import (
 
 	"github.com/foxylis237/seo-pipeline/internal/config"
 	"github.com/foxylis237/seo-pipeline/internal/integrations/arsenkin"
-	"github.com/foxylis237/seo-pipeline/internal/llm"
-	"github.com/foxylis237/seo-pipeline/internal/llm/deepseekweb"
-	llmgemini "github.com/foxylis237/seo-pipeline/internal/llm/gemini"
 	"github.com/foxylis237/seo-pipeline/internal/storage"
 	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/article"
 	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/diagnostics"
@@ -161,80 +158,30 @@ func main() {
 
 	case "run", "regenerate", "generate", "demo-generate", "retry", "article", "info", "review", "fix", "html":
 		if command.DryRun {
-			err = runDryRun(ctx, articleRepository, cfg, taskLogger, writer, resultService)
+			err = runDryRun(ctx, articleRepository, cfg, taskLogger, writer, resultService, os.Stdout)
 			break
 		}
-		llmConfig, configErr := config.LoadLLMConfig("config/config.yaml")
+		stages, configErr := loadStageConfigs(taskLogger, true)
 		if configErr != nil {
 			err = configErr
 			break
 		}
-		clients := make(map[string]llm.Client)
-		var closeClients []interface{ Close() error }
-		usedProviders := make(map[string]struct{})
-		for _, stage := range llmConfig.Stages {
-			for _, target := range stage.Targets {
-				usedProviders[target.Provider] = struct{}{}
-			}
+		availability := newGeminiAvailability()
+		// Истёкший маркер снимается один раз при старте, а не при выборе схемы: выбор обязан
+		// быть чистым, иначе на batch-прогоне он повторяет одну и ту же запись в лог.
+		if until, reason, removed, expireErr := availability.expire(); expireErr != nil {
+			taskLogger.Warn("Gemini state file was not removed", "error", expireErr)
+		} else if removed {
+			taskLogger.Info("Gemini is available again, its disable period has expired",
+				"was_disabled_until", until.UTC().Format(time.RFC3339), "previous_reason", reason)
 		}
-		for name := range usedProviders {
-			provider := llmConfig.Providers[name]
-			switch provider.Type {
-			case "gemini":
-				model := ""
-				for _, stage := range llmConfig.Stages {
-					for _, target := range stage.Targets {
-						if target.Provider == name {
-							model = target.Model
-							break
-						}
-					}
-					if model != "" {
-						break
-					}
-				}
-				client, generatorErr := llmgemini.NewClient(ctx, os.Getenv(provider.APIKeyEnv), model)
-				if generatorErr != nil {
-					err = fmt.Errorf("создать LLM provider %q: %w", name, generatorErr)
-					break
-				}
-				clients[name] = client
-				closeClients = append(closeClients, client)
-			case "openai_compatible":
-				client, clientErr := llm.NewOpenAICompatibleClient(provider.BaseURL, os.Getenv(provider.APIKeyEnv), name, taskLogger)
-				if clientErr != nil {
-					err = fmt.Errorf("создать LLM provider %q: %w", name, clientErr)
-					break
-				}
-				clients[name] = client
-			case "deepseek_web":
-				headless := true
-				if provider.Headless != nil {
-					headless = *provider.Headless
-				}
-				client, clientErr := deepseekweb.NewClient(deepseekweb.Config{
-					ChatURL: provider.ChatURL, LoginURL: provider.LoginURL,
-					ProfileDir: provider.ProfileDir, Headless: headless,
-				}, taskLogger.With("provider", name))
-				if clientErr != nil {
-					err = fmt.Errorf("создать LLM provider %q: %w", name, clientErr)
-					break
-				}
-				clients[name] = client
-				closeClients = append(closeClients, client)
-			}
-			if err != nil {
-				break
-			}
-		}
-		if err != nil {
+		mode, closeLLM, buildErr := buildLLM(ctx, stages, availability, generationDeps{
+			repository: articleRepository, writer: writer, result: resultService, logger: taskLogger,
+		})
+		if buildErr != nil {
+			err = buildErr
 			break
 		}
-		router := llm.NewRouter(llmConfig, clients, taskLogger)
-		// review и fix идут одним чатом: fix опирается на историю, а не на повторную
-		// передачу статьи и ревью.
-		chatFactory := router.NewStageChatFactory("review", "fix")
-		generationPipeline := generation.NewPipeline(articleRepository, router, chatFactory, writer, taskLogger, resultService)
 		runPreparedDemo := func(ctx context.Context, externalID string) error {
 			saved, loadErr := articleRepository.GetSavedGenerationInput(ctx, externalID)
 			if loadErr != nil {
@@ -242,7 +189,7 @@ func main() {
 			}
 			return runDemoWithoutRecordedError(saved.Article, taskLogger, func() error {
 				if saved.Article.Status == "completed" {
-					return runDemoGenerate(ctx, generationPipeline, externalID)
+					return mode.stage(ctx, externalID, runDemoGenerate)
 				}
 				prepared, researchErr := articleRepository.HasPreparedResearch(ctx, externalID)
 				if researchErr != nil {
@@ -256,17 +203,27 @@ func main() {
 						return prepareErr
 					}
 				}
-				return runDemoGenerate(ctx, generationPipeline, externalID)
+				return mode.stage(ctx, externalID, runDemoGenerate)
 			})
+		}
+		// Одна форма для всех одностадийных команд: схема выбирается на статью, режим не
+		// переключается. Раньше эти восемь веток отличались только именем операции.
+		stageOperation := func(name string, run func(context.Context, *generation.Pipeline, string) error) error {
+			if command.ExternalID != "" {
+				return mode.stage(ctx, command.ExternalID, run)
+			}
+			return runBatchOperation(ctx, articleRepository, name, func(ctx context.Context, externalID string) error {
+				return mode.stage(ctx, externalID, run)
+			}, taskLogger)
 		}
 		switch command.Name {
 		case "generate":
 			if command.ExternalID == "" {
 				err = runBatchOperation(ctx, articleRepository, "generate", func(ctx context.Context, externalID string) error {
-					return runGenerate(ctx, generationPipeline, externalID)
+					return mode.run(ctx, externalID, runGenerate)
 				}, taskLogger)
 			} else {
-				err = runGenerate(ctx, generationPipeline, command.ExternalID)
+				err = mode.run(ctx, command.ExternalID, runGenerate)
 			}
 		case "run", "regenerate":
 			if command.Plan {
@@ -275,39 +232,46 @@ func main() {
 			}
 			// Полный пайплайн с возобновлением: этапы выполняются существующими сервисами,
 			// раннер лишь выбирает, с какого продолжить.
-			execute := func(ctx context.Context, stage pipelineStage, externalID string) error {
-				switch stage {
-				case stagePrepare:
-					if validateErr := cfg.ValidatePrepare(); validateErr != nil {
-						return validateErr
+			execute := func(pipeline *generation.Pipeline) func(context.Context, pipelineStage, string) error {
+				return func(ctx context.Context, stage pipelineStage, externalID string) error {
+					switch stage {
+					case stagePrepare:
+						if validateErr := cfg.ValidatePrepare(); validateErr != nil {
+							return validateErr
+						}
+						return runPrepare(ctx, articleRepository, cfg, taskLogger, writer, logRouter, externalID)
+					case stageStructure:
+						_, stageErr := pipeline.RunStructureByExternalID(ctx, externalID)
+						return stageErr
+					case stageArticle:
+						return runArticle(ctx, pipeline, externalID)
+					case stageReview:
+						return runReview(ctx, pipeline, externalID)
+					case stageFix:
+						return runFix(ctx, pipeline, externalID)
+					case stageHTML:
+						return runHTML(ctx, pipeline, externalID)
+					case stageResult:
+						if _, buildErr := resultService.Build(ctx, externalID); buildErr != nil {
+							return buildErr
+						}
+						resultInput, loadErr := articleRepository.GetResultInput(ctx, externalID)
+						if loadErr != nil {
+							return loadErr
+						}
+						return articleRepository.CompleteGeneration(ctx, resultInput.Article.ID)
+					default:
+						return fmt.Errorf("неизвестный этап пайплайна %q", stage)
 					}
-					return runPrepare(ctx, articleRepository, cfg, taskLogger, writer, logRouter, externalID)
-				case stageStructure:
-					_, stageErr := generationPipeline.RunStructureByExternalID(ctx, externalID)
-					return stageErr
-				case stageArticle:
-					return runArticle(ctx, generationPipeline, externalID)
-				case stageReview:
-					return runReview(ctx, generationPipeline, externalID)
-				case stageFix:
-					return runFix(ctx, generationPipeline, externalID)
-				case stageHTML:
-					return runHTML(ctx, generationPipeline, externalID)
-				case stageResult:
-					if _, buildErr := resultService.Build(ctx, externalID); buildErr != nil {
-						return buildErr
-					}
-					resultInput, loadErr := articleRepository.GetResultInput(ctx, externalID)
-					if loadErr != nil {
-						return loadErr
-					}
-					return articleRepository.CompleteGeneration(ctx, resultInput.Article.ID)
-				default:
-					return fmt.Errorf("неизвестный этап пайплайна %q", stage)
 				}
 			}
+			// Схема выбирается на статью и здесь: раньше run был единственной генерационной
+			// командой вообще без переключения режима — исчерпание квоты Gemini не выключало
+			// провайдера и не переводило статью на DeepSeek.
 			runOne := func(ctx context.Context, externalID string) error {
-				return runFullPipeline(ctx, articleRepository, execute, taskLogger, externalID)
+				scheme, pipeline := mode.pipelineFor(externalID)
+				runErr := runFullPipeline(ctx, articleRepository, execute(pipeline), taskLogger, externalID)
+				return mode.guard(ctx, externalID, scheme, runErr)
 			}
 			if command.Name == "regenerate" {
 				err = runRegenerate(ctx, articleRepository, writer, runOne, taskLogger, command.ExternalID)
@@ -331,43 +295,15 @@ func main() {
 		case "retry":
 			err = runRetry(ctx, articleRepository, command.ExternalID, runPreparedDemo, taskLogger)
 		case "article", "info":
-			if command.ExternalID == "" {
-				err = runBatchOperation(ctx, articleRepository, command.Name, func(ctx context.Context, externalID string) error {
-					return runArticle(ctx, generationPipeline, externalID)
-				}, taskLogger)
-			} else {
-				err = runArticle(ctx, generationPipeline, command.ExternalID)
-			}
+			err = stageOperation(command.Name, runArticle)
 		case "review":
-			if command.ExternalID == "" {
-				err = runBatchOperation(ctx, articleRepository, "review", func(ctx context.Context, externalID string) error {
-					return runReview(ctx, generationPipeline, externalID)
-				}, taskLogger)
-			} else {
-				err = runReview(ctx, generationPipeline, command.ExternalID)
-			}
+			err = stageOperation("review", runReview)
 		case "fix":
-			if command.ExternalID == "" {
-				err = runBatchOperation(ctx, articleRepository, "fix", func(ctx context.Context, externalID string) error {
-					return runFix(ctx, generationPipeline, externalID)
-				}, taskLogger)
-			} else {
-				err = runFix(ctx, generationPipeline, command.ExternalID)
-			}
+			err = stageOperation("fix", runFix)
 		case "html":
-			if command.ExternalID == "" {
-				err = runBatchOperation(ctx, articleRepository, "html", func(ctx context.Context, externalID string) error {
-					return runHTML(ctx, generationPipeline, externalID)
-				}, taskLogger)
-			} else {
-				err = runHTML(ctx, generationPipeline, command.ExternalID)
-			}
+			err = stageOperation("html", runHTML)
 		}
-		for _, client := range closeClients {
-			if closeErr := client.Close(); closeErr != nil {
-				err = errors.Join(err, fmt.Errorf("закрыть LLM client: %w", closeErr))
-			}
-		}
+		err = errors.Join(err, closeLLM())
 
 	}
 
