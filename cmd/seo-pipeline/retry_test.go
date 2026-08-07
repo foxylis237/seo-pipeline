@@ -3,6 +3,9 @@ package main
 import (
 	"context"
 	"errors"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io"
 	"log/slog"
 	"reflect"
@@ -66,6 +69,104 @@ func TestRunRetrySingleUsesExternalIDAndSkipsWithoutError(t *testing.T) {
 	}
 	if called || len(repository.cleared) != 0 {
 		t.Fatalf("pipeline called=%v cleared=%v", called, repository.cleared)
+	}
+}
+
+// TestRunRetryDrivesFullPipeline фиксирует F1: retry обязан вести статью полным маршрутом
+// prepare → structure → article/info → review → fix → html → result и завершать её только
+// после html. Раньше он шёл demo-путём и ставил completed сразу после article/info.
+func TestRunRetryDrivesFullPipeline(t *testing.T) {
+	message := "prepare failed"
+	retryRepo := &fakeRetryRepository{saved: article.Article{ID: 7, ExternalID: "37", Status: "failed", ErrorMessage: &message}}
+	runRepo := &fakeRunRepository{state: pipelineState{Status: "failed", ErrorMessage: message}}
+
+	var executed []pipelineStage
+	completedAfter := make([]pipelineStage, 0, 1)
+	runOne := func(ctx context.Context, externalID string) error {
+		return runFullPipeline(ctx, runRepo, func(_ context.Context, stage pipelineStage, _ string) error {
+			executed = append(executed, stage)
+			runRepo.advance(stage)
+			if runRepo.state.Status == "completed" {
+				completedAfter = append(completedAfter, stage)
+			}
+			return nil
+		}, runPipelineTestLogger(), externalID)
+	}
+
+	if err := runRetry(context.Background(), retryRepo, "37", runOne, slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
+		t.Fatal(err)
+	}
+	want := []pipelineStage{stagePrepare, stageStructure, stageArticle, stageReview, stageFix, stageHTML, stageResult}
+	if !reflect.DeepEqual(executed, want) {
+		t.Fatalf("retry выполнил этапы %v, ожидались %v", executed, want)
+	}
+	if !reflect.DeepEqual(completedAfter, []pipelineStage{stageResult}) {
+		t.Fatalf("статья завершена на этапах %v, ожидался только %q", completedAfter, stageResult)
+	}
+	if !reflect.DeepEqual(retryRepo.cleared, []int64{7}) {
+		t.Fatalf("сохранённая ошибка не снята: cleared=%v", retryRepo.cleared)
+	}
+}
+
+// TestRunRetryDoesNotCompleteArticleWithoutHTML — этап html, не сохранивший артефакт,
+// обязан остановить retry, а не пропустить статью в result и completed.
+func TestRunRetryDoesNotCompleteArticleWithoutHTML(t *testing.T) {
+	message := "html failed"
+	retryRepo := &fakeRetryRepository{saved: article.Article{ID: 7, ExternalID: "37", Status: "failed", ErrorMessage: &message}}
+	runRepo := &fakeRunRepository{state: readyThrough(stageFix)}
+
+	var executed []pipelineStage
+	runOne := func(ctx context.Context, externalID string) error {
+		return runFullPipeline(ctx, runRepo, func(_ context.Context, stage pipelineStage, _ string) error {
+			executed = append(executed, stage)
+			if stage == stageHTML {
+				return nil // этап отработал без ошибки, но html_path не появился
+			}
+			runRepo.advance(stage)
+			return nil
+		}, runPipelineTestLogger(), externalID)
+	}
+
+	err := runRetry(context.Background(), retryRepo, "37", runOne, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err == nil {
+		t.Fatal("retry завершился успешно, хотя html не сохранён")
+	}
+	if !reflect.DeepEqual(executed, []pipelineStage{stageHTML}) {
+		t.Fatalf("после незавершённого html выполнены этапы %v", executed)
+	}
+	if runRepo.state.Status == "completed" || runRepo.state.HTMLPath != "" {
+		t.Fatalf("статья завершена без html: status=%q html_path=%q", runRepo.state.Status, runRepo.state.HTMLPath)
+	}
+}
+
+// TestRetryIsWiredToFullPipelineRunner проверяет саму проводку в main: retry и run обязаны
+// получать один и тот же раннер. Именно расхождение здесь и было причиной F1, а поймать его
+// иначе нельзя — обе команды собираются внутри main() и наружу не выведены.
+func TestRetryIsWiredToFullPipelineRunner(t *testing.T) {
+	file, err := parser.ParseFile(token.NewFileSet(), "main.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runners := map[string]string{}
+	ast.Inspect(file, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		name, ok := call.Fun.(*ast.Ident)
+		if !ok || len(call.Args) < 4 {
+			return true
+		}
+		switch name.Name {
+		case "runRetry", "runRegenerate":
+			if argument, isIdent := call.Args[3].(*ast.Ident); isIdent {
+				runners[name.Name] = argument.Name
+			}
+		}
+		return true
+	})
+	if runners["runRetry"] == "" || runners["runRetry"] != runners["runRegenerate"] {
+		t.Fatalf("retry и regenerate получают разные раннеры: %v", runners)
 	}
 }
 
