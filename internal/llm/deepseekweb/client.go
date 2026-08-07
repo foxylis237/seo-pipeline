@@ -21,6 +21,10 @@ type Client struct {
 
 	pace          pacing
 	lastRequestAt time.Time
+
+	// openArticleID — статья, диалог которой сейчас открыт в браузере. Ноль означает, что
+	// открытой беседы нет и следующий запрос должен начать новую.
+	openArticleID int64
 }
 
 func NewClient(cfg Config, logger *slog.Logger) (*Client, error) {
@@ -42,9 +46,6 @@ func (c *Client) Generate(ctx context.Context, request llm.Request) (llm.Respons
 		defer func() { <-c.access }()
 	case <-ctx.Done():
 		return llm.Response{}, ctx.Err()
-	}
-	if err := c.waitBeforeRequest(ctx); err != nil {
-		return llm.Response{}, err
 	}
 	started := time.Now()
 	c.logger.Info("DeepSeek Web generation started", "model", request.Model)
@@ -73,29 +74,36 @@ func (c *Client) generate(ctx context.Context, request llm.Request) (llm.Respons
 	}
 	page := session.page
 	timeout := operationTimeout(ctx, defaultOperationTimeout)
-	if _, err := page.Goto(c.cfg.ChatURL, playwright.PageGotoOptions{
-		WaitUntil: playwright.WaitUntilStateDomcontentloaded,
-		Timeout:   playwright.Float(timeout),
-	}); err != nil {
-		return llm.Response{}, c.browserError(ctx, "open DeepSeek Chat", err)
+	// Переход на chat_url всегда открывает новую беседу. В режиме одного диалога на статью
+	// он выполняется только для первой стадии: дальше промпт уходит в уже открытый чат,
+	// и модель видит все предыдущие стадии как историю.
+	if c.shouldOpenNewChat(request) {
+		if _, err := page.Goto(c.cfg.ChatURL, playwright.PageGotoOptions{
+			WaitUntil: playwright.WaitUntilStateDomcontentloaded,
+			Timeout:   playwright.Float(timeout),
+		}); err != nil {
+			return llm.Response{}, c.browserError(ctx, "open DeepSeek Chat", err)
+		}
+		c.markChatOpened(request.ArticleID)
+		c.stage("open_page", "url", c.cfg.ChatURL, "article_id", request.ArticleID)
+	} else {
+		c.stage("continue_chat", "article_id", request.ArticleID)
 	}
 	if reason, blocked := c.detectBlocked(page); blocked {
-		return llm.Response{}, c.blockAccount(reason)
+		return llm.Response{}, c.handleUnavailable(ctx, reason)
 	}
 	state, err := waitForChatReady(page, timeout)
 	if err != nil {
 		// Неизвестная страница — самый частый вид блокировки: ни поля ввода, ни формы входа.
 		// Проверяем ещё раз, прежде чем считать ошибку временной и уходить в повтор.
 		if reason, blocked := c.detectBlocked(page); blocked {
-			return llm.Response{}, c.blockAccount(reason)
+			return llm.Response{}, c.handleUnavailable(ctx, reason)
 		}
 		return llm.Response{}, c.browserError(ctx, "wait for DeepSeek Chat", err)
 	}
 	if state == "expired" {
 		return llm.Response{}, sessionExpiredError()
 	}
-	c.stage("open_page", "url", c.cfg.ChatURL)
-
 	composer := page.Locator(composerSelector).First()
 	if err := composer.WaitFor(playwright.LocatorWaitForOptions{
 		State: playwright.WaitForSelectorStateVisible, Timeout: playwright.Float(timeout),
@@ -104,20 +112,22 @@ func (c *Client) generate(ctx context.Context, request llm.Request) (llm.Respons
 	}
 	c.stage("input_found")
 
-	answers := page.Locator(answerSelector)
-	previousCount, err := answers.Count()
+	// Снимок треда до отправки: по нему отличается новый ответ от уже имеющихся.
+	mark, err := takeAnswerMark(page)
 	if err != nil {
-		return llm.Response{}, c.browserError(ctx, "count DeepSeek answers", err)
+		return llm.Response{}, c.browserError(ctx, "read DeepSeek thread state", err)
 	}
-	if err := composer.Fill(request.Prompt, playwright.LocatorFillOptions{Timeout: playwright.Float(timeout)}); err != nil {
-		return llm.Response{}, c.browserError(ctx, "fill DeepSeek prompt", err)
+	if err := c.sendPrompt(ctx, page, composer, request, timeout); err != nil {
+		return llm.Response{}, err
 	}
-	if err := composer.Press("Enter", playwright.LocatorPressOptions{Timeout: playwright.Float(timeout)}); err != nil {
-		return llm.Response{}, c.browserError(ctx, "send DeepSeek prompt", err)
-	}
-	c.stage("send_prompt", "length", len([]rune(request.Prompt)), "model", request.Model)
 
-	if err := c.waitForAnswer(ctx, page, previousCount); err != nil {
+	if err := c.waitForAnswer(ctx, page, mark); err != nil {
+		c.saveDiagnostics(page, "wait_answer", request.ArticleID)
+		// Проверка Cloudflare приходит и в ответ на уже отправленное сообщение: оно уходит,
+		// а вместо ответа появляется заглушка. Статья 47 стояла так по пять минут.
+		if reason, blocked := c.detectBlocked(page); blocked {
+			return llm.Response{}, c.handleUnavailable(ctx, reason)
+		}
 		return llm.Response{}, err
 	}
 	sources, err := c.readAnswerSources(page)
@@ -144,7 +154,7 @@ func (c *Client) generate(ctx context.Context, request llm.Request) (llm.Respons
 // waitForAnswer waits for the generation to finish, reporting progress every heartbeat.
 // Ожидание разбито на короткие интервалы вместо одного длинного, чтобы состояние попадало
 // в лог без второй горутины возле страницы Playwright.
-func (c *Client) waitForAnswer(ctx context.Context, page playwright.Page, previousCount int) error {
+func (c *Client) waitForAnswer(ctx context.Context, page playwright.Page, mark answerMark) error {
 	started := time.Now()
 	deadline := started.Add(time.Duration(operationTimeout(ctx, defaultResponseTimeout)) * time.Millisecond)
 	state := "waiting"
@@ -159,19 +169,15 @@ func (c *Client) waitForAnswer(ctx context.Context, page playwright.Page, previo
 			))
 		}
 		wait := min(responseHeartbeat, remaining)
-		_, err := page.WaitForFunction(completedAnswerJS, map[string]any{
-			"answerSelector": answerSelector,
-			"stopSelector":   stopSelector,
-			"previousCount":  previousCount,
-			"stableForMs":    responseStableFor.Milliseconds(),
-		}, playwright.PageWaitForFunctionOptions{Polling: "raf", Timeout: playwright.Float(float64(wait.Milliseconds()))})
+		_, err := page.WaitForFunction(completedAnswerJS, completedAnswerOptions(mark),
+			playwright.PageWaitForFunctionOptions{Polling: "raf", Timeout: playwright.Float(float64(wait.Milliseconds()))})
 		if err == nil {
 			return nil
 		}
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return fmt.Errorf("wait for complete DeepSeek answer: %w", ctxErr)
 		}
-		state = responseState(page, previousCount)
+		state = responseState(page, mark)
 		c.stage("waiting_response", "elapsed", time.Since(started).Round(time.Second).String(), "state", state)
 	}
 }
@@ -253,12 +259,59 @@ func formatLostError(model, source string, lost []string) error {
 }
 
 // responseState reports whether the answer has started arriving.
-func responseState(page playwright.Page, previousCount int) string {
-	value, err := page.Evaluate(responseStateJS, map[string]any{
-		"answerSelector": answerSelector,
-		"stopSelector":   stopSelector,
-		"previousCount":  previousCount,
-	})
+// answerMark фиксирует состояние треда до отправки промпта.
+//
+// Ключ — основной ориентир: тред виртуализирован, и число смонтированных ответов не растёт.
+// Количество остаётся запасным признаком на случай, если разметка списка изменится.
+type answerMark struct {
+	count int
+	key   int
+}
+
+// takeAnswerMark снимает состояние треда перед отправкой промпта.
+func takeAnswerMark(page playwright.Page) (answerMark, error) {
+	count, err := page.Locator(answerSelector).Count()
+	if err != nil {
+		return answerMark{}, err
+	}
+	// Ключ читается «по возможности»: если список не виртуализирован или разметка изменилась,
+	// ключ остаётся -1 и скрипты ожидания уходят на запасной путь по количеству ответов.
+	mark := answerMark{count: count, key: -1}
+	if value, evaluateErr := page.Evaluate(lastItemKeyJS, map[string]any{
+		"itemSelector": itemSelector, "itemKeyAttribute": itemKeyAttribute,
+	}); evaluateErr == nil {
+		switch key := value.(type) {
+		case int:
+			mark.key = key
+		case float64:
+			mark.key = int(key)
+		}
+	}
+	return mark, nil
+}
+
+// completedAnswerOptions собирает параметры скриптов ожидания в одном месте: имена ключей
+// должны совпадать с options.* внутри скрипта, иначе сравнение молча пойдёт с undefined.
+func completedAnswerOptions(mark answerMark) map[string]any {
+	options := responseStateOptions(mark)
+	options["settledForMs"] = responseSettledFor.Milliseconds()
+	options["stableForMs"] = responseStableFor.Milliseconds()
+	return options
+}
+
+func responseStateOptions(mark answerMark) map[string]any {
+	return map[string]any{
+		"answerSelector":   answerSelector,
+		"stopSelector":     stopSelector,
+		"itemSelector":     itemSelector,
+		"itemKeyAttribute": itemKeyAttribute,
+		"previousCount":    mark.count,
+		"previousKey":      mark.key,
+	}
+}
+
+func responseState(page playwright.Page, mark answerMark) string {
+	value, err := page.Evaluate(responseStateJS, responseStateOptions(mark))
 	if err != nil {
 		return "unknown"
 	}
@@ -271,6 +324,25 @@ func responseState(page playwright.Page, previousCount int) string {
 // stage writes one step of the DeepSeek run in the format the operator greps for.
 func (c *Client) stage(name string, fields ...any) {
 	c.logger.Info("[deepseek]", append([]any{"stage", name}, fields...)...)
+}
+
+// shouldOpenNewChat решает, начинать ли новую беседу.
+//
+// Без режима одного диалога поведение прежнее: новая беседа на каждый запрос. В режиме
+// одного диалога беседа переоткрывается только при смене статьи или после потери сессии.
+func (c *Client) shouldOpenNewChat(request llm.Request) bool {
+	if !request.SingleChat || request.ArticleID == 0 {
+		return true
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.openArticleID != request.ArticleID
+}
+
+func (c *Client) markChatOpened(articleID int64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.openArticleID = articleID
 }
 
 func (c *Client) ensureSession() (*browserSession, error) {
@@ -301,6 +373,8 @@ func (c *Client) resetSession() error {
 	defer c.mu.Unlock()
 	err := c.session.close()
 	c.session = nil
+	// Вместе с сессией теряется и открытая беседа: следующий запрос начнёт новую.
+	c.openArticleID = 0
 	return err
 }
 

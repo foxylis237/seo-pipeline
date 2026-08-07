@@ -123,7 +123,7 @@ func testGenerationRouter(client *fakeLLMClient, logger *slog.Logger) *llm.Route
 			prompt = "info|{{.GeneratedStructure}}|{{.GeneratedArticle}}"
 		}
 		stages[stage] = config.LLMStageConfig{
-			Provider: "fake", Model: stage, PromptTemplate: prompt,
+			Targets: []config.LLMTargetConfig{{Provider: "fake", Model: stage}}, PromptTemplate: prompt,
 			Temperature: &temperature, MaxTokens: 100, Timeout: time.Second,
 		}
 	}

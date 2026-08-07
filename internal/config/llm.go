@@ -36,11 +36,16 @@ type LLMProviderConfig struct {
 	LoginURL   string `yaml:"login_url"`
 	ProfileDir string `yaml:"profile_dir"`
 	Headless   *bool  `yaml:"headless"`
+	// SingleChatPerArticle держит один диалог провайдера на статью вместо новой беседы на
+	// каждую стадию. Поддерживается только браузерными провайдерами.
+	SingleChatPerArticle bool `yaml:"single_chat_per_article"`
 }
 
+// LLMStageConfig описывает одну стадию. Маршрутизация существует здесь ровно в одном виде —
+// Targets. Исторические ключи provider/model на уровне стадии по-прежнему разбираются, но
+// полями структуры не становятся: пока они ими были, их значение расходилось с Targets и код
+// читал то одно, то другое.
 type LLMStageConfig struct {
-	Provider    string            `yaml:"provider"`
-	Model       string            `yaml:"model"`
 	Targets     []LLMTargetConfig `yaml:"targets"`
 	Prompt      string            `yaml:"prompt"`
 	Temperature *float64          `yaml:"temperature"`
@@ -49,6 +54,27 @@ type LLMStageConfig struct {
 
 	Timeout        time.Duration `yaml:"-"`
 	PromptTemplate string        `yaml:"-"`
+}
+
+// UnmarshalYAML принимает обе формы записи стадии и схлопывает историческую в Targets прямо
+// при разборе. Дальше по коду вторая форма уже не существует — в том числе в mergeLLMConfig,
+// который иначе молча пропускал бы overlay, написанный одиночной формой.
+func (s *LLMStageConfig) UnmarshalYAML(node *yaml.Node) error {
+	// stageFields не наследует этот метод, поэтому рекурсии при разборе не возникает.
+	type stageFields LLMStageConfig
+	var raw struct {
+		stageFields `yaml:",inline"`
+		Provider    string `yaml:"provider"`
+		Model       string `yaml:"model"`
+	}
+	if err := node.Decode(&raw); err != nil {
+		return err
+	}
+	*s = LLMStageConfig(raw.stageFields)
+	if len(s.Targets) == 0 && (strings.TrimSpace(raw.Provider) != "" || strings.TrimSpace(raw.Model) != "") {
+		s.Targets = []LLMTargetConfig{{Provider: raw.Provider, Model: raw.Model}}
+	}
+	return nil
 }
 
 type LLMTargetConfig struct {
@@ -84,14 +110,85 @@ func LoadLLMProviderConfig(path, name string) (LLMProviderConfig, error) {
 	return normalizeLLMProvider(name, provider)
 }
 
-func loadLLMConfig(path string, requireCredentials bool) (LLMConfig, error) {
+// LoadLLMConfigWithOverlay накладывает файл отличий на базовую конфигурацию.
+//
+// Overlay перечисляет только то, что меняется: путь к промпту, targets, флаг провайдера.
+// Всё остальное — таймауты, температуры, max_tokens — остаётся в одном месте, в базовом
+// файле, и не расходится между режимами.
+func LoadLLMConfigWithOverlay(basePath, overlayPath string, requireCredentials bool) (LLMConfig, error) {
+	base, err := readLLMFile(basePath)
+	if err != nil {
+		return LLMConfig{}, err
+	}
+	overlay, err := readLLMFile(overlayPath)
+	if err != nil {
+		return LLMConfig{}, err
+	}
+	mergeLLMConfig(&base.LLM, overlay.LLM)
+	if err := validateLLMConfig(&base.LLM, requireCredentials); err != nil {
+		return LLMConfig{}, fmt.Errorf("LLM config %q с наложенным %q: %w", basePath, overlayPath, err)
+	}
+	return base.LLM, nil
+}
+
+// mergeLLMConfig переносит заполненные поля overlay в базовую конфигурацию.
+// Пустое поле overlay означает «оставить как в базе», а не «очистить».
+func mergeLLMConfig(base *LLMConfig, overlay LLMConfig) {
+	for name, provider := range overlay.Providers {
+		merged, found := base.Providers[name]
+		if !found {
+			base.Providers[name] = provider
+			continue
+		}
+		if provider.SingleChatPerArticle {
+			merged.SingleChatPerArticle = true
+		}
+		if provider.Headless != nil {
+			merged.Headless = provider.Headless
+		}
+		base.Providers[name] = merged
+	}
+	for name, stage := range overlay.Stages {
+		merged, found := base.Stages[name]
+		if !found {
+			base.Stages[name] = stage
+			continue
+		}
+		if len(stage.Targets) > 0 {
+			merged.Targets = stage.Targets
+		}
+		if strings.TrimSpace(stage.Prompt) != "" {
+			merged.Prompt = stage.Prompt
+		}
+		if stage.Temperature != nil {
+			merged.Temperature = stage.Temperature
+		}
+		if stage.MaxTokens != 0 {
+			merged.MaxTokens = stage.MaxTokens
+		}
+		if strings.TrimSpace(stage.TimeoutText) != "" {
+			merged.TimeoutText = stage.TimeoutText
+		}
+		base.Stages[name] = merged
+	}
+}
+
+func readLLMFile(path string) (LLMFileConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return LLMConfig{}, fmt.Errorf("прочитать LLM config %q: %w", path, err)
+		return LLMFileConfig{}, fmt.Errorf("прочитать LLM config %q: %w", path, err)
 	}
 	var fileConfig LLMFileConfig
 	if err := yaml.Unmarshal(data, &fileConfig); err != nil {
-		return LLMConfig{}, fmt.Errorf("разобрать LLM config %q: %w", path, err)
+		return LLMFileConfig{}, fmt.Errorf("разобрать LLM config %q: %w", path, err)
+	}
+	return fileConfig, nil
+}
+
+func loadLLMConfig(path string, requireCredentials bool) (LLMConfig, error) {
+	fileConfig, err := readLLMFile(path)
+	if err != nil {
+		return LLMConfig{}, err
 	}
 	if err := validateLLMConfig(&fileConfig.LLM, requireCredentials); err != nil {
 		return LLMConfig{}, err
@@ -113,22 +210,9 @@ func validateLLMConfig(cfg *LLMConfig, requireCredentials bool) error {
 		if !found {
 			return fmt.Errorf("LLM stage %q is missing", stageName)
 		}
-		if len(stage.Targets) == 0 {
-			stage.Targets = []LLMTargetConfig{{Provider: stage.Provider, Model: stage.Model}}
+		if err := validateStageTargets(cfg, stageName, stage.Targets, usedProviders, requireCredentials); err != nil {
+			return err
 		}
-		for index := range stage.Targets {
-			target := &stage.Targets[index]
-			target.Provider = strings.TrimSpace(target.Provider)
-			target.Model = os.ExpandEnv(target.Model)
-			if _, found := cfg.Providers[target.Provider]; !found {
-				return fmt.Errorf("LLM stage %q target %d references unknown provider %q; available providers: %s", stageName, index, target.Provider, strings.Join(providerNames(cfg.Providers), ", "))
-			}
-			if strings.TrimSpace(target.Model) == "" {
-				return fmt.Errorf("LLM stage %q target %d has empty model", stageName, index)
-			}
-			usedProviders[target.Provider] = struct{}{}
-		}
-		stage.Provider, stage.Model = stage.Targets[0].Provider, stage.Targets[0].Model
 		if strings.TrimSpace(stage.Prompt) == "" {
 			return fmt.Errorf("LLM stage %q has empty prompt path", stageName)
 		}
@@ -167,6 +251,36 @@ func validateLLMConfig(cfg *LLMConfig, requireCredentials bool) error {
 				return fmt.Errorf("provider %q requires environment variable %s", name, provider.APIKeyEnv)
 			}
 		}
+	}
+	return nil
+}
+
+// validateStageTargets приводит targets стадии к рабочему виду и отмечает задействованных
+// провайдеров. Пустой список — ошибка: после разбора YAML маршрут обязан существовать.
+func validateStageTargets(cfg *LLMConfig, stageName string, targets []LLMTargetConfig, usedProviders map[string]struct{}, requireCredentials bool) error {
+	if len(targets) == 0 {
+		return fmt.Errorf("LLM stage %q has no targets", stageName)
+	}
+	for index := range targets {
+		target := &targets[index]
+		target.Provider = strings.TrimSpace(target.Provider)
+		if _, found := cfg.Providers[target.Provider]; !found {
+			return fmt.Errorf("LLM stage %q target %d references unknown provider %q; available providers: %s",
+				stageName, index, target.Provider, strings.Join(providerNames(cfg.Providers), ", "))
+		}
+		// Модель из переменной окружения — такое же требование окружения, как API-ключ,
+		// поэтому пустое значение после подстановки проверяется тем же флагом. Иначе
+		// dry-run падал бы на незаданном GEMINI_MODEL, так и не дойдя до вывода о том,
+		// что Gemini в этом прогоне вообще не нужен.
+		raw := strings.TrimSpace(target.Model)
+		if raw == "" {
+			return fmt.Errorf("LLM stage %q target %d has empty model", stageName, index)
+		}
+		target.Model = strings.TrimSpace(os.ExpandEnv(raw))
+		if target.Model == "" && requireCredentials {
+			return fmt.Errorf("LLM stage %q target %d model %q expands to an empty value", stageName, index, raw)
+		}
+		usedProviders[target.Provider] = struct{}{}
 	}
 	return nil
 }

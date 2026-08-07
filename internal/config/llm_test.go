@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestProjectLLMStageTimeouts(t *testing.T) {
@@ -47,7 +49,8 @@ func TestLoadLLMConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	stage := cfg.Stages["structure"]
-	if stage.Provider != "gemini" || stage.Model != "test-model" || stage.Timeout == 0 || stage.PromptTemplate == "" {
+	if len(stage.Targets) != 1 || stage.Targets[0].Provider != "gemini" || stage.Targets[0].Model != "test-model" ||
+		stage.Timeout == 0 || stage.PromptTemplate == "" {
 		t.Fatalf("structure stage = %+v", stage)
 	}
 	if cfg.Stages["fix"].Timeout.String() != "5m0s" {
@@ -98,10 +101,68 @@ func TestValidateLLMConfigSupportsConfiguredProviderTypes(t *testing.T) {
 			if test.wantType == "deepseek_web" && cfg.Providers["selected"].ProfileDir != "data/browser/deepseek" {
 				t.Fatalf("profile_dir = %q", cfg.Providers["selected"].ProfileDir)
 			}
-			if cfg.Stages["structure"].Model != "model-a" || cfg.Stages["review"].Model != "model-b" {
-				t.Fatalf("stage models were not independent: structure=%q review=%q", cfg.Stages["structure"].Model, cfg.Stages["review"].Model)
+			structureModel := cfg.Stages["structure"].Targets[0].Model
+			reviewModel := cfg.Stages["review"].Targets[0].Model
+			if structureModel != "model-a" || reviewModel != "model-b" {
+				t.Fatalf("stage models were not independent: structure=%q review=%q", structureModel, reviewModel)
 			}
 		})
+	}
+}
+
+// Историческая форма записи стадии остаётся рабочей, но живёт только в YAML: после разбора
+// маршрутизация существует одним способом. Раньше provider/model были полями структуры и
+// расходились с Targets — из-за этого dry-run писал не туда, куда читает роутер.
+func TestLegacyStageFormCollapsesIntoTargets(t *testing.T) {
+	prompt := filepath.Join(t.TempDir(), "prompt.txt")
+	if err := os.WriteFile(prompt, []byte("prompt"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stage LLMStageConfig
+	if err := yaml.Unmarshal([]byte("provider: gemini\nmodel: legacy-model\nprompt: "+prompt+"\n"), &stage); err != nil {
+		t.Fatal(err)
+	}
+	if len(stage.Targets) != 1 || stage.Targets[0].Provider != "gemini" || stage.Targets[0].Model != "legacy-model" {
+		t.Fatalf("одиночная форма не схлопнулась: %+v", stage.Targets)
+	}
+
+	// Targets побеждают: смешанная запись не должна давать два разных маршрута.
+	var mixed LLMStageConfig
+	if err := yaml.Unmarshal([]byte("provider: gemini\nmodel: legacy-model\ntargets:\n  - {provider: deepseek_web, model: deepseek-web}\n"), &mixed); err != nil {
+		t.Fatal(err)
+	}
+	if len(mixed.Targets) != 1 || mixed.Targets[0].Provider != "deepseek_web" {
+		t.Fatalf("одиночная форма перебила targets: %+v", mixed.Targets)
+	}
+}
+
+// Модель из переменной окружения — требование окружения, а не ошибка конфигурации: без
+// учётных данных она допустима, с ними обязана быть заполнена.
+func TestEmptyModelIsRejectedOnlyWhereCredentialsAreRequired(t *testing.T) {
+	prompt := filepath.Join(t.TempDir(), "prompt.txt")
+	if err := os.WriteFile(prompt, []byte("prompt"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.Unsetenv("EMPTY_MODEL_TEST")
+
+	relaxed := testLLMConfig(prompt, "selected", "${EMPTY_MODEL_TEST}", "model-b")
+	relaxed.Providers = map[string]LLMProviderConfig{"selected": {Type: "gemini", APIKeyEnv: "KEY"}}
+	if err := validateLLMConfig(&relaxed, false); err != nil {
+		t.Fatalf("незаданная модель остановила загрузку без учётных данных: %v", err)
+	}
+
+	strict := testLLMConfig(prompt, "selected", "${EMPTY_MODEL_TEST}", "model-b")
+	strict.Providers = map[string]LLMProviderConfig{"selected": {Type: "gemini", APIKeyEnv: "KEY"}}
+	t.Setenv("KEY", "value")
+	if err := validateLLMConfig(&strict, true); err == nil || !strings.Contains(err.Error(), "EMPTY_MODEL_TEST") {
+		t.Fatalf("error = %v, want отказ по незаданной модели", err)
+	}
+
+	// Литерально пустая модель — ошибка конфигурации всегда, окружение тут ни при чём.
+	literal := testLLMConfig(prompt, "selected", "", "model-b")
+	literal.Providers = map[string]LLMProviderConfig{"selected": {Type: "gemini", APIKeyEnv: "KEY"}}
+	if err := validateLLMConfig(&literal, false); err == nil || !strings.Contains(err.Error(), "empty model") {
+		t.Fatalf("error = %v, want отказ по пустой модели", err)
 	}
 }
 
@@ -126,7 +187,7 @@ func testLLMConfig(prompt, provider, structureModel, otherModel string) LLMConfi
 		if name == "structure" {
 			model = structureModel
 		}
-		stages[name] = LLMStageConfig{Provider: provider, Model: model, Prompt: prompt, Temperature: &temperature, MaxTokens: 100, TimeoutText: "1m"}
+		stages[name] = LLMStageConfig{Targets: []LLMTargetConfig{{Provider: provider, Model: model}}, Prompt: prompt, Temperature: &temperature, MaxTokens: 100, TimeoutText: "1m"}
 	}
 	return LLMConfig{Stages: stages}
 }
@@ -249,12 +310,13 @@ func TestTask1StageProvidersMatchConfiguredScheme(t *testing.T) {
 		providers []string
 	}{
 		{stage: "structure", providers: []string{"deepseek_web"}},
-		{stage: "article", providers: []string{"gemini", "deepseek_web"}},
+		{stage: "article", providers: []string{"gemini"}},
 		{stage: "info", providers: []string{"deepseek_web"}},
-		{stage: "review", providers: []string{"gemini", "deepseek_web"}},
+		// Резерва на DeepSeek у Gemini-стадий нет: режимы не смешиваются внутри статьи.
+		{stage: "review", providers: []string{"gemini"}},
 		// fix продолжает чат review и идёт к выбранному там провайдеру; список targets
 		// существует только ради обязательной валидации стадии.
-		{stage: "fix", providers: []string{"gemini", "deepseek_web"}},
+		{stage: "fix", providers: []string{"gemini"}},
 		{stage: "html", providers: []string{"deepseek_web"}},
 	}
 	for _, test := range tests {

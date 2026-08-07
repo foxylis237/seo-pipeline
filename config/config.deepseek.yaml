@@ -1,0 +1,50 @@
+# DeepSeek-only режим: наложение на config/config.yaml.
+#
+# Включается переменной LLM_MODE=deepseek. Здесь перечислено только то, что отличается от
+# базовой конфигурации: провайдер стадии, путь к промпту и флаг одного диалога. Таймауты,
+# температуры и max_tokens остаются в базовом файле и не расходятся между режимами.
+#
+# Все шесть стадий одной статьи идут в ОДНОМ чате DeepSeek: structure -> article -> info ->
+# review -> fix -> html. Новая беседа открывается только при смене статьи. Поэтому промпты
+# здесь свои: они опираются на историю диалога, а не пересылают результат прошлой стадии.
+llm:
+  providers:
+    deepseek_web:
+      single_chat_per_article: true
+
+  stages:
+    structure:
+      targets:
+        - { provider: deepseek_web, model: deepseek-web }
+      prompt: tasks/task_1/prompts/deepseek/structure.txt
+      timeout: 180s
+
+    article:
+      targets:
+        - { provider: deepseek_web, model: deepseek-web }
+      prompt: tasks/task_1/prompts/deepseek/article.txt
+      timeout: 300s
+
+    info:
+      targets:
+        - { provider: deepseek_web, model: deepseek-web }
+      prompt: tasks/task_1/prompts/deepseek/article_info.txt
+      timeout: 300s
+
+    review:
+      targets:
+        - { provider: deepseek_web, model: deepseek-web }
+      prompt: tasks/task_1/prompts/deepseek/review.txt
+      timeout: 300s
+
+    fix:
+      targets:
+        - { provider: deepseek_web, model: deepseek-web }
+      prompt: tasks/task_1/prompts/deepseek/fix_article.txt
+      timeout: 420s
+
+    html:
+      targets:
+        - { provider: deepseek_web, model: deepseek-web }
+      prompt: tasks/task_1/prompts/deepseek/html.txt
+      timeout: 420s

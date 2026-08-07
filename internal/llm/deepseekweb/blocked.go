@@ -27,6 +27,14 @@ func accountUnavailableError(reason string) error {
 	}
 }
 
+// BlockedUntil сообщает, действует ли cooldown аккаунта, не запуская браузер.
+//
+// Нужен проверке перед дорогим прогоном: она обязана назвать причину недоступности провайдера,
+// не открывая профиль и не трогая cookies.
+func BlockedUntil(profileDir string, now time.Time) (until time.Time, reason string, blocked bool) {
+	return readBlockedUntil(profileDir, now)
+}
+
 func blockedStatePath(profileDir string) string {
 	return filepath.Join(profileDir, blockedStateFileName)
 }
@@ -78,13 +86,19 @@ func (c *Client) blockAccount(reason string) error {
 	return accountUnavailableError(reason)
 }
 
+// blockedStateOptions собирает параметры blockedStateJS в одном месте: имена ключей должны
+// совпадать с options.* внутри скрипта, иначе сравнение молча пойдёт с undefined.
+func blockedStateOptions() map[string]any {
+	return map[string]any{
+		"blockedSelector": blockedSelector,
+		"answerSelector":  answerSelector,
+	}
+}
+
 // detectBlocked ищет на открытой странице признаки блокировки, проверки Cloudflare или капчи.
 // Это только распознавание состояния: ничего не обходит и не подменяет.
 func (c *Client) detectBlocked(page playwright.Page) (string, bool) {
-	value, err := page.Evaluate(blockedStateJS, map[string]any{
-		"blockedSelector":  blockedSelector,
-		"composerSelector": composerSelector,
-	})
+	value, err := page.Evaluate(blockedStateJS, blockedStateOptions())
 	if err != nil {
 		return "", false
 	}

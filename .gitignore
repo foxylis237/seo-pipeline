@@ -5,6 +5,8 @@ data/keysso-storage-state.json
 data/keysso-browser-profile/
 data/arsenkin-browser-profile/
 data/browser/deepseek/
+# Состояние доступности LLM-провайдеров: время жизни — сутки, в репозитории не место.
+data/llm/
 
 # Input
 input/**/*.xlsx

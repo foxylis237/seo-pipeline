@@ -8,6 +8,12 @@ const (
 	stopSelector     = `button[aria-label*="stop" i], button[title*="stop" i], [role="button"][aria-label*="stop" i], [data-testid*="stop" i]`
 	loginSelector    = `a[href*="sign_in"], a[href*="login"], form input[type="password"]`
 
+	// Тред DeepSeek — виртуальный список: смонтировано только окно сообщений, остальные
+	// размонтируются при прокрутке. Поэтому число ответов на странице не растёт, и признаком
+	// нового ответа служит ключ элемента: его назначает сам DeepSeek, и он монотонно растёт.
+	itemKeyAttribute = "data-virtual-list-item-key"
+	itemSelector     = `[data-virtual-list-item-key]`
+
 	// blockedSelector перечисляет разметку страниц проверки и капчи. Используется только для
 	// распознавания состояния — ничего не обходит и не подменяет.
 	blockedSelector = `#challenge-running, #cf-challenge-running, #cf-wrapper, .cf-browser-verification, .cf-error-title, ` +
@@ -36,22 +42,30 @@ const chatReadyJS = `(options) => {
 
 // blockedStateJS возвращает причину недоступности аккаунта или пустую строку.
 //
-// Пока поле ввода видно, страница считается рабочей: текст ответа модели может содержать
-// любые слова, и принимать его за блокировку нельзя.
+// Проверка Cloudflare приходит и на рабочей странице чата: сообщение уходит, а вместо ответа
+// внизу появляется заглушка, при этом поле ввода остаётся на месте. Поэтому наличие поля
+// ввода больше не считается признаком исправной страницы — так проверка пропускалась.
+//
+// Чтобы текст модели не принимался за блокировку, содержимое ответов вырезается из текста
+// страницы перед поиском маркеров: сама модель может написать любые слова.
 const blockedStateJS = `(options) => {
   const visible = (element) => {
     const style = window.getComputedStyle(element);
     const rect = element.getBoundingClientRect();
     return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
   };
-  if (Array.from(document.querySelectorAll(options.composerSelector)).some(visible)) return "";
   if (Array.from(document.querySelectorAll(options.blockedSelector)).some(visible)) return "challenge_or_captcha";
-  const text = (document.body ? document.body.innerText || "" : "").slice(0, 4000).toLowerCase();
+  let page = document.body ? document.body.innerText || "" : "";
+  for (const answer of Array.from(document.querySelectorAll(options.answerSelector))) {
+    const answerText = answer.innerText || "";
+    if (answerText.length > 0) page = page.split(answerText).join(" ");
+  }
+  const text = page.slice(0, 8000).toLowerCase();
   const markers = [
     ["account_blocked", ["account has been blocked", "account is blocked", "account has been suspended", "account is suspended", "аккаунт заблокирован", "учетная запись заблокирована"]],
     ["terms_violation", ["violation of our terms", "violates our terms", "нарушение правил", "нарушение условий"]],
     ["access_restricted", ["access denied", "access restricted", "you do not have access", "доступ запрещен", "доступ запрещён", "доступ ограничен"]],
-    ["challenge_or_captcha", ["verify you are human", "verifying you are human", "checking your browser", "unusual traffic", "проверка браузера", "подтвердите, что вы человек"]],
+    ["challenge_or_captcha", ["one more step before you proceed", "verify you are human", "verifying you are human", "checking your browser", "unusual traffic", "проверка браузера", "подтвердите, что вы человек", "ещё один шаг"]],
   ];
   for (const [reason, phrases] of markers) {
     if (phrases.some((phrase) => text.includes(phrase))) return reason;
@@ -78,6 +92,40 @@ const copyLastAnswerJS = `(options) => {
   return "clicked";
 }`
 
+// lastItemKeyJS возвращает наибольший ключ в треде или -1, если список пуст либо не
+// виртуализирован. Значение снимается перед отправкой промпта и служит границей «нового».
+const lastItemKeyJS = `(options) => {
+  let max = -1;
+  for (const item of Array.from(document.querySelectorAll(options.itemSelector))) {
+    const key = Number(item.getAttribute(options.itemKeyAttribute));
+    if (Number.isFinite(key) && key > max) max = key;
+  }
+  return max;
+}`
+
+// clickSendButtonJS нажимает кнопку отправки рядом с полем ввода.
+//
+// Как и «Копировать» под ответом, кнопка опознаётся положением: в блоке поля ввода она самая
+// правая. Ни aria-label, ни title у неё нет, поэтому по атрибутам её не найти.
+const clickSendButtonJS = `(options) => {
+  const visible = (element) => {
+    const style = window.getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
+  };
+  const composer = Array.from(document.querySelectorAll(options.composerSelector)).filter(visible)[0];
+  if (!composer) return "no_composer";
+  let block = composer;
+  for (let i = 0; i < 4 && block.parentElement; i++) block = block.parentElement;
+  const composerTop = composer.getBoundingClientRect().top;
+  const buttons = Array.from(block.querySelectorAll('[role="button"], button'))
+    .filter((button) => visible(button) && button.getBoundingClientRect().top >= composerTop - 4)
+    .sort((left, right) => right.getBoundingClientRect().x - left.getBoundingClientRect().x);
+  if (buttons.length === 0) return "no_button";
+  buttons[0].click();
+  return "clicked";
+}`
+
 // answerSourcesJS собирает всё, что страница может рассказать про последний ответ.
 const answerSourcesJS = `(options) => {
   const visible = (element) => {
@@ -99,31 +147,70 @@ const answerSourcesJS = `(options) => {
   };
 }`
 
+// freshAnswerJS — общая часть: возвращает элемент ответа, появившегося после отправки
+// промпта, или null. Подставляется в начало скриптов ожидания, чтобы правило поиска нового
+// ответа было ровно одно.
+//
+// Пока тред виртуализирован, ориентир — ключ элемента. Запасной путь по количеству нужен на
+// случай, если разметка списка изменится: тогда поведение вернётся к прежнему.
+const freshAnswerJS = `
+  const visible = (element) => {
+    const style = window.getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
+  };
+  const findFreshAnswer = () => {
+    const items = Array.from(document.querySelectorAll(options.itemSelector));
+    if (items.length === 0) {
+      const answers = Array.from(document.querySelectorAll(options.answerSelector)).filter(visible);
+      return answers.length > options.previousCount ? answers[answers.length - 1] : null;
+    }
+    let bestKey = options.previousKey;
+    let found = null;
+    for (const item of items) {
+      const key = Number(item.getAttribute(options.itemKeyAttribute));
+      if (!Number.isFinite(key) || key <= options.previousKey || key < bestKey) continue;
+      const answer = item.querySelector(options.answerSelector);
+      if (!answer) continue;
+      bestKey = key;
+      found = answer;
+    }
+    return found;
+  };
+`
+
 // responseStateJS reports what the page is doing while the answer is awaited:
 // generating — ответ уже появился или видна кнопка остановки, waiting — ещё ничего нет.
-const responseStateJS = `(options) => {
-  const visible = (element) => {
-    const style = window.getComputedStyle(element);
-    const rect = element.getBoundingClientRect();
-    return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
-  };
-  const answers = Array.from(document.querySelectorAll(options.answerSelector)).filter(visible);
+const responseStateJS = `(options) => {` + freshAnswerJS + `
   const stopVisible = Array.from(document.querySelectorAll(options.stopSelector)).some(visible);
-  return (answers.length > options.previousCount || stopVisible) ? "generating" : "waiting";
+  return (findFreshAnswer() !== null || stopVisible) ? "generating" : "waiting";
 }`
 
-const completedAnswerJS = `(options) => {
+// completedAnswerJS решает, дописан ли ответ.
+//
+// Раньше единственным признаком была неизменность текста в течение нескольких секунд, а
+// проверка кнопки остановки не работала: stopSelector ищет её по aria-label и title, которых
+// у кнопок DeepSeek нет (см. комментарий к copyLastAnswerJS). Из-за этого любая пауза стрима
+// принималась за конец ответа, статья сохранялась обрезанной, а следующий промпт уходил в
+// поле ввода во время генерации — и не отправлялся.
+//
+// Теперь основной признак положительный: панель действий под ответом («Копировать» и
+// соседние кнопки) появляется только после того, как генерация закончилась. Она ищется той
+// же геометрией, что и в copyLastAnswerJS. Пока панели нет, ответ считается незавершённым и
+// используется запасной признак — заметно более длинная стабилизация текста.
+const completedAnswerJS = `(options) => {` + freshAnswerJS + `
   const stateKey = "__seoPipelineDeepSeekResponseState";
-  const visible = (element) => {
-    const style = window.getComputedStyle(element);
-    const rect = element.getBoundingClientRect();
-    return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
-  };
-  const answers = Array.from(document.querySelectorAll(options.answerSelector)).filter(visible);
-  if (answers.length <= options.previousCount) return false;
-  const answer = answers[answers.length - 1];
+  const answer = findFreshAnswer();
+  if (!answer) return false;
   const text = (answer.innerText || answer.textContent || "").trim();
   const stopVisible = Array.from(document.querySelectorAll(options.stopSelector)).some(visible);
+
+  let block = answer;
+  for (let i = 0; i < 3 && block.parentElement; i++) block = block.parentElement;
+  const answerBottom = answer.getBoundingClientRect().bottom;
+  const actionsReady = Array.from(block.querySelectorAll('[role="button"]'))
+    .some((button) => visible(button) && button.getBoundingClientRect().top >= answerBottom - 4);
+
   const now = performance.now();
   let state = window[stateKey];
   if (!state || state.element !== answer || state.text !== text || stopVisible) {
@@ -131,7 +218,9 @@ const completedAnswerJS = `(options) => {
     window[stateKey] = state;
     return false;
   }
-  return text.length > 0 && now - state.changedAt >= options.stableForMs;
+  if (text.length === 0) return false;
+  if (actionsReady) return now - state.changedAt >= options.settledForMs;
+  return now - state.changedAt >= options.stableForMs;
 }`
 
 func isLoginURL(value string) bool {
