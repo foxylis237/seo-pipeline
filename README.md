@@ -85,7 +85,7 @@ Makefile — короткая оболочка над существующим C
 | `task-1 import` | Импортирует все заполненные строки Excel. | Необязательный положительный лимит строк данных. | `make task-1 import` или `make task-1 import 10` | `go run ./cmd/seo-pipeline task-1 import [limit]` |
 | `task-1 import-check` | Проверяет корректность импорта Excel перед запуском генерации: полноту переноса, уникальность `external_id`, совпадение полей и связь `articles ↔ article_inputs`. Данные не изменяет, внешние сервисы не вызывает. | Необязательный `external_id` из Excel. | `make task-1 import-check` или `make task-1 import-check 37` | `go run ./cmd/seo-pipeline task-1 import-check [external_id]` |
 | `task-1 errors` | Показывает статьи с текущей сохранённой ошибкой. | Необязательный `external_id` из Excel. | `make task-1 errors` или `make task-1 errors 57` | `go run ./cmd/seo-pipeline task-1 errors [external_id]` |
-| `task-1 retry` | Последовательно повторяет ошибочные статьи через сокращённый demo-flow. | Необязательный `external_id` из Excel. | `make task-1 retry` или `make task-1 retry 57` | `go run ./cmd/seo-pipeline task-1 retry [external_id]` |
+| `task-1 retry` | Последовательно повторяет ошибочные статьи полным pipeline с возобновлением — тем же раннером, что и `run`. | Необязательный `external_id` из Excel. | `make task-1 retry` или `make task-1 retry 57` | `go run ./cmd/seo-pipeline task-1 retry [external_id]` |
 | `task-1 run` | Полный pipeline `prepare → structure → article/info → review → fix → html → result` с возобновлением: готовые этапы пропускаются. Без ID берёт все статьи, кроме `completed`. | Необязательный ID; `plan` показывает точку возобновления, ничего не выполняя. | `make task-1 run`, `make task-1 run 37`, `make task-1 run plan` | `go run ./cmd/seo-pipeline task-1 run [--plan] [external_id]` |
 | `task-1 dry-run` | Поднимает тестовую БД, запускает тесты, vet и полный локальный pipeline на stub-данных. | Нет. | `make task-1 dry-run` | См. раздел «Dry-run». |
 | `task-1 prepare` | Собирает отсутствующий Keys.so и Arsenkin research. | Необязательный ID. | `make task-1 prepare` или `make task-1 prepare 37` | `go run ./cmd/seo-pipeline task-1 prepare [external_id]` |
@@ -327,7 +327,7 @@ make task-1 retry
 make task-1 retry 57
 ```
 
-Число — это `external_id` из Excel. `retry` обрабатывает статьи последовательно тем же сокращённым flow, что и `demo-generate`: `prepare → structure → article/info → result`, без Review, Fix и HTML. Существующие research и файлы Structure/Article/Result не удаляются. Ошибка очищается только непосредственно перед повтором конкретной статьи; при новом сбое новая ошибка снова сохраняется штатной логикой пайплайна, а batch продолжает следующие статьи. Записи без текущей ошибки не затрагиваются.
+Число — это `external_id` из Excel. `retry` обрабатывает статьи последовательно тем же полным flow с возобновлением, что и `run`: `prepare → structure → article/info → review → fix → html → result`. Готовые этапы пропускаются — признаком служит сохранённый артефакт, поэтому существующие research и файлы Structure/Article/Review/Fix/HTML не удаляются и не переделываются. Статья получает статус `completed` только после `html` и сборки `result.md`. Ошибка очищается только непосредственно перед повтором конкретной статьи; при новом сбое новая ошибка снова сохраняется штатной логикой пайплайна, а batch продолжает следующие статьи. Записи без текущей ошибки не затрагиваются.
 
 ## Dry-run
 

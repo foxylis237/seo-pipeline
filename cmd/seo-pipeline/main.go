@@ -216,6 +216,53 @@ func main() {
 				return mode.stage(ctx, externalID, run)
 			}, taskLogger)
 		}
+		// Полный пайплайн с возобновлением: этапы выполняются существующими сервисами,
+		// раннер лишь выбирает, с какого продолжить.
+		execute := func(pipeline *generation.Pipeline) func(context.Context, pipelineStage, string) error {
+			return func(ctx context.Context, stage pipelineStage, externalID string) error {
+				switch stage {
+				case stagePrepare:
+					if validateErr := cfg.ValidatePrepare(); validateErr != nil {
+						return validateErr
+					}
+					return runPrepare(ctx, articleRepository, cfg, taskLogger, writer, logRouter, externalID)
+				case stageStructure:
+					_, stageErr := pipeline.RunStructureByExternalID(ctx, externalID)
+					return stageErr
+				case stageArticle:
+					return runArticle(ctx, pipeline, externalID)
+				case stageReview:
+					return runReview(ctx, pipeline, externalID)
+				case stageFix:
+					return runFix(ctx, pipeline, externalID)
+				case stageHTML:
+					return runHTML(ctx, pipeline, externalID)
+				case stageResult:
+					if _, buildErr := resultService.Build(ctx, externalID); buildErr != nil {
+						return buildErr
+					}
+					resultInput, loadErr := articleRepository.GetResultInput(ctx, externalID)
+					if loadErr != nil {
+						return loadErr
+					}
+					return articleRepository.CompleteGeneration(ctx, resultInput.Article.ID)
+				default:
+					return fmt.Errorf("неизвестный этап пайплайна %q", stage)
+				}
+			}
+		}
+		// Единственный полный прогон статьи: его делят run, regenerate и retry. У retry был
+		// собственный demo-путь, который завершал статью после article/info, минуя review,
+		// fix и html, — поэтому раннер объявлен здесь, а не внутри ветки run.
+		//
+		// Схема выбирается на статью: раньше run был единственной генерационной командой
+		// вообще без переключения режима — исчерпание квоты Gemini не выключало провайдера
+		// и не переводило статью на DeepSeek.
+		runOne := func(ctx context.Context, externalID string) error {
+			scheme, pipeline := mode.pipelineFor(externalID)
+			runErr := runFullPipeline(ctx, articleRepository, execute(pipeline), taskLogger, externalID)
+			return mode.guard(ctx, externalID, scheme, runErr)
+		}
 		switch command.Name {
 		case "generate":
 			if command.ExternalID == "" {
@@ -229,49 +276,6 @@ func main() {
 			if command.Plan {
 				err = runPipelinePlan(ctx, articleRepository, os.Stdout, command.ExternalID)
 				break
-			}
-			// Полный пайплайн с возобновлением: этапы выполняются существующими сервисами,
-			// раннер лишь выбирает, с какого продолжить.
-			execute := func(pipeline *generation.Pipeline) func(context.Context, pipelineStage, string) error {
-				return func(ctx context.Context, stage pipelineStage, externalID string) error {
-					switch stage {
-					case stagePrepare:
-						if validateErr := cfg.ValidatePrepare(); validateErr != nil {
-							return validateErr
-						}
-						return runPrepare(ctx, articleRepository, cfg, taskLogger, writer, logRouter, externalID)
-					case stageStructure:
-						_, stageErr := pipeline.RunStructureByExternalID(ctx, externalID)
-						return stageErr
-					case stageArticle:
-						return runArticle(ctx, pipeline, externalID)
-					case stageReview:
-						return runReview(ctx, pipeline, externalID)
-					case stageFix:
-						return runFix(ctx, pipeline, externalID)
-					case stageHTML:
-						return runHTML(ctx, pipeline, externalID)
-					case stageResult:
-						if _, buildErr := resultService.Build(ctx, externalID); buildErr != nil {
-							return buildErr
-						}
-						resultInput, loadErr := articleRepository.GetResultInput(ctx, externalID)
-						if loadErr != nil {
-							return loadErr
-						}
-						return articleRepository.CompleteGeneration(ctx, resultInput.Article.ID)
-					default:
-						return fmt.Errorf("неизвестный этап пайплайна %q", stage)
-					}
-				}
-			}
-			// Схема выбирается на статью и здесь: раньше run был единственной генерационной
-			// командой вообще без переключения режима — исчерпание квоты Gemini не выключало
-			// провайдера и не переводило статью на DeepSeek.
-			runOne := func(ctx context.Context, externalID string) error {
-				scheme, pipeline := mode.pipelineFor(externalID)
-				runErr := runFullPipeline(ctx, articleRepository, execute(pipeline), taskLogger, externalID)
-				return mode.guard(ctx, externalID, scheme, runErr)
 			}
 			if command.Name == "regenerate" {
 				err = runRegenerate(ctx, articleRepository, writer, runOne, taskLogger, command.ExternalID)
@@ -293,7 +297,9 @@ func main() {
 				err = runPreparedDemo(ctx, command.ExternalID)
 			}
 		case "retry":
-			err = runRetry(ctx, articleRepository, command.ExternalID, runPreparedDemo, taskLogger)
+			// Тот же раннер, что у run: retry снимает сохранённую ошибку и доводит статью
+			// до конца через review, fix и html, а не завершает её сразу после article/info.
+			err = runRetry(ctx, articleRepository, command.ExternalID, runOne, taskLogger)
 		case "article", "info":
 			err = stageOperation(command.Name, runArticle)
 		case "review":

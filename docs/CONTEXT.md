@@ -196,8 +196,10 @@ domain events не вводим — см. [.claude/rules/architecture.md](../.cl
 
 - **Полный поток** (`generate`) — все шесть стадий: structure → article + info → review →
   fix → html → result.
-- **Demo-поток** (`demo-generate`, `retry`) — сокращённый: prepare → structure →
+- **Demo-поток** (`demo-generate`) — сокращённый: prepare → structure →
   article + info → result. Без review, fix и html.
+- **`retry`** — тот же полный поток с возобновлением, что у `run`, но только для статей
+  с сохранённой ошибкой: она снимается непосредственно перед повтором.
 - **`run <external_id>`** — самый короткий: article + info → result, **без research**.
   Промпт получает пустые `{{.GeneratedStructure}}`, `{{.Keywords}}`, `{{.LSIWords}}`,
   поэтому результат заведомо низкого качества.
