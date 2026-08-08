@@ -70,22 +70,39 @@ func (w *Writer) SaveDiagnostics(externalID, slug, subdirectory, name string, pa
 	if err != nil {
 		return "", err
 	}
+	encoded, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("закодировать диагностику %s: %w", name, err)
+	}
+	return w.saveDiagnosticsFile(directory, subdirectory, name, append(encoded, '\n'))
+}
+
+// SaveDiagnosticsText atomically writes one plain-text diagnostics file into a subdirectory of
+// the article directory and returns its path relative to the output root.
+//
+// Дамп сырого ответа модели — не артефакт статьи: он ничего не публикует в БД и живёт вне
+// пары «файл + статус». Пустой slug означает «найти каталог статьи по external_id»: на стадии
+// падения каталог уже существует.
+func (w *Writer) SaveDiagnosticsText(externalID, slug, subdirectory, name, content string) (string, error) {
+	directory, err := w.resolveArticleDirectory(externalID, slug)
+	if err != nil {
+		return "", err
+	}
+	return w.saveDiagnosticsFile(directory, subdirectory, name, []byte(content))
+}
+
+func (w *Writer) saveDiagnosticsFile(directory, subdirectory, name string, data []byte) (string, error) {
 	if err := validatePathPart("subdirectory", subdirectory); err != nil {
 		return "", err
 	}
 	if err := validatePathPart("diagnostics file", name); err != nil {
 		return "", err
 	}
-	encoded, err := json.MarshalIndent(payload, "", "  ")
-	if err != nil {
-		return "", fmt.Errorf("закодировать диагностику %s: %w", name, err)
-	}
-	encoded = append(encoded, '\n')
 	if err := os.MkdirAll(filepath.Join(w.root, directory, subdirectory), 0o755); err != nil {
 		return "", fmt.Errorf("создать каталог диагностики: %w", err)
 	}
 	relativePath := filepath.ToSlash(filepath.Join(directory, subdirectory, name))
-	pending, err := w.stage(ArticlePaths{}, []fileContent{{relativePath, encoded}})
+	pending, err := w.stage(ArticlePaths{}, []fileContent{{relativePath, data}})
 	if err != nil {
 		return "", fmt.Errorf("подготовить диагностику %s: %w", name, err)
 	}

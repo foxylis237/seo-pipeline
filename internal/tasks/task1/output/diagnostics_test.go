@@ -35,6 +35,31 @@ func TestSaveDiagnosticsWritesJSONIntoArticleDirectory(t *testing.T) {
 	}
 }
 
+func TestSaveDiagnosticsTextWritesRawResponseNextToLogs(t *testing.T) {
+	root := t.TempDir()
+	writer := NewWriter(root)
+	if err := os.MkdirAll(filepath.Join(root, "52-kak-stat-logopedom"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	response := "```html\n<h1>Тема</h1>"
+
+	// Пустой slug: на упавшей стадии каталог статьи уже есть, а slug знать необязательно.
+	path, err := writer.SaveDiagnosticsText("52", "", LogsSubdirectory, "validate_html_failed.txt", response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "52-kak-stat-logopedom/logs/validate_html_failed.txt"; path != want {
+		t.Fatalf("path = %q, want %q", path, want)
+	}
+	data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(path)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != response {
+		t.Fatalf("содержимое = %q, want %q", data, response)
+	}
+}
+
 func TestSaveDiagnosticsReplacesPreviousRun(t *testing.T) {
 	root := t.TempDir()
 	writer := NewWriter(root)

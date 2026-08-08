@@ -496,6 +496,37 @@ func (p *Pipeline) runFix(ctx context.Context, input article.GenerationInput, ch
 	return stageOutput{Text: text, Paths: paths}, nil
 }
 
+// htmlResponseDumpName holds the model response that failed validation, next to the run logs:
+// generated/ is wiped before a repeated run, and the dump has to outlive it.
+const htmlResponseDumpName = "validate_html_failed.txt"
+
+// htmlResponseDumper writes a plain-text diagnostics file into the article directory. Объявлен
+// у потребителя и намеренно узкий: дамп нужен одной стадии, и реализовывать его в каждом
+// тестовом writer-е незачем.
+type htmlResponseDumper interface {
+	SaveDiagnosticsText(externalID, slug, subdirectory, name, content string) (string, error)
+}
+
+// Дамп берётся type assertion-ом, поэтому расхождение с боевым writer-ом иначе всплыло бы
+// только на упавшем прогоне — и ровно тогда, когда дамп и нужен.
+var _ htmlResponseDumper = (*articleoutput.Writer)(nil)
+
+// dumpHTMLResponse сохраняет ответ модели, на котором упала валидация: без него разбор
+// падения остаётся вслепую. Ошибка записи дампа не подменяет ошибку стадии — она только
+// уходит в лог, иначе диагностика скрыла бы настоящую причину остановки.
+func (p *Pipeline) dumpHTMLResponse(logger *slog.Logger, input article.GenerationInput, response string) {
+	dumper, ok := p.writer.(htmlResponseDumper)
+	if !ok {
+		return
+	}
+	path, err := dumper.SaveDiagnosticsText(input.Article.ExternalID, input.Article.Slug, articleoutput.LogsSubdirectory, htmlResponseDumpName, response)
+	if err != nil {
+		logger.Warn("failed to save raw HTML response", "stage", "validate_html", "error", err)
+		return
+	}
+	logger.Info("raw HTML response saved", "stage", "validate_html", "result_path", path)
+}
+
 func (p *Pipeline) runHTML(ctx context.Context, input article.GenerationInput, fixedArticle string) (stageOutput, error) {
 	started := time.Now()
 	logger := p.logger.With("article_id", input.Article.ID, "external_id", input.Article.ExternalID)
@@ -511,8 +542,12 @@ func (p *Pipeline) runHTML(ctx context.Context, input article.GenerationInput, f
 	if err != nil {
 		return stageOutput{}, p.fail(ctx, logger, input, "html_generation", err)
 	}
-	html, err := normalizeAndValidateHTML(result.Text)
+	html, cleanup, err := normalizeAndValidateHTML(result.Text)
+	if cleanup.Applied() {
+		logger.Warn("markdown wrapper removed from HTML response", "stage", "validate_html", "cleanup", cleanup.Kind, "size_before", cleanup.SizeBefore, "size_after", cleanup.SizeAfter)
+	}
 	if err != nil {
+		p.dumpHTMLResponse(logger, input, result.Text)
 		return stageOutput{}, p.fail(ctx, logger, input, "validate_html", err)
 	}
 	if err := ctx.Err(); err != nil {
