@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
 	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/article"
@@ -84,24 +83,6 @@ func runSelectedArticles(
 func runGenerate(ctx context.Context, pipeline *generation.Pipeline, externalID string) error {
 	_, err := pipeline.RunByExternalID(ctx, externalID)
 	return err
-}
-
-func runDemoGenerate(ctx context.Context, pipeline *generation.Pipeline, externalID string) error {
-	_, err := pipeline.RunDemoByExternalID(ctx, externalID)
-	return err
-}
-
-func runDemoWithoutRecordedError(selected article.Article, logger *slog.Logger, run func() error) error {
-	if selected.ErrorMessage == nil || strings.TrimSpace(*selected.ErrorMessage) == "" {
-		return run()
-	}
-	logger.Warn(
-		"article skipped because it has a recorded error",
-		"article_id", selected.ID,
-		"external_id", selected.ExternalID,
-		"error_message", *selected.ErrorMessage,
-	)
-	return nil
 }
 
 func runQuickDemoGenerate(ctx context.Context, pipeline *generation.Pipeline, externalID string) error {

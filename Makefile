@@ -34,7 +34,7 @@ help: ## Show all available commands
 	@printf '  %-32s %s\n' 'make task-1 dry-run' 'Run the isolated local pipeline'
 	@printf '  %-32s %s\n' 'make task-1 prepare [ID]' 'Collect pending research or process one article'
 	@printf '  %-32s %s\n' 'make task-1 generate [ID]' 'Run pending full flows or process one article'
-	@printf '  %-32s %s\n' 'make task-1 demo-generate [ID]' 'Resume the demo generation flow'
+	@printf '  %-32s %s\n' 'make task-1 demo-generate [ID]' 'Rebuild the DEMO folder of every article or of one'
 	@printf '  %-32s %s\n' 'make task-1 article [ID]' 'Generate pending article text/metadata or one article'
 	@printf '  %-32s %s\n' 'make task-1 info [ID]' 'Generate pending article text/metadata or one article'
 	@printf '  %-32s %s\n' 'make task-1 review [ID]' 'Review pending generated articles or one article'

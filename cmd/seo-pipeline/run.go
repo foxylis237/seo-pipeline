@@ -104,9 +104,11 @@ func runPrepare(
 	return nil
 }
 
+// prepareArticle собирает research одной статьи. Репозиторий принимается интерфейсом, потому
+// что demo-сборке нужен тот же сбор, но без переходов состояния статьи.
 func prepareArticle(
 	ctx context.Context,
-	articleRepository *repository.ArticleRepository,
+	articleRepository prepareRepository,
 	cfg config.Config,
 	logger *slog.Logger,
 	writer *articleoutput.Writer,

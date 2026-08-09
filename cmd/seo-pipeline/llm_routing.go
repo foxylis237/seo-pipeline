@@ -223,13 +223,15 @@ func buildLLM(ctx context.Context, configs stageConfigs, availability geminiAvai
 	// review и fix идут одним чатом: fix опирается на историю, а не на повторную передачу
 	// статьи и ревью.
 	pipelines := make(map[schemeName]*generation.Pipeline, len(schemes))
+	routers := make(map[schemeName]*llm.Router, len(schemes))
 	for name, stageSet := range schemes {
 		router := llm.NewRouter(stageSet, clients, deps.logger)
+		routers[name] = router
 		pipelines[name] = generation.NewPipeline(deps.repository, router, router.NewStageChatFactory("review", "fix"),
 			deps.writer, deps.logger, deps.result)
 	}
 	return &articleMode{
-		pipelines: pipelines, resolver: resolver, availability: availability, logger: deps.logger,
+		pipelines: pipelines, routers: routers, resolver: resolver, availability: availability, logger: deps.logger,
 	}, closeAll, nil
 }
 

@@ -743,10 +743,6 @@ func (r *ArticleRepository) GetPendingForOperation(ctx context.Context, operatio
 		predicate = `
 			a.status <> 'completed'
 			AND NULLIF(BTRIM(COALESCE(r.competitor_structure, '')), '') IS NOT NULL`
-	case "demo-generate":
-		predicate = `
-			a.status <> 'completed'
-			AND (a.error_message IS NULL OR BTRIM(a.error_message) = '')`
 	case "article", "info":
 		predicate = `
 			a.status <> 'completed'

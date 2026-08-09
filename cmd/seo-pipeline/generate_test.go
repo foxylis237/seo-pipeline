@@ -1,60 +1,46 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"io"
 	"log/slog"
 	"reflect"
-	"strings"
 	"testing"
 
 	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/article"
 )
 
-func TestRunDemoWithoutRecordedErrorSkipsArticleWithoutChangingState(t *testing.T) {
-	step := "arsenkin_collection"
+// Пакетная demo-сборка обходит выборку GetAll: статус и сохранённая ошибка не исключают
+// статью, а падение одной не прекращает обход — иначе одна сломанная статья лишила бы
+// материалов все следующие.
+func TestRunSelectedArticlesCoversEveryStateAndSurvivesFailure(t *testing.T) {
 	errorMessage := "Keys.so timeout"
-	selected := article.Article{
-		ID: 37, ExternalID: "57", Status: "failed",
-		CurrentStep: &step, ErrorMessage: &errorMessage,
+	selected := []article.Article{
+		{ID: 1, ExternalID: "11", Status: "completed"},
+		{ID: 2, ExternalID: "12", Status: "failed", ErrorMessage: &errorMessage},
+		{ID: 3, ExternalID: "13", Status: "pending"},
 	}
-	before := selected
-	called := false
-	var logs bytes.Buffer
-	err := runDemoWithoutRecordedError(selected, slog.New(slog.NewTextHandler(&logs, nil)), func() error {
-		called = true
+	before := append([]article.Article(nil), selected...)
+	wantErr := errors.New("demo failed")
+	var calls []string
+	err := runSelectedArticles(context.Background(), selected, "demo-generate", func(_ context.Context, externalID string) error {
+		calls = append(calls, externalID)
+		if externalID == "12" {
+			return wantErr
+		}
 		return nil
-	})
-	if err != nil || called {
-		t.Fatalf("err = %v, pipeline called = %v", err, called)
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if !reflect.DeepEqual(calls, []string{"11", "12", "13"}) {
+		t.Fatalf("calls = %v, want all three articles", calls)
+	}
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("batch error = %v, want wrapped %v", err, wantErr)
 	}
 	if !reflect.DeepEqual(selected, before) {
 		t.Fatalf("article state changed: got %+v, want %+v", selected, before)
 	}
-	for _, expected := range []string{"article skipped because it has a recorded error", "article_id=37", "external_id=57", `error_message="Keys.so timeout"`} {
-		if !strings.Contains(logs.String(), expected) {
-			t.Fatalf("log %q does not contain %q", logs.String(), expected)
-		}
-	}
 }
-
-func TestRunDemoWithoutRecordedErrorRunsArticleWithNoMeaningfulError(t *testing.T) {
-	for _, errorMessage := range []*string{nil, stringPointer(""), stringPointer("   \t")} {
-		called := false
-		err := runDemoWithoutRecordedError(
-			article.Article{ID: 1, ExternalID: "11", ErrorMessage: errorMessage},
-			slog.New(slog.NewTextHandler(io.Discard, nil)),
-			func() error { called = true; return nil },
-		)
-		if err != nil || !called {
-			t.Fatalf("error_message = %v: err = %v, pipeline called = %v", errorMessage, err, called)
-		}
-	}
-}
-
-func stringPointer(value string) *string { return &value }
 
 type queuedArticles struct {
 	articles []article.Article

@@ -17,6 +17,7 @@ import (
 	"github.com/foxylis237/seo-pipeline/internal/integrations/arsenkin"
 	"github.com/foxylis237/seo-pipeline/internal/storage"
 	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/article"
+	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/demo"
 	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/diagnostics"
 	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/generation"
 	articleoutput "github.com/foxylis237/seo-pipeline/internal/tasks/task1/output"
@@ -182,29 +183,16 @@ func main() {
 			err = buildErr
 			break
 		}
-		runPreparedDemo := func(ctx context.Context, externalID string) error {
-			saved, loadErr := articleRepository.GetSavedGenerationInput(ctx, externalID)
-			if loadErr != nil {
-				return loadErr
-			}
-			return runDemoWithoutRecordedError(saved.Article, taskLogger, func() error {
-				if saved.Article.Status == "completed" {
-					return mode.stage(ctx, externalID, runDemoGenerate)
-				}
-				prepared, researchErr := articleRepository.HasPreparedResearch(ctx, externalID)
-				if researchErr != nil {
-					return researchErr
-				}
-				if !prepared {
-					if validateErr := cfg.ValidatePrepare(); validateErr != nil {
-						return validateErr
-					}
-					if prepareErr := runPrepare(ctx, articleRepository, cfg, taskLogger, writer, logRouter, externalID); prepareErr != nil {
-						return prepareErr
-					}
-				}
-				return mode.stage(ctx, externalID, runDemoGenerate)
+		// DEMO собирается отдельной операцией: статус, current_step и error_message статьи
+		// её не выбирают и ею не меняются, а маршрутизация берётся та же, что у боевого
+		// прогона этой статьи.
+		buildDemo := func(ctx context.Context, externalID string) error {
+			preparer := demo.PrepareFunc(func(ctx context.Context, externalID string) error {
+				return runDemoPrepare(ctx, articleRepository, cfg, taskLogger, writer, logRouter, externalID)
 			})
+			builder := demo.NewBuilder(cfg.OutputDir, articleRepository, writer, resultService,
+				mode.routerFor(externalID), preparer, taskLogger)
+			return builder.Build(ctx, externalID)
 		}
 		// Одна форма для всех одностадийных команд: схема выбирается на статью, режим не
 		// переключается. Раньше эти восемь веток отличались только именем операции.
@@ -292,9 +280,16 @@ func main() {
 			}
 		case "demo-generate":
 			if command.ExternalID == "" {
-				err = runBatchOperation(ctx, articleRepository, "demo-generate", runPreparedDemo, taskLogger)
+				// Все статьи, а не подмножество по состоянию: DEMO пересобирается и для
+				// completed, и для failed. Ошибка одной статьи не прекращает обход, но
+				// возвращается наружу — процесс завершится ненулевым кодом.
+				var all []article.Article
+				if all, err = articleRepository.GetAll(ctx); err != nil {
+					break
+				}
+				err = runSelectedArticles(ctx, all, "demo-generate", buildDemo, taskLogger)
 			} else {
-				err = runPreparedDemo(ctx, command.ExternalID)
+				err = buildDemo(ctx, command.ExternalID)
 			}
 		case "retry":
 			// Тот же раннер, что у run: retry снимает сохранённую ошибку и доводит статью

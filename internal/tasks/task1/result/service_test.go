@@ -155,6 +155,65 @@ func TestBuildAllowsEmptyMappedFieldsAndLogsWarnings(t *testing.T) {
 	}
 }
 
+// RenderForDemo обязан отдать result.md на любой статье: demo-папка собирается и до того,
+// как статья прошла пайплайн, — иначе проверять результат было бы не по чему.
+func TestRenderForDemoFillsKnownFieldsAndLeavesMissingEmpty(t *testing.T) {
+	root := t.TempDir()
+	input := article.ResultInput{
+		Article:  article.Article{ID: 9, ExternalID: "39", Title: "Как стать логопедом", Slug: "logoped"},
+		Category: "Профессии", Tags: "метки", TLDR: "коротко", Author: "Редакция", Keyword: "логопед",
+		FAQ:      "Вопрос: Что?\nОтвет: Это.",
+		HTMLPath: "39-logoped/article.html",
+	}
+	var logs bytes.Buffer
+	service := NewService(fakeRepository{input}, articleoutput.NewWriter(root), slog.New(slog.NewTextHandler(&logs, nil)))
+	service.templatePath = filepath.Join("..", "..", "..", "..", "tasks", "task_1", "templates", "result.md.tmpl")
+
+	rendered, err := service.RenderForDemo(context.Background(), "39", strings.Repeat("слово ", 180))
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertResultField(t, rendered, "Название", "Как стать логопедом")
+	assertResultField(t, rendered, "Рубрика", "Профессии")
+	assertResultField(t, rendered, "Время чтения", "1 мин")
+	// Незаполненные поля остаются пустыми, а не срывают сборку.
+	assertResultField(t, rendered, "Мета-описание", "")
+	assertResultField(t, rendered, "Файл статьи", "")
+	// HTML на диске нет — путь не выдаётся за существующий файл.
+	assertResultField(t, rendered, "HTML", "")
+	if !strings.Contains(rendered, "Вопрос: Что?") && !strings.Contains(rendered, "Что?") {
+		t.Fatalf("FAQ не отрендерен: %q", rendered)
+	}
+	if strings.Contains(rendered, "<nil>") {
+		t.Fatalf("пустое поле отрендерено как nil: %q", rendered)
+	}
+	if entries, readErr := os.ReadDir(root); readErr != nil || len(entries) != 0 {
+		t.Fatalf("RenderForDemo записал файлы: %v, %v", entries, readErr)
+	}
+}
+
+func TestRenderForDemoSurvivesUnparsableFAQ(t *testing.T) {
+	input := article.ResultInput{
+		Article: article.Article{ID: 10, ExternalID: "40", Title: "Заголовок", Slug: "slug"},
+		FAQ:     "просто текст без маркеров",
+	}
+	var logs bytes.Buffer
+	service := NewService(fakeRepository{input}, articleoutput.NewWriter(t.TempDir()), slog.New(slog.NewTextHandler(&logs, nil)))
+	service.templatePath = filepath.Join("..", "..", "..", "..", "tasks", "task_1", "templates", "result.md.tmpl")
+
+	rendered, err := service.RenderForDemo(context.Background(), "40", "")
+	if err != nil {
+		t.Fatalf("RenderForDemo() = %v, want отрендеренный result.md", err)
+	}
+	assertResultField(t, rendered, "Название", "Заголовок")
+	if strings.Contains(rendered, "## Вопрос 1") {
+		t.Fatalf("неразобранный FAQ попал в result.md: %q", rendered)
+	}
+	if !strings.Contains(logs.String(), "FAQ не разобран") {
+		t.Fatalf("предупреждение о FAQ не записано: %s", logs.String())
+	}
+}
+
 func assertResultField(t *testing.T, result, label, want string) {
 	t.Helper()
 	block := "## " + label + "\n\n```text\n" + want + "\n```"

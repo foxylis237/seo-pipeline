@@ -1,7 +1,11 @@
 // Package article содержит модели SEO-пайплайна.
 package article
 
-import "time"
+import (
+	"fmt"
+	"strings"
+	"time"
+)
 
 // Article представляет статью, сохранённую в PostgreSQL.
 type Article struct {
@@ -66,6 +70,19 @@ type ImportedArticle struct {
 type KeywordFrequency struct {
 	Query     string `json:"query"`
 	Frequency int    `json:"frequency"`
+}
+
+// FormatKeywords готовит ключи для подстановки в промпт: запрос, табуляция, частотность.
+// Формат принадлежит модели, потому что его подставляют и боевые стадии, и demo-сборка.
+func FormatKeywords(keywords []KeywordFrequency) string {
+	var result strings.Builder
+	for index, keyword := range keywords {
+		if index > 0 {
+			result.WriteByte('\n')
+		}
+		fmt.Fprintf(&result, "%s\t%d", keyword.Query, keyword.Frequency)
+	}
+	return result.String()
 }
 
 // GenerationInput contains persisted research required by implemented generation stages.

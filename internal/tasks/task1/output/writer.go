@@ -393,14 +393,28 @@ func (w *Writer) StageArticle(externalID, slug, prompt, text, model string) (*Pe
 }
 
 func (w *Writer) articlePaths(externalID, slug string) (ArticlePaths, string, error) {
-	if err := validatePathPart("external ID", externalID); err != nil {
+	paths, err := Paths(externalID, slug)
+	if err != nil {
 		return ArticlePaths{}, "", err
+	}
+	return paths, filepath.Join(w.root, DirectoryName(externalID, slug)), nil
+}
+
+// DirectoryName is the per-article directory relative to the output root.
+func DirectoryName(externalID, slug string) string {
+	return externalID + "-" + slug
+}
+
+// Paths returns the artifact paths of one article relative to the output root. Exported so
+// that assembling a folder from already produced artifacts does not restate the layout.
+func Paths(externalID, slug string) (ArticlePaths, error) {
+	if err := validatePathPart("external ID", externalID); err != nil {
+		return ArticlePaths{}, err
 	}
 	if err := validatePathPart("slug", slug); err != nil {
-		return ArticlePaths{}, "", err
+		return ArticlePaths{}, err
 	}
-	directoryName := externalID + "-" + slug
-	articleDirectory := filepath.Join(w.root, directoryName)
+	directoryName := DirectoryName(externalID, slug)
 	return ArticlePaths{
 		StructurePromptPath:   filepath.ToSlash(filepath.Join(directoryName, "prompts", "structure_prompt.txt")),
 		StructurePath:         filepath.ToSlash(filepath.Join(directoryName, "generated", "structure.txt")),
@@ -416,7 +430,7 @@ func (w *Writer) articlePaths(externalID, slug string) (ArticlePaths, string, er
 		HTMLPromptPath:        filepath.ToSlash(filepath.Join(directoryName, "prompts", "article_html_prompt.txt")),
 		HTMLPath:              filepath.ToSlash(filepath.Join(directoryName, "article.html")),
 		ResultPath:            filepath.ToSlash(filepath.Join(directoryName, "result.md")),
-	}, articleDirectory, nil
+	}, nil
 }
 
 func validatePathPart(name, value string) error {

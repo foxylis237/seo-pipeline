@@ -621,10 +621,6 @@ func TestGetPendingForOperationUsesPersistedPrerequisites(t *testing.T) {
 	assertPendingIDs(t, repository, "fix", fixReady.ID)
 	assertPendingIDs(t, repository, "html", htmlReady.ID)
 	assertPendingIDs(t, repository, "result", resultReady.ID)
-	assertPendingIDs(t, repository, "demo-generate",
-		prepareReady.ID, prepareDone.ID, generateReady.ID, articleReady.ID,
-		reviewReady.ID, fixReady.ID, htmlReady.ID, htmlBlocked.ID, resultReady.ID,
-	)
 	prepared, err := repository.HasPreparedResearch(ctx, generateReady.ExternalID)
 	if err != nil || !prepared {
 		t.Fatalf("HasPreparedResearch(prepared) = %t, %v", prepared, err)
@@ -653,27 +649,35 @@ func assertPendingIDs(t *testing.T, repository *ArticleRepository, operation str
 	}
 }
 
-func TestDemoGenerateSelectionExcludesOnlyNonEmptyRecordedErrors(t *testing.T) {
+// Пакетная demo-сборка идёт по GetAll, а не по выборке под операцию: ни статус, ни
+// сохранённая ошибка не должны исключать статью из обхода.
+func TestGetAllReturnsEveryArticleRegardlessOfStateAndError(t *testing.T) {
 	repository, pool := newTestRepository(t)
 	ctx := context.Background()
-	nullError, _ := repository.Create(ctx, article.Input{ExcelID: 1101, Title: "null error", ImageSlug: "null-error"})
-	emptyError, _ := repository.Create(ctx, article.Input{ExcelID: 1102, Title: "empty error", ImageSlug: "empty-error"})
-	spaceError, _ := repository.Create(ctx, article.Input{ExcelID: 1103, Title: "space error", ImageSlug: "space-error"})
-	recordedError, _ := repository.Create(ctx, article.Input{ExcelID: 1104, Title: "recorded error", ImageSlug: "recorded-error"})
+	pending, _ := repository.Create(ctx, article.Input{ExcelID: 1101, Title: "pending", ImageSlug: "pending"})
+	completed, _ := repository.Create(ctx, article.Input{ExcelID: 1102, Title: "completed", ImageSlug: "completed"})
+	failed, _ := repository.Create(ctx, article.Input{ExcelID: 1103, Title: "failed", ImageSlug: "failed"})
 	if _, err := pool.Exec(ctx, `
 		UPDATE articles
-		SET error_message = CASE id
-			WHEN $1 THEN ''
-			WHEN $2 THEN '   '
-			WHEN $3 THEN 'Keys.so timeout'
-			ELSE error_message
-		END
-		WHERE id = ANY($4)
-	`, emptyError.ID, spaceError.ID, recordedError.ID, []int64{emptyError.ID, spaceError.ID, recordedError.ID}); err != nil {
+		SET status = CASE id WHEN $1 THEN 'completed' WHEN $2 THEN 'failed' ELSE status END,
+			current_step = CASE id WHEN $1 THEN NULL WHEN $2 THEN 'article_generation' ELSE current_step END,
+			error_message = CASE id WHEN $2 THEN 'Keys.so timeout' ELSE error_message END
+		WHERE id = ANY($3)
+	`, completed.ID, failed.ID, []int64{completed.ID, failed.ID}); err != nil {
 		t.Fatal(err)
 	}
 
-	assertPendingIDs(t, repository, "demo-generate", nullError.ID, emptyError.ID, spaceError.ID)
+	selected, err := repository.GetAll(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make([]int64, len(selected))
+	for index := range selected {
+		got[index] = selected[index].ID
+	}
+	if !reflect.DeepEqual(got, []int64{pending.ID, completed.ID, failed.ID}) {
+		t.Fatalf("GetAll IDs = %v, want %v", got, []int64{pending.ID, completed.ID, failed.ID})
+	}
 }
 
 func TestListArticlesWithErrorsAndClearOneForRetry(t *testing.T) {

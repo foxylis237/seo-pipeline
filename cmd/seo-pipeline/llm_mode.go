@@ -121,7 +121,10 @@ func loadLLMScheme(path string, requireCredentials bool) (config.LLMConfig, erro
 // ничего не проверяется и пробных запросов к Gemini не делается. Доступность выясняется
 // только по реальному ответу модели.
 type articleMode struct {
-	pipelines    map[schemeName]*generation.Pipeline
+	pipelines map[schemeName]*generation.Pipeline
+	// routers — те же схемы стадий, но без конвейера. Нужны командам, которые выполняют
+	// стадию, не двигая статью по пайплайну: demo-сборке.
+	routers      map[schemeName]*llm.Router
 	resolver     llmResolver
 	availability geminiAvailability
 	logger       *slog.Logger
@@ -148,6 +151,21 @@ func (m *articleMode) pipelineFor(externalID string) (schemeName, *generation.Pi
 	m.logger.Info("article scheme selected",
 		"external_id", externalID, "mode", string(routing.Scheme), "reason", routing.Reason)
 	return routing.Scheme, pipeline
+}
+
+// routerFor возвращает роутер той же схемы, которую получил бы полный прогон этой статьи.
+// Схему выбирает тот же резолвер: у demo-сборки не должно быть своей политики маршрутизации.
+func (m *articleMode) routerFor(externalID string) *llm.Router {
+	routing := m.resolver.Resolve()
+	if router, found := m.routers[routing.Scheme]; found {
+		m.logger.Info("article scheme selected",
+			"external_id", externalID, "mode", string(routing.Scheme), "reason", routing.Reason)
+		return router
+	}
+	m.logger.Warn("scheme is unavailable in this process, falling back to DeepSeek-only",
+		"external_id", externalID, "requested_scheme", string(routing.Scheme),
+		"reason", routing.Reason, "mode", string(schemeDeepSeek))
+	return m.routers[schemeDeepSeek]
 }
 
 // run прогоняет статью выбранной схемой и передаёт результат в guard.

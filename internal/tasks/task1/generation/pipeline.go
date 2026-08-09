@@ -825,12 +825,5 @@ func isContextCancellation(ctx context.Context, err error) bool {
 }
 
 func formatKeywords(keywords []article.KeywordFrequency) string {
-	var result strings.Builder
-	for index, keyword := range keywords {
-		if index > 0 {
-			result.WriteByte('\n')
-		}
-		fmt.Fprintf(&result, "%s\t%d", keyword.Query, keyword.Frequency)
-	}
-	return result.String()
+	return article.FormatKeywords(keywords)
 }

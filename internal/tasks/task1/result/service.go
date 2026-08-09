@@ -151,15 +151,35 @@ func (s *Service) BuildStaged(ctx context.Context, externalID string) (*articleo
 	if err != nil {
 		return nil, fmt.Errorf("parse FAQ for result: %w", err)
 	}
+	rendered, err := s.render(input, articleText, faqItems)
+	if err != nil {
+		return nil, err
+	}
+	outputSlug := input.Article.Slug
+	if strings.TrimSpace(outputSlug) == "" {
+		articleDirectory := strings.Split(strings.Trim(filepath.ToSlash(input.ArticlePath), "/"), "/")[0]
+		outputSlug = strings.TrimPrefix(articleDirectory, input.Article.ExternalID+"-")
+	}
+	pending, err := s.writer.StageResult(input.Article.ExternalID, outputSlug, rendered)
+	if err != nil {
+		return nil, err
+	}
+	s.logger.Info("result staged", "article_id", input.Article.ID, "external_id", externalID, "stage", "result_generation", "result_path", pending.Paths.ResultPath)
+	return pending, nil
+}
+
+// render fills result.md.tmpl. Единственное место, где шаблон читается и исполняется:
+// боевая сборка и demo обязаны давать один и тот же файл из одних и тех же данных.
+func (s *Service) render(input article.ResultInput, articleText string, faqItems []FAQItem) (string, error) {
 	templateText, err := os.ReadFile(s.templatePath)
 	if err != nil {
-		return nil, fmt.Errorf("read result template %q: %w", s.templatePath, err)
+		return "", fmt.Errorf("read result template %q: %w", s.templatePath, err)
 	}
 	tmpl, err := template.New("result.md").Funcs(template.FuncMap{
 		"add": func(left, right int) int { return left + right },
 	}).Option("missingkey=error").Parse(string(templateText))
 	if err != nil {
-		return nil, fmt.Errorf("parse result template %q: %w", s.templatePath, err)
+		return "", fmt.Errorf("parse result template %q: %w", s.templatePath, err)
 	}
 	var rendered bytes.Buffer
 	if err := tmpl.Execute(&rendered, templateData{
@@ -172,19 +192,29 @@ func (s *Service) BuildStaged(ctx context.Context, externalID string) (*articleo
 		ReadingTimeMinutes: ReadingTimeMinutes(articleText),
 		FAQItems:           faqItems,
 	}); err != nil {
-		return nil, fmt.Errorf("render result template: %w", err)
+		return "", fmt.Errorf("render result template: %w", err)
 	}
-	outputSlug := input.Article.Slug
-	if strings.TrimSpace(outputSlug) == "" {
-		articleDirectory := strings.Split(strings.Trim(filepath.ToSlash(input.ArticlePath), "/"), "/")[0]
-		outputSlug = strings.TrimPrefix(articleDirectory, input.Article.ExternalID+"-")
-	}
-	pending, err := s.writer.StageResult(input.Article.ExternalID, outputSlug, rendered.String())
+	return rendered.String(), nil
+}
+
+// RenderForDemo renders result.md from whatever is already persisted, without writing anything.
+// В отличие от Build отсутствующие данные здесь не ошибка: demo обязан получить result.md и на
+// статье, которая ещё не прошла пайплайн, — незаполненные поля остаются пустыми.
+func (s *Service) RenderForDemo(ctx context.Context, externalID, articleText string) (string, error) {
+	input, err := s.repository.GetResultInput(ctx, externalID)
 	if err != nil {
-		return nil, err
+		return "", fmt.Errorf("load result data for external_id %s: %w", externalID, err)
 	}
-	s.logger.Info("result staged", "article_id", input.Article.ID, "external_id", externalID, "stage", "result_generation", "result_path", pending.Paths.ResultPath)
-	return pending, nil
+	if input.HTMLPath != "" && !s.writer.Exists(input.HTMLPath) {
+		input.HTMLPath = ""
+	}
+	faqItems, err := ParseFAQItems(input.FAQ)
+	if err != nil {
+		s.logger.Warn("FAQ не разобран, раздел вопросов останется пустым",
+			"external_id", externalID, "stage", "result_generation", "error", err)
+		faqItems = nil
+	}
+	return s.render(input, articleText, faqItems)
 }
 
 func (s *Service) warnMissingResultFields(input article.ResultInput) {
