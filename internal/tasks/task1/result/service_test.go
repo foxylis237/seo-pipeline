@@ -169,7 +169,7 @@ func TestRenderForDemoFillsKnownFieldsAndLeavesMissingEmpty(t *testing.T) {
 	service := NewService(fakeRepository{input}, articleoutput.NewWriter(root), slog.New(slog.NewTextHandler(&logs, nil)))
 	service.templatePath = filepath.Join("..", "..", "..", "..", "tasks", "task_1", "templates", "result.md.tmpl")
 
-	rendered, err := service.RenderForDemo(context.Background(), "39", strings.Repeat("слово ", 180))
+	rendered, err := service.RenderForDemo(context.Background(), "39", strings.Repeat("слово ", 180), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +201,7 @@ func TestRenderForDemoSurvivesUnparsableFAQ(t *testing.T) {
 	service := NewService(fakeRepository{input}, articleoutput.NewWriter(t.TempDir()), slog.New(slog.NewTextHandler(&logs, nil)))
 	service.templatePath = filepath.Join("..", "..", "..", "..", "tasks", "task_1", "templates", "result.md.tmpl")
 
-	rendered, err := service.RenderForDemo(context.Background(), "40", "")
+	rendered, err := service.RenderForDemo(context.Background(), "40", "", nil)
 	if err != nil {
 		t.Fatalf("RenderForDemo() = %v, want отрендеренный result.md", err)
 	}
@@ -212,6 +212,81 @@ func TestRenderForDemoSurvivesUnparsableFAQ(t *testing.T) {
 	if !strings.Contains(logs.String(), "FAQ не разобран") {
 		t.Fatalf("предупреждение о FAQ не записано: %s", logs.String())
 	}
+}
+
+// Метаданные, уже собранные стадией info и сохранённые в PostgreSQL, попадают в result.md
+// целиком: и метки, и TL;DR, и FAQ.
+func TestRenderForDemoRendersStoredMetadata(t *testing.T) {
+	input := article.ResultInput{
+		Article: article.Article{ID: 11, ExternalID: "41", Title: "Заголовок", Slug: "slug"},
+		Tags:    "логопед, обучение", TLDR: "Логопед ставит речь.",
+		FAQ: "Вопрос: Где учиться?\nОтвет: В вузе.",
+	}
+	service := newDemoService(t, input)
+
+	rendered, err := service.RenderForDemo(context.Background(), "41", "текст статьи", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertResultField(t, rendered, "Метки", "логопед, обучение")
+	assertResultField(t, rendered, "TL;DR", "Логопед ставит речь.")
+	assertResultField(t, rendered, "Вопрос", "Где учиться?")
+	assertResultField(t, rendered, "Ответ", "В вузе.")
+}
+
+// Метаданные, разобранные demo из article_info.txt, вытесняют сохранённые целиком: пустое
+// поле разбора остаётся пустым и не подменяется значением из PostgreSQL.
+func TestRenderForDemoReplacesStoredMetadataWholesale(t *testing.T) {
+	input := article.ResultInput{
+		Article: article.Article{ID: 12, ExternalID: "42", Title: "Заголовок", Slug: "slug"},
+		Tags:    "метки из БД", TLDR: "TL;DR из БД", FAQ: "Вопрос: Из БД?\nОтвет: Да.",
+	}
+	service := newDemoService(t, input)
+
+	rendered, err := service.RenderForDemo(context.Background(), "42", "текст статьи", &article.ArticleInfo{
+		Tags: "метки demo", TLDR: "TL;DR demo",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertResultField(t, rendered, "Метки", "метки demo")
+	assertResultField(t, rendered, "TL;DR", "TL;DR demo")
+	// FAQ разбора пуст — раздел вопросов пустой, а не взятый из БД.
+	if strings.Contains(rendered, "Из БД?") || strings.Contains(rendered, "## Вопрос 1") {
+		t.Fatalf("FAQ из БД подмешан к метаданным demo: %q", rendered)
+	}
+	for _, stored := range []string{"метки из БД", "TL;DR из БД"} {
+		if strings.Contains(rendered, stored) {
+			t.Fatalf("сохранённое значение %q осталось в result.md: %q", stored, rendered)
+		}
+	}
+}
+
+// Разобранные demo метаданные с FAQ рендерятся так же, как сохранённые: demo и боевой прогон
+// дают один и тот же result.md из одних и тех же данных.
+func TestRenderForDemoRendersParsedMetadataWithFAQ(t *testing.T) {
+	input := article.ResultInput{Article: article.Article{ID: 13, ExternalID: "43", Title: "Заголовок", Slug: "slug"}}
+	service := newDemoService(t, input)
+
+	parsed, err := article.ParseArticleInfo("Метки: логопед\nTLDR: Коротко.\nFAQ:\nВопрос: Где учиться?\nОтвет: В вузе.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rendered, renderErr := service.RenderForDemo(context.Background(), "43", "текст статьи", &parsed)
+	if renderErr != nil {
+		t.Fatal(renderErr)
+	}
+	assertResultField(t, rendered, "Метки", "логопед")
+	assertResultField(t, rendered, "TL;DR", "Коротко.")
+	assertResultField(t, rendered, "Вопрос", "Где учиться?")
+	assertResultField(t, rendered, "Ответ", "В вузе.")
+}
+
+func newDemoService(t *testing.T, input article.ResultInput) *Service {
+	t.Helper()
+	service := NewService(fakeRepository{input}, articleoutput.NewWriter(t.TempDir()), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	service.templatePath = filepath.Join("..", "..", "..", "..", "tasks", "task_1", "templates", "result.md.tmpl")
+	return service
 }
 
 func assertResultField(t *testing.T, result, label, want string) {

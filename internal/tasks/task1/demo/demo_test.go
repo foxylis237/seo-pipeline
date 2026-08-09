@@ -90,11 +90,15 @@ type fakeResult struct {
 	err         error
 	calls       int
 	articleText string
+	// metadata — набор, с которым demo пришёл за result.md. nil означает «источник — БД».
+	metadata    *article.ArticleInfo
+	metadataSet bool
 }
 
-func (r *fakeResult) RenderForDemo(_ context.Context, _, articleText string) (string, error) {
+func (r *fakeResult) RenderForDemo(_ context.Context, _, articleText string, metadata *article.ArticleInfo) (string, error) {
 	r.calls++
 	r.articleText = articleText
+	r.metadata, r.metadataSet = metadata, true
 	return r.rendered, r.err
 }
 
@@ -222,6 +226,23 @@ func (f *fixture) demoFiles(t *testing.T) []string {
 	return names
 }
 
+// demoRootFiles перечисляет файлы в корне DEMO — то, что видит человек, открыв папку.
+func (f *fixture) demoRootFiles(t *testing.T) []string {
+	t.Helper()
+	entries, err := os.ReadDir(filepath.Join(f.root, testDirectory, FolderName))
+	if err != nil {
+		t.Fatalf("корень DEMO не прочитан: %v", err)
+	}
+	var names []string
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			names = append(names, entry.Name())
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
 // snapshotOutsideDemo фиксирует всё, кроме папки DEMO: боевые файлы демо-сборка менять не должна.
 func snapshotOutsideDemo(t *testing.T, root string) map[string]string {
 	t.Helper()
@@ -267,18 +288,19 @@ func TestBuildReusesCompletedArticleWithoutCallingLLM(t *testing.T) {
 		t.Fatalf("LLM вызывался для готовой статьи: %v", fixture.generator.calls)
 	}
 	want := []string{
-		"article.txt", "article_info.txt", "article_info_prompt.txt", "article_prompt.txt",
-		"fix_links_html_prompt.txt", "prepare/keysso.json", "result.md",
-		"structure.txt", "structure_prompt.txt",
+		"article_prompt.txt", "fix_links_html_prompt.txt",
+		"generated/article.txt", "generated/article_info.txt", "generated/structure.txt",
+		"prepare/keysso.json", "prompts/article_info_prompt.txt", "prompts/structure_prompt.txt",
+		"result.md",
 	}
 	if got := fixture.demoFiles(t); !reflect.DeepEqual(got, want) {
 		t.Fatalf("состав DEMO = %v, want %v", got, want)
 	}
 	for name, wantContent := range map[string]string{
-		"article.txt":        "БОЕВАЯ СТАТЬЯ",
-		"article_info.txt":   "БОЕВАЯ ИНФОРМАЦИЯ",
-		"article_prompt.txt": "БОЕВОЙ ПРОМПТ СТАТЬИ",
-		"structure.txt":      "БОЕВАЯ СТРУКТУРА",
+		"generated/article.txt":      "БОЕВАЯ СТАТЬЯ",
+		"generated/article_info.txt": "БОЕВАЯ ИНФОРМАЦИЯ",
+		"article_prompt.txt":         "БОЕВОЙ ПРОМПТ СТАТЬИ",
+		"generated/structure.txt":    "БОЕВАЯ СТРУКТУРА",
 	} {
 		if got := fixture.demoFile(t, name); got != wantContent {
 			t.Fatalf("DEMO/%s = %q, want %q", name, got, wantContent)
@@ -308,8 +330,8 @@ func TestBuildAssemblesDemoForFailedArticle(t *testing.T) {
 	if len(fixture.generator.calls) != 0 {
 		t.Fatalf("LLM вызывался при готовых артефактах: %v", fixture.generator.calls)
 	}
-	if got := fixture.demoFile(t, "article.txt"); got != "БОЕВАЯ СТАТЬЯ" {
-		t.Fatalf("DEMO/article.txt = %q", got)
+	if got := fixture.demoFile(t, "generated/article.txt"); got != "БОЕВАЯ СТАТЬЯ" {
+		t.Fatalf("DEMO/generated/article.txt = %q", got)
 	}
 	if fixture.repository.result.Article.Status != "failed" || *fixture.repository.result.Article.ErrorMessage != recorded {
 		t.Fatalf("состояние статьи изменилось: %+v", fixture.repository.result.Article)
@@ -330,10 +352,10 @@ func TestBuildRunsOnlyTheMissingStage(t *testing.T) {
 	if !reflect.DeepEqual(fixture.generator.calls, []string{"info"}) {
 		t.Fatalf("вызванные стадии = %v, want только info", fixture.generator.calls)
 	}
-	if got := fixture.demoFile(t, "article_info.txt"); got != "СГЕНЕРИРОВАННАЯ ИНФОРМАЦИЯ" {
-		t.Fatalf("DEMO/article_info.txt = %q", got)
+	if got := fixture.demoFile(t, "generated/article_info.txt"); got != "СГЕНЕРИРОВАННАЯ ИНФОРМАЦИЯ" {
+		t.Fatalf("DEMO/generated/article_info.txt = %q", got)
 	}
-	if got := fixture.demoFile(t, "article.txt"); got != "БОЕВАЯ СТАТЬЯ" {
+	if got := fixture.demoFile(t, "generated/article.txt"); got != "БОЕВАЯ СТАТЬЯ" {
 		t.Fatalf("статья перегенерирована: %q", got)
 	}
 	if _, err := os.Stat(filepath.Join(fixture.root, filepath.FromSlash(fixture.paths.ArticleInfoPath))); !os.IsNotExist(err) {
@@ -353,7 +375,7 @@ func TestBuildGeneratesArticleAndInfoFromReusedStructure(t *testing.T) {
 	if !reflect.DeepEqual(fixture.generator.calls, []string{"article", "info"}) {
 		t.Fatalf("вызванные стадии = %v, want article и info", fixture.generator.calls)
 	}
-	if got := fixture.demoFile(t, "structure.txt"); got != "БОЕВАЯ СТРУКТУРА" {
+	if got := fixture.demoFile(t, "generated/structure.txt"); got != "БОЕВАЯ СТРУКТУРА" {
 		t.Fatalf("структура перегенерирована: %q", got)
 	}
 	if got := fixture.demoFile(t, "article_prompt.txt"); !strings.Contains(got, "БОЕВАЯ СТРУКТУРА") ||
@@ -381,8 +403,8 @@ func TestBuildOverwritesPreviousDemo(t *testing.T) {
 	if _, err := os.Stat(stale); !os.IsNotExist(err) {
 		t.Fatalf("файл прошлой сборки уцелел: %v", err)
 	}
-	if got := fixture.demoFile(t, "article.txt"); got != "ОБНОВЛЁННАЯ СТАТЬЯ" {
-		t.Fatalf("DEMO/article.txt = %q, want обновлённую статью", got)
+	if got := fixture.demoFile(t, "generated/article.txt"); got != "ОБНОВЛЁННАЯ СТАТЬЯ" {
+		t.Fatalf("DEMO/generated/article.txt = %q, want обновлённую статью", got)
 	}
 }
 
@@ -445,10 +467,10 @@ func TestBuildRunsPrepareOnceWhenResearchIsMissing(t *testing.T) {
 	if !reflect.DeepEqual(fixture.generator.calls, []string{"structure", "article", "info"}) {
 		t.Fatalf("вызванные стадии = %v, want structure, article и info", fixture.generator.calls)
 	}
-	if got := fixture.demoFile(t, "structure.txt"); got != "СГЕНЕРИРОВАННАЯ СТРУКТУРА" {
-		t.Fatalf("DEMO/structure.txt = %q", got)
+	if got := fixture.demoFile(t, "generated/structure.txt"); got != "СГЕНЕРИРОВАННАЯ СТРУКТУРА" {
+		t.Fatalf("DEMO/generated/structure.txt = %q", got)
 	}
-	if got := fixture.demoFile(t, "structure_prompt.txt"); !strings.Contains(got, "H2 Кто такой логопед") {
+	if got := fixture.demoFile(t, "prompts/structure_prompt.txt"); !strings.Contains(got, "H2 Кто такой логопед") {
 		t.Fatalf("промпт структуры собран без структуры конкурентов: %q", got)
 	}
 	if got := fixture.demoFile(t, "article_prompt.txt"); !strings.Contains(got, "логопед обучение\t1200") ||
@@ -467,14 +489,18 @@ func TestBuildRendersMergedFixLinksHTMLPrompt(t *testing.T) {
 
 	prompt := fixture.demoFile(t, "fix_links_html_prompt.txt")
 	for _, requirement := range []string{
-		"исправления из предыдущего анализа",          // fix
-		"Сохрани итоговый объём статьи",               // fix
-		"внутреннюю перелинковку",                     // линковка
-		"если URL отсутствует — используй href=\"#\"", // линковка
-		"HTML-разметку для WordPress",                 // html
-		`<p class="ds-markdown-paragraph">`,           // html
-		"Логопед — /logoped",                          // подстановка профессий
-		"Дополнительно — /extra",                      // подстановка ссылок
+		"исправления из предыдущего анализа", // fix
+		"Сохрани итоговый объём статьи",      // fix
+		"внутреннюю перелинковку",            // линковка
+		// Требование к ссылке без URL проверяется по смыслу: промпт переписывают отдельно, и
+		// перефразирование при том же требовании тест ронять не должно.
+		`href="#"`,                          // линковка
+		"HTML-разметку для WordPress",       // html
+		`<p class="ds-markdown-paragraph">`, // html
+		// Профессии в этот промпт больше не подставляются: {{.Professions}} из него убрали
+		// намеренно. Поле по-прежнему передаётся в шаблон, чтобы вернуть его можно было
+		// правкой одного промпта, без изменений в Go.
+		"Дополнительно — /extra", // подстановка ссылок
 	} {
 		if !strings.Contains(prompt, requirement) {
 			t.Fatalf("объединённый промпт не содержит %q", requirement)
@@ -482,6 +508,154 @@ func TestBuildRendersMergedFixLinksHTMLPrompt(t *testing.T) {
 	}
 	if strings.Contains(prompt, "{{") {
 		t.Fatalf("объединённый промпт не отрендерен: %q", prompt)
+	}
+}
+
+// storedMetadata — метаданные статьи, уже прошедшей стадию info.
+func storedMetadata() (tags, tldr, faq string) {
+	return "логопед, обучение", "Логопед ставит речь.", "Вопрос: Где учиться?\nОтвет: В вузе."
+}
+
+// Готовые метаданные в PostgreSQL — единственный источник: стадия info повторно не
+// запускается, а result.md собирается по данным БД (metadata == nil).
+func TestBuildTakesMetadataFromDatabaseWithoutRunningInfo(t *testing.T) {
+	fixture := newFixture(t)
+	fixture.writeCompleteProduction(t)
+	tags, tldr, faq := storedMetadata()
+	fixture.repository.result.Tags, fixture.repository.result.TLDR, fixture.repository.result.FAQ = tags, tldr, faq
+	// Боевого article_info.txt нет: даже без файла стадия info не нужна — метаданные уже в БД.
+	if err := os.Remove(filepath.Join(fixture.root, filepath.FromSlash(fixture.paths.ArticleInfoPath))); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := fixture.builder.Build(context.Background(), testExternalID); err != nil {
+		t.Fatalf("Build() = %v", err)
+	}
+
+	if len(fixture.generator.calls) != 0 {
+		t.Fatalf("стадия info запущена при готовых метаданных в БД: %v", fixture.generator.calls)
+	}
+	if !fixture.result.metadataSet || fixture.result.metadata != nil {
+		t.Fatalf("result.md собран с подменой метаданных %+v, want источник БД", fixture.result.metadata)
+	}
+}
+
+// Метаданных в БД нет — источником становится article_info.txt, разобранный demo целиком.
+func TestBuildParsesGeneratedArticleInfoIntoResultMetadata(t *testing.T) {
+	fixture := newFixture(t)
+	fixture.writeCompleteProduction(t)
+	if err := os.Remove(filepath.Join(fixture.root, filepath.FromSlash(fixture.paths.ArticleInfoPath))); err != nil {
+		t.Fatal(err)
+	}
+	tags, tldr, faq := storedMetadata()
+	fixture.generator.answers["info"] = "Метки: " + tags + "\nTLDR: " + tldr + "\nFAQ:\n" + faq
+
+	if err := fixture.builder.Build(context.Background(), testExternalID); err != nil {
+		t.Fatalf("Build() = %v", err)
+	}
+
+	if !reflect.DeepEqual(fixture.generator.calls, []string{"info"}) {
+		t.Fatalf("вызванные стадии = %v, want только info", fixture.generator.calls)
+	}
+	metadata := fixture.result.metadata
+	if metadata == nil {
+		t.Fatal("result.md собран по данным БД, хотя метаданных там нет")
+	}
+	if metadata.Tags != tags || metadata.TLDR != tldr || metadata.FAQ != faq {
+		t.Fatalf("разобранные метаданные = %+v, want Tags %q, TLDR %q, FAQ %q", metadata, tags, tldr, faq)
+	}
+	if got := fixture.demoFile(t, "generated/article_info.txt"); !strings.Contains(got, tldr) {
+		t.Fatalf("DEMO/generated/article_info.txt = %q", got)
+	}
+}
+
+// Частично заполненные метаданные в БД не дополняются разбором article_info.txt: источник
+// выбирается целиком. Иначе result.md собрался бы из FAQ одного прогона и меток другого.
+func TestBuildDoesNotMixDatabaseAndDemoMetadata(t *testing.T) {
+	fixture := newFixture(t)
+	fixture.writeCompleteProduction(t)
+	_, _, faq := storedMetadata()
+	fixture.repository.result.FAQ = faq
+	// На диске лежит разбираемый article_info.txt с метками и TL;DR: если бы demo дополнял
+	// пустые поля БД, они бы отсюда и приехали.
+	fixture.writeProduction(t, fixture.paths.ArticleInfoPath, "Метки: метки из файла\nTLDR: коротко из файла\nFAQ: -")
+
+	if err := fixture.builder.Build(context.Background(), testExternalID); err != nil {
+		t.Fatalf("Build() = %v", err)
+	}
+
+	if len(fixture.generator.calls) != 0 {
+		t.Fatalf("стадия info запущена при метаданных в БД: %v", fixture.generator.calls)
+	}
+	if !fixture.result.metadataSet || fixture.result.metadata != nil {
+		t.Fatalf("метаданные БД дополнены разбором файла: %+v", fixture.result.metadata)
+	}
+}
+
+// Неразобранный ответ стадии info не теряется: он целиком уходит в TL;DR, а сборка остаётся
+// успешной — пустой раздел в result.md заметить труднее, чем текст не по формату.
+func TestBuildKeepsUnparsableArticleInfoAsTLDR(t *testing.T) {
+	fixture := newFixture(t)
+	fixture.writeCompleteProduction(t)
+
+	if err := fixture.builder.Build(context.Background(), testExternalID); err != nil {
+		t.Fatalf("Build() = %v", err)
+	}
+
+	metadata := fixture.result.metadata
+	if metadata == nil || metadata.TLDR != "БОЕВАЯ ИНФОРМАЦИЯ" {
+		t.Fatalf("метаданные = %+v, want весь текст article_info.txt в TL;DR", metadata)
+	}
+}
+
+// Demo собирает метаданные для result.md, но в PostgreSQL их не пишет: интерфейс Repository
+// методов записи не объявляет, и сохранённое состояние статьи после сборки то же.
+func TestBuildDoesNotWriteMetadataToDatabase(t *testing.T) {
+	fixture := newFixture(t)
+	fixture.writeCompleteProduction(t)
+	if err := os.Remove(filepath.Join(fixture.root, filepath.FromSlash(fixture.paths.ArticleInfoPath))); err != nil {
+		t.Fatal(err)
+	}
+	tags, tldr, faq := storedMetadata()
+	fixture.generator.answers["info"] = "Метки: " + tags + "\nTLDR: " + tldr + "\nFAQ:\n" + faq
+	before := fixture.repository.result
+
+	if err := fixture.builder.Build(context.Background(), testExternalID); err != nil {
+		t.Fatalf("Build() = %v", err)
+	}
+
+	if !reflect.DeepEqual(fixture.repository.result, before) {
+		t.Fatalf("состояние статьи в БД изменилось:\nбыло %+v\nстало %+v", before, fixture.repository.result)
+	}
+	if _, isWriter := any(fixture.repository).(interface {
+		SaveArticleInfo(context.Context, int64, string, article.ArticleInfo) error
+	}); isWriter {
+		t.Fatal("demo получил репозиторий с методом записи метаданных")
+	}
+}
+
+// В корне DEMO остаётся ровно то, что открывают руками: результат и два промпта ручного
+// чата. Всё промежуточное лежит по подпапкам боевой раскладки.
+func TestBuildKeepsOnlyResultAndManualPromptsInDemoRoot(t *testing.T) {
+	fixture := newFixture(t)
+	fixture.writeCompleteProduction(t)
+
+	if err := fixture.builder.Build(context.Background(), testExternalID); err != nil {
+		t.Fatalf("Build() = %v", err)
+	}
+
+	wantRoot := []string{"article_prompt.txt", "fix_links_html_prompt.txt", "result.md"}
+	if got := fixture.demoRootFiles(t); !reflect.DeepEqual(got, wantRoot) {
+		t.Fatalf("корень DEMO = %v, want %v", got, wantRoot)
+	}
+	wantAll := []string{
+		"article_prompt.txt", "fix_links_html_prompt.txt",
+		"generated/article.txt", "generated/article_info.txt", "generated/structure.txt",
+		"prepare/keysso.json", "prompts/article_info_prompt.txt", "prompts/structure_prompt.txt",
+		"result.md",
+	}
+	if got := fixture.demoFiles(t); !reflect.DeepEqual(got, wantAll) {
+		t.Fatalf("состав DEMO = %v, want %v", got, wantAll)
 	}
 }
 
@@ -495,7 +669,7 @@ func TestBuildDoesNotReadArtifactsOfAnotherArticle(t *testing.T) {
 		t.Fatalf("Build() = %v", err)
 	}
 
-	if got := fixture.demoFile(t, "article.txt"); got == "ЧУЖАЯ СТАТЬЯ" {
+	if got := fixture.demoFile(t, "generated/article.txt"); got == "ЧУЖАЯ СТАТЬЯ" {
 		t.Fatal("в DEMO попала статья другой статьи")
 	}
 }

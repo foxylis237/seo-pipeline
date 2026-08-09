@@ -26,17 +26,27 @@ const (
 	FixLinksHTMLPromptPath = "tasks/task_1/prompts/demo/fix_links_html.txt"
 )
 
-// Имена файлов внутри DEMO. Плоская раскладка намеренная: папку открывают руками.
+// Подпапки DEMO повторяют раскладку боевого каталога статьи: то же имя папки — тот же вид
+// содержимого, отдельную схему запоминать не нужно.
 const (
-	structurePromptFile    = "structure_prompt.txt"
-	structureFile          = "structure.txt"
-	articlePromptFile      = "article_prompt.txt"
-	articleFile            = "article.txt"
-	articleInfoPromptFile  = "article_info_prompt.txt"
-	articleInfoFile        = "article_info.txt"
-	fixLinksHTMLPromptFile = "fix_links_html_prompt.txt"
+	promptsFolder   = "prompts"
+	generatedFolder = "generated"
+	prepareFolder   = "prepare"
+)
+
+// Имена файлов внутри DEMO. В корне лежит ровно то, что открывают руками при ручном прогоне:
+// готовый результат и два промпта ручного чата. Всё остальное — по подпапкам.
+const (
 	resultFile             = "result.md"
-	prepareFolder          = "prepare"
+	articlePromptFile      = "article_prompt.txt"
+	fixLinksHTMLPromptFile = "fix_links_html_prompt.txt"
+
+	structurePromptFile   = promptsFolder + "/structure_prompt.txt"
+	articleInfoPromptFile = promptsFolder + "/article_info_prompt.txt"
+
+	structureFile   = generatedFolder + "/structure.txt"
+	articleFile     = generatedFolder + "/article.txt"
+	articleInfoFile = generatedFolder + "/article_info.txt"
 )
 
 // Repository читает сохранённое состояние статьи. Методов записи здесь нет намеренно: demo
@@ -55,9 +65,11 @@ type Generator interface {
 	Generate(ctx context.Context, call llm.Call) (llm.RoutedResponse, error)
 }
 
-// ResultRenderer собирает result.md из сохранённых данных, не записывая его.
+// ResultRenderer собирает result.md из сохранённых данных, не записывая его. metadata == nil
+// означает «взять Метки, TL;DR и FAQ из PostgreSQL», иначе они берутся из переданного набора
+// целиком.
 type ResultRenderer interface {
-	RenderForDemo(ctx context.Context, externalID, articleText string) (string, error)
+	RenderForDemo(ctx context.Context, externalID, articleText string, metadata *article.ArticleInfo) (string, error)
 }
 
 // Artifacts читает боевые артефакты по путям относительно OUTPUT_DIR.
@@ -131,9 +143,9 @@ func (b *Builder) assemble(ctx context.Context, state articleState, staging stri
 	b.copyPrepare(state, staging)
 	structure, structureErr := b.structure(ctx, state, staging)
 	articleText, articleErr := b.article(ctx, state, staging, structure)
-	infoErr := b.articleInfo(ctx, state, staging, structure, articleText)
+	metadata, infoErr := b.articleInfo(ctx, state, staging, structure, articleText)
 	promptErr := b.mergedPrompt(state, staging)
-	resultErr := b.resultMarkdown(ctx, state, staging, articleText)
+	resultErr := b.resultMarkdown(ctx, state, staging, articleText, metadata)
 	// researchErr идёт в общий итог, а не прерывает сборку: без research папка выходит
 	// неполной, но result.md и промпты в ней всё равно должны появиться.
 	return errors.Join(state.researchErr, structureErr, articleErr, infoErr, promptErr, resultErr)

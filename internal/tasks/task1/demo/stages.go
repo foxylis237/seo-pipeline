@@ -45,6 +45,15 @@ func (s articleState) links() string {
 
 func (s articleState) title() string { return s.result.Article.Title }
 
+// hasStoredMetadata сообщает, что стадия info уже отработала и её результат лежит в
+// PostgreSQL. Признак читается из того же ResultInput, по которому собирается result.md,
+// поэтому «есть метаданные» и «они попадут в result.md» — одно и то же условие.
+func (s articleState) hasStoredMetadata() bool {
+	return strings.TrimSpace(s.result.Tags) != "" ||
+		strings.TrimSpace(s.result.TLDR) != "" ||
+		strings.TrimSpace(s.result.FAQ) != ""
+}
+
 // load собирает состояние статьи из читающих методов репозитория. Отсутствие research или
 // сохранённых артефактов — не ошибка: DEMO обязан собраться и для статьи, которая ещё не
 // проходила пайплайн.
@@ -195,35 +204,68 @@ func (b *Builder) articleCall(state articleState, structure string) llm.Call {
 	}}
 }
 
-// articleInfo кладёт в DEMO сохранённую информацию для публикации либо запрашивает её.
-func (b *Builder) articleInfo(ctx context.Context, state articleState, staging, structure, articleText string) error {
-	if text, found := b.readProduction(state, state.production.ArticleInfoPath); found {
-		if err := writeDemoFile(staging, articleInfoFile, text); err != nil {
-			return err
+// articleInfo кладёт в DEMO информацию для публикации и возвращает набор метаданных для
+// result.md.
+//
+// Источник выбирается целиком, а не по полям. Есть метаданные в PostgreSQL — берутся они,
+// стадия info не запускается повторно, а сохранённый article_info.txt лишь копируется для
+// справки; возвращается nil, и result.md собирается по данным БД. Метаданных в БД нет —
+// источником становится article_info.txt: переиспользованный с диска или сгенерированный
+// этой же стадией info. Разбирается он целиком, и целиком же уходит в result.md.
+func (b *Builder) articleInfo(ctx context.Context, state articleState, staging, structure, articleText string) (*article.ArticleInfo, error) {
+	saved, found := b.readProduction(state, state.production.ArticleInfoPath)
+	if found {
+		if err := writeDemoFile(staging, articleInfoFile, saved); err != nil {
+			return nil, err
 		}
 		b.copyProduction(state, state.production.ArticleInfoPromptPath, staging, articleInfoPromptFile)
-		return nil
+	}
+	if state.hasStoredMetadata() {
+		return nil, nil
+	}
+	if found {
+		return b.parseDemoMetadata(state, saved), nil
 	}
 	if strings.TrimSpace(articleText) == "" {
 		b.logger.Warn("информация для публикации пропущена: статьи нет", "external_id", state.externalID, "stage", "demo_info")
-		return nil
+		return nil, nil
 	}
 	call := llm.Call{Stage: "info", ArticleID: state.result.Article.ID, Data: struct {
 		GeneratedStructure string
 		GeneratedArticle   string
 	}{structure, articleText}}
 	if err := b.writePrompt(state, staging, articleInfoPromptFile, call); err != nil {
-		return err
+		return nil, err
 	}
 	response, err := b.generator.Generate(ctx, call)
 	if err != nil {
-		return fmt.Errorf("собрать информацию для DEMO external_id %s: %w", state.externalID, err)
+		return nil, fmt.Errorf("собрать информацию для DEMO external_id %s: %w", state.externalID, err)
 	}
 	text := strings.TrimSpace(response.Text)
 	if text == "" {
-		return fmt.Errorf("информация для DEMO external_id %s пуста", state.externalID)
+		return nil, fmt.Errorf("информация для DEMO external_id %s пуста", state.externalID)
 	}
-	return writeDemoFile(staging, articleInfoFile, text)
+	if err := writeDemoFile(staging, articleInfoFile, text); err != nil {
+		return nil, err
+	}
+	return b.parseDemoMetadata(state, text), nil
+}
+
+// parseDemoMetadata разбирает article_info.txt для result.md. Неразобранный ответ не теряется:
+// он целиком уходит в TL;DR, а причина остаётся в логе статьи — пустой раздел в result.md
+// молча пропускают глазами, а текст не по формату виден сразу.
+func (b *Builder) parseDemoMetadata(state articleState, text string) *article.ArticleInfo {
+	parsed, err := article.ParseArticleInfo(text)
+	if err == nil && (parsed.Tags != "" || parsed.TLDR != "" || parsed.FAQ != "") {
+		if parsed.FallbackUsed {
+			b.logger.Warn("метаданные DEMO разобраны нестрогим разбором", "external_id", state.externalID,
+				"stage", "demo_info", "has_tags", parsed.Tags != "", "has_tldr", parsed.TLDR != "", "has_faq", parsed.FAQ != "")
+		}
+		return &parsed
+	}
+	b.logger.Warn("метаданные DEMO не разобраны, ответ стадии info целиком помещён в TL;DR",
+		"external_id", state.externalID, "stage", "demo_info", "error", err)
+	return &article.ArticleInfo{TLDR: strings.TrimSpace(text)}
 }
 
 // mergedPrompt рендерит объединённый промпт fix + перелинковка + HTML. Ревью в него не
@@ -244,9 +286,10 @@ func (b *Builder) mergedPrompt(state articleState, staging string) error {
 	return writeDemoFile(staging, fixLinksHTMLPromptFile, rendered.String())
 }
 
-// resultMarkdown собирает result.md всегда: недостающие поля остаются пустыми.
-func (b *Builder) resultMarkdown(ctx context.Context, state articleState, staging, articleText string) error {
-	rendered, err := b.result.RenderForDemo(ctx, state.externalID, articleText)
+// resultMarkdown собирает result.md всегда: недостающие поля остаются пустыми. metadata == nil
+// означает, что источником метаданных остаётся PostgreSQL.
+func (b *Builder) resultMarkdown(ctx context.Context, state articleState, staging, articleText string, metadata *article.ArticleInfo) error {
+	rendered, err := b.result.RenderForDemo(ctx, state.externalID, articleText, metadata)
 	if err != nil {
 		return fmt.Errorf("собрать result.md для DEMO external_id %s: %w", state.externalID, err)
 	}
