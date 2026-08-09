@@ -22,6 +22,7 @@ type fakePrepareRepository struct {
 	metadataPresent    bool
 	outputPresent      bool
 	savePreparedCalls  int
+	savePreparedErr    error
 	savedProcessingErr error
 	trace              article.Trace
 }
@@ -40,6 +41,9 @@ func (r *fakePrepareRepository) PrepareArticleForRun(context.Context, int64) err
 
 func (r *fakePrepareRepository) SavePreparedResearch(_ context.Context, _ int64, cleaned []string, wordstat []article.KeywordFrequency, lsi []string, structure string) error {
 	r.savePreparedCalls++
+	if r.savePreparedErr != nil {
+		return r.savePreparedErr
+	}
 	r.research = fakeResearch{
 		cleaned: append([]string(nil), cleaned...), wordstat: append([]article.KeywordFrequency(nil), wordstat...),
 		lsi: append([]string(nil), lsi...), structure: structure,
@@ -216,6 +220,38 @@ func TestPrepareArticleDoesNotSavePartiallyCollectedArsenkinResult(t *testing.T)
 		t.Fatalf("error = %v, want %v", err, wantErr)
 	}
 	assertOldPrepareResultsPreserved(t, repository, want)
+}
+
+// TestPrepareArticleReportsDatabaseFailureAsItself фиксирует, что недоступность PostgreSQL
+// не выдаётся за отказ Arsenkin. Раньше она заворачивалась в arsenkin.StageError с адресом
+// страницы Copywriters, и main печатал «этап Arsenkin завершён с ошибкой» с этим URL —
+// пользователь шёл чинить интеграцию вместо базы.
+func TestPrepareArticleReportsDatabaseFailureAsItself(t *testing.T) {
+	databaseErr := errors.New("connection refused")
+	repository := &fakePrepareRepository{savePreparedErr: databaseErr}
+
+	err := prepareArticleWithCollectors(
+		context.Background(), repository, config.Config{}, testPrepareLogger(), newFakePrepareArtifacts(), testPreparedArticle(),
+		fakeKeysSOCollector{result: keysso.CollectResult{CollectedCount: 1, CleanedKeywords: []string{"бариста обучение"}}},
+		fakeArsenkinCollector{result: arsenkin.Result{
+			WordstatKeywords:    []arsenkin.KeywordFrequency{{Query: "бариста обучение", Frequency: 100}},
+			LSIWords:            []string{"кофе"},
+			CompetitorStructure: "H1 - Бариста",
+		}},
+	)
+	if !errors.Is(err, databaseErr) {
+		t.Fatalf("error = %v, want database error", err)
+	}
+	var stageErr *arsenkin.StageError
+	if errors.As(err, &stageErr) {
+		t.Fatalf("отказ PostgreSQL выдан за отказ Arsenkin: stage=%s current_url=%s", stageErr.Stage, stageErr.CurrentURL)
+	}
+	if strings.Contains(err.Error(), "arsenkin.ru") {
+		t.Fatalf("в ошибке базы остался адрес Arsenkin: %v", err)
+	}
+	if !errors.Is(repository.savedProcessingErr, databaseErr) {
+		t.Fatalf("сохранённая ошибка = %v, want database error", repository.savedProcessingErr)
+	}
 }
 
 func oldPrepareRepositoryState() *fakePrepareRepository {

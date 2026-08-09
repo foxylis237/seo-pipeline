@@ -319,13 +319,12 @@ func collectPreparedResearch(
 		arsenkinResult.CompetitorStructure,
 	); err != nil {
 		report.Fail("save_research", err.Error(), nil)
-		return "save_research", savePipelineError(ctx, articleRepository, selected.ID, &arsenkin.StageError{
-			ArticleID:  selected.ID,
-			Stage:      "save_result",
-			CurrentURL: "https://arsenkin.ru/tools/copyrighters/",
-			Duration:   time.Since(arsenkinStarted),
-			Err:        fmt.Errorf("сохранить результаты Arsenkin в PostgreSQL: %w", err),
-		})
+		// Отказ PostgreSQL остаётся отказом PostgreSQL. Раньше он заворачивался в
+		// arsenkin.StageError с адресом страницы Copywriters, и недоступность базы
+		// приезжала пользователю как «этап Arsenkin завершён с ошибкой» с URL, по
+		// которому в этот момент никто не ходил.
+		return "save_research", savePipelineError(ctx, articleRepository, selected.ID,
+			fmt.Errorf("сохранить research статьи external_id=%s в PostgreSQL: %w", selected.ExternalID, err))
 	}
 	savedTrace, traceErr := articleRepository.GetArticleTrace(ctx, selected.ID)
 	if traceErr != nil {
