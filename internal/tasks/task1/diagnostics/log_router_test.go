@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -134,6 +135,42 @@ func TestRouterKeepsWorkingWhenLogCannotBeOpened(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "нет каталога статьи") {
 		t.Fatalf("stdout = %q", stdout.String())
+	}
+}
+
+// TestRouterHandlesConcurrentRecords воспроизводит боевую связку: heartbeat-goroutine
+// internal/llm пишет тем же логгером, что и стадия, которая её запустила. slog требует,
+// чтобы Handle был безопасен при конкурентном вызове, а мемоизация обработчика статьи
+// раньше писала поля routingHandler без блокировки.
+func TestRouterHandlesConcurrentRecords(t *testing.T) {
+	router, stdout, root := newTestRouter(t)
+	router.Register(7, "52", "kak-stat-logopedom")
+	logger := slog.New(router.Handler(slog.NewTextHandler(stdout, nil))).
+		With("article_id", int64(7), "external_id", "52")
+
+	const records = 50
+	var started sync.WaitGroup
+	var finished sync.WaitGroup
+	started.Add(2)
+	finished.Add(2)
+	for worker := range 2 {
+		go func() {
+			defer finished.Done()
+			started.Done()
+			started.Wait()
+			for index := range records {
+				logger.Info("стадия идёт", "worker", worker, "index", index)
+			}
+		}()
+	}
+	finished.Wait()
+	if err := router.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	stage := readStageLog(t, root, "52-kak-stat-logopedom")
+	if got := strings.Count(stage, "стадия идёт"); got != 2*records {
+		t.Fatalf("в логе статьи %d записей, ожидалось %d", got, 2*records)
 	}
 }
 

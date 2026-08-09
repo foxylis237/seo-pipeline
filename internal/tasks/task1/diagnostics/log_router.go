@@ -152,6 +152,10 @@ type routingHandler struct {
 	externalID string
 	attrs      []slog.Attr
 	groups     []string
+	// mu guards the memoised handler below. slog requires Handle to be safe for
+	// concurrent use, and the pipeline relies on it: the heartbeat goroutine of
+	// internal/llm logs through the very same logger as the stage that started it.
+	mu sync.Mutex
 	// file is the per-destination handler with the same attrs and groups applied.
 	file    slog.Handler
 	fileFor string
@@ -198,6 +202,8 @@ func (h *routingHandler) Handle(ctx context.Context, record slog.Record) error {
 
 // fileHandler applies the attrs and groups of this handler to the article log handler once.
 func (h *routingHandler) fileHandler(externalID string) slog.Handler {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	if h.file != nil && h.fileFor == externalID {
 		return h.file
 	}
