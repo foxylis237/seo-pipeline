@@ -2,8 +2,10 @@ package generation
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/foxylis237/seo-pipeline/internal/llm"
@@ -26,6 +28,13 @@ type StructureOutput struct {
 	Result    llm.Response
 	Paths     articleoutput.ArticlePaths
 }
+
+// ErrEmptyStructure reports a model answer with no structure in it.
+//
+// Проверка обязана стоять до записи: сохранённая пустая структура публикуется как готовый
+// артефакт, статья генерируется из пустоты без единой ошибки, а дальше каждый прогон видит
+// непустой structure_path, уходит на стадию article и падает там на чужом имени стадии.
+var ErrEmptyStructure = errors.New("structure returned an empty response")
 
 // StructureService owns the reusable structure-generation business stage.
 type StructureService struct {
@@ -63,6 +72,10 @@ func (s *StructureService) Generate(ctx context.Context, input article.Generatio
 	if err != nil {
 		logger.Error("ошибка LLM при генерации структуры", "stage", "generate_structure", "duration_ms", time.Since(started).Milliseconds(), "error", err)
 		return StructureOutput{}, fmt.Errorf("сгенерировать структуру для external_id %q: %w", input.Article.ExternalID, err)
+	}
+	if strings.TrimSpace(result.Text) == "" {
+		logger.Error("модель вернула пустую структуру", "stage", "generate_structure", "provider", result.Provider, "model", result.Model, "duration_ms", time.Since(started).Milliseconds())
+		return StructureOutput{}, fmt.Errorf("сгенерировать структуру для external_id %q: %w", input.Article.ExternalID, ErrEmptyStructure)
 	}
 	promptSize := len([]rune(result.Prompt))
 	pending, err := s.writer.StageStructure(input.Article.ExternalID, input.Article.Slug, result.Prompt, result.Text)

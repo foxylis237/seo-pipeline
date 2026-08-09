@@ -57,6 +57,29 @@ func TestStructureServiceDatabaseErrorKeepsPreviousFiles(t *testing.T) {
 	assertGeneratedFile(t, filepath.Join(root, filepath.FromSlash(paths.StructurePath)), "old structure")
 }
 
+// TestStructureServiceRejectsEmptyStructure фиксирует контракт ответа стадии: пустая
+// структура не должна ни публиковаться, ни сохраняться. Иначе она проходит как успех, а
+// статья запирается — следующий прогон видит непустой structure_path и падает на стадии
+// article, указывая не на ту стадию.
+func TestStructureServiceRejectsEmptyStructure(t *testing.T) {
+	root := t.TempDir()
+	writer := articleoutput.NewWriter(root)
+	repository := &fakeStructureRepository{}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	service := NewStructureService(repository, testStructureRouter(llm.Response{Text: "  \n\t "}, logger), writer, logger)
+	input := article.GenerationInput{Article: article.Article{ID: 7, ExternalID: "37", Title: "Тема", Slug: "tema"}}
+
+	if _, err := service.Generate(context.Background(), input); !errors.Is(err, ErrEmptyStructure) {
+		t.Fatalf("Generate() error = %v, want ErrEmptyStructure", err)
+	}
+	if repository.savedPath != "" {
+		t.Fatalf("путь структуры сохранён при пустом ответе: %q", repository.savedPath)
+	}
+	if _, err := os.Stat(filepath.Join(root, "37-tema", "generated", "structure.txt")); !os.IsNotExist(err) {
+		t.Fatalf("пустая структура опубликована на диск: %v", err)
+	}
+}
+
 func TestStructureServiceGenerate(t *testing.T) {
 	root := t.TempDir()
 	writer := articleoutput.NewWriter(root)
