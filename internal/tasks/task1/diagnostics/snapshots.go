@@ -39,6 +39,15 @@ func NewInputSnapshot(selected article.Article, input article.Input) InputSnapsh
 	return snapshot
 }
 
+// Where the cleaned queries of an article came from.
+const (
+	// KeywordSourceKeysSO — запросы собраны браузерной автоматизацией Keys.so.
+	KeywordSourceKeysSO = "keysso"
+	// KeywordSourceManual — запросы заполнены руками в article_research.cleaned_keywords,
+	// этап Keys.so пропущен.
+	KeywordSourceManual = "manual"
+)
+
 // KeysSOSnapshot is everything the Keys.so stage returned for one article.
 type KeysSOSnapshot struct {
 	ArticleID       int64     `json:"article_id"`
@@ -46,6 +55,7 @@ type KeysSOSnapshot struct {
 	Title           string    `json:"title"`
 	Keyword         string    `json:"keyword"`
 	ReferenceURL    string    `json:"reference_url"`
+	Source          string    `json:"source"`
 	CollectedCount  int       `json:"collected_count"`
 	CleanedCount    int       `json:"cleaned_count"`
 	Fingerprint     string    `json:"cleaned_keywords_fingerprint"`
@@ -54,11 +64,12 @@ type KeysSOSnapshot struct {
 	CleanedKeywords []string  `json:"cleaned_keywords"`
 }
 
-// NewKeysSOSnapshot records the Keys.so result together with the article it belongs to.
-func NewKeysSOSnapshot(trace article.Trace, collectedCount int, cleaned []string, duration time.Duration) KeysSOSnapshot {
+// NewKeysSOSnapshot records the collected queries together with the article they belong to
+// and the source they came from — Keys.so or a manual fill.
+func NewKeysSOSnapshot(trace article.Trace, source string, collectedCount int, cleaned []string, duration time.Duration) KeysSOSnapshot {
 	return KeysSOSnapshot{
 		ArticleID: trace.ArticleID, ExternalID: trace.ExternalID, Title: trace.Title,
-		Keyword: trace.Keyword, ReferenceURL: trace.ReferenceURL,
+		Keyword: trace.Keyword, ReferenceURL: trace.ReferenceURL, Source: source,
 		CollectedCount: collectedCount, CleanedCount: len(cleaned),
 		Fingerprint: Fingerprint(joinLines(cleaned)), DurationMS: duration.Milliseconds(),
 		CollectedAt: time.Now(), CleanedKeywords: cleaned,

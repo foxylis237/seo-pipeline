@@ -1030,6 +1030,46 @@ func (r *ArticleRepository) MarkArticlePromptBuilt(ctx context.Context, articleI
 	return nil
 }
 
+// GetManualKeywords returns the cleaned queries that were filled in by hand instead of
+// collected from Keys.so, or nil when there are none.
+//
+// Ручное заполнение опознаётся по состоянию, которого сам пайплайн создать не может:
+// SavePreparedResearch пишет очищенные запросы и структуру конкурентов одной транзакцией,
+// а до успеха Arsenkin в article_research не попадает ничего. Значит непустые
+// cleaned_keywords при пустом competitor_structure остаются только после правки руками.
+// Дополнительного флага для этого не нужно, и уже собранная статья не рискует навсегда
+// застрять на устаревших запросах: после успешного прогона competitor_structure непуст,
+// и повторный prepare снова пойдёт в Keys.so.
+func (r *ArticleRepository) GetManualKeywords(ctx context.Context, articleID int64) ([]string, error) {
+	const query = `
+		SELECT cleaned_keywords
+		FROM article_research
+		WHERE article_id = $1
+			AND NULLIF(BTRIM(COALESCE(competitor_structure, '')), '') IS NULL
+	`
+	var encoded []byte
+	if err := r.pool.QueryRow(ctx, query, articleID).Scan(&encoded); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("прочитать ручные запросы статьи %d: %w", articleID, err)
+	}
+	var stored []string
+	if err := json.Unmarshal(encoded, &stored); err != nil {
+		return nil, fmt.Errorf("разобрать ручные запросы статьи %d: %w", articleID, err)
+	}
+	keywords := make([]string, 0, len(stored))
+	for _, keyword := range stored {
+		if trimmed := strings.TrimSpace(keyword); trimmed != "" {
+			keywords = append(keywords, trimmed)
+		}
+	}
+	if len(keywords) == 0 {
+		return nil, nil
+	}
+	return keywords, nil
+}
+
 // SaveCleanedKeywords сохраняет очищенные запросы исследования статьи.
 func (r *ArticleRepository) SaveCleanedKeywords(
 	ctx context.Context,

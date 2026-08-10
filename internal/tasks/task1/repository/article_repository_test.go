@@ -1268,3 +1268,68 @@ func TestResetGenerationStateKeepsInputsAndResearch(t *testing.T) {
 		t.Fatal("research Keys.so/Arsenkin удалён при сбросе")
 	}
 }
+
+// TestGetManualKeywordsDistinguishesManualFillFromCollectedResearch проверяет условие, по
+// которому prepare решает пропускать ли Keys.so: ручные запросы видны только пока
+// competitor_structure пуст, а после успешного prepare статья снова пойдёт в Keys.so.
+func TestGetManualKeywordsDistinguishesManualFillFromCollectedResearch(t *testing.T) {
+	repository, pool := newTestRepository(t)
+	ctx := context.Background()
+
+	created, err := repository.Create(ctx, article.Input{ExcelID: 21, Title: "Ручные запросы", ImageSlug: "manual"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	keywords, err := repository.GetManualKeywords(ctx, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if keywords != nil {
+		t.Fatalf("без строки в article_research = %v, want nil", keywords)
+	}
+
+	// Ручное заполнение: только запросы, структуры конкурентов ещё нет. Пустые строки и
+	// пробелы по краям — обычный след ручной вставки, их не должно быть в результате.
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO article_research (article_id, cleaned_keywords, updated_at)
+		VALUES ($1, $2::jsonb, NOW())
+	`, created.ID, `["  первый запрос  ", "", "второй запрос"]`); err != nil {
+		t.Fatal(err)
+	}
+	keywords, err = repository.GetManualKeywords(ctx, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"первый запрос", "второй запрос"}; !reflect.DeepEqual(keywords, want) {
+		t.Fatalf("ручные запросы = %v, want %v", keywords, want)
+	}
+
+	// Пустой массив ручным заполнением не считается.
+	if _, err := pool.Exec(ctx, `UPDATE article_research SET cleaned_keywords = '[]'::jsonb WHERE article_id = $1`, created.ID); err != nil {
+		t.Fatal(err)
+	}
+	keywords, err = repository.GetManualKeywords(ctx, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if keywords != nil {
+		t.Fatalf("при пустом массиве = %v, want nil", keywords)
+	}
+
+	// После успешного prepare структура конкурентов непуста — запросы больше не ручные.
+	if err := repository.SavePreparedResearch(
+		ctx, created.ID, []string{"собранный запрос"},
+		[]article.KeywordFrequency{{Query: "собранный запрос", Frequency: 10}},
+		[]string{"lsi"}, "H1 Структура",
+	); err != nil {
+		t.Fatal(err)
+	}
+	keywords, err = repository.GetManualKeywords(ctx, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if keywords != nil {
+		t.Fatalf("после успешного prepare = %v, want nil", keywords)
+	}
+}

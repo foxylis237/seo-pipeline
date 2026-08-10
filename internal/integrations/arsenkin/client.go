@@ -3,16 +3,20 @@ package arsenkin
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -44,12 +48,33 @@ const (
 	wordstatForeignSample  = 5
 	// wordstatPollInterval — шаг ожидания между перезагрузками списка задач.
 	wordstatPollInterval = 20_000
+	// wordstatStartTimeout — бюджет подтверждения того, что Arsenkin принял запросы.
+	// Задача заводится сразу после submit, поэтому её отсутствие через полторы минуты —
+	// это отказ приёма, а не медленный расчёт: ждать такое весь бюджет результата незачем.
+	wordstatStartTimeout = 90_000
+	// submitObservationWindow — окно наблюдения за отправкой: сколько ждём POST-запрос
+	// после клика и состояние кнопки. Обработчик страницы блокирует кнопку в beforeSend,
+	// то есть до самого запроса, поэтому длинного окна тут не нужно.
+	submitObservationWindow = 10_000
+	// containerSampleRunes ограничивает выдержку из #container: туда попадает либо прогресс,
+	// либо текст ошибки сервера, и первых строк для разбора достаточно.
+	containerSampleRunes  = 500
+	diagnosticSampleRunes = 300
 	// wordstatTimeout — бюджет ожидания своей задачи. Раньше хватало и меньшего, потому что
 	// подходила любая готовая строка, в том числе чужая; теперь ждём именно свою.
 	wordstatTimeout    = 600_000
 	copywritersTimeout = 600_000
 	resultLimit        = 50
+	// maxWordstatQueries ограничивает размер отправляемого в форму списка. Лишние запросы
+	// отбрасываются с конца, порядок оставшихся сохраняется.
+	maxWordstatQueries = 49
+
+	debugArtifactsRoot = "output/task1/debug/arsenkin"
 )
+
+// errWordstatTaskNotCreated marks the state in which the start button was clicked but the
+// account still shows only the tasks that were there before.
+var errWordstatTaskNotCreated = errors.New("Wordstat не создал новую задачу")
 
 // KeywordFrequency contains one Wordstat query and its frequency.
 type KeywordFrequency struct {
@@ -99,6 +124,9 @@ type Service struct {
 	page      playwright.Page
 	profile   *os.File
 	startedAt time.Time
+	// lastSubmit — что страница сделала в ответ на последний клик запуска. Нужен, чтобы
+	// итоговая ошибка этапа несла доказательства отправки, а не только свой вердикт.
+	lastSubmit *submitOutcome
 }
 
 func New(cfg Config, logger *slog.Logger) *Service {
@@ -112,6 +140,11 @@ func (s *Service) CollectResearch(ctx context.Context, queries []string) (Result
 	if len(normalized) == 0 {
 		return Result{}, s.stageError("validate_queries", fmt.Errorf("cleaned Keys.so queries are empty"))
 	}
+	submitted := limitWordstatQueries(normalized)
+	if len(submitted) != len(normalized) {
+		s.log(slog.LevelInfo, "список запросов Wordstat обрезан до лимита формы", "wordstat_limit",
+			"original_count", len(normalized), "submitted_count", len(submitted))
+	}
 	s.log(slog.LevelInfo, "запуск Arsenkin", "start")
 	if err := s.start(); err != nil {
 		return Result{}, s.stageError("start_browser", err)
@@ -120,7 +153,7 @@ func (s *Service) CollectResearch(ctx context.Context, queries []string) (Result
 	if err := s.ensureAuthenticated(ctx); err != nil {
 		return Result{}, s.stageError("authorize", err)
 	}
-	wordstat, err := s.runWordstat(ctx, normalized)
+	wordstat, err := s.runWordstat(ctx, submitted)
 	if err != nil {
 		return Result{}, s.stageError("wordstat", err)
 	}
@@ -314,28 +347,42 @@ func (s *Service) runWordstat(ctx context.Context, queries []string) ([]KeywordF
 	}
 	s.log(slog.LevelInfo, "состояние Wordstat до запуска", "wordstat_start",
 		"known_task_count", len(knownTaskIDs), "known_task_ids", knownTaskIDs)
-	if err := input.Fill(strings.Join(queries, "\n")); err != nil {
+	expected := strings.Join(queries, "\n")
+	if err := input.Fill(expected); err != nil {
 		return nil, fmt.Errorf("fill Wordstat queries: %w", err)
 	}
-	if err := button.Click(); err != nil {
-		return nil, fmt.Errorf("start Wordstat: %w", err)
-	}
-	s.log(slog.LevelInfo, "Wordstat стартовал", "wordstat_start", "queries_count", len(queries))
-
-	for _, threshold := range []int{25, 50, 75} {
-		if err := s.waitWordstatProgressOrDownload(ctx, threshold, knownTaskIDs); err != nil {
-			return nil, err
-		}
-		progress, err := s.currentProgress()
-		if err != nil {
-			return nil, err
-		}
-		if progress >= threshold {
-			s.log(slog.LevelInfo, fmt.Sprintf("progress %d", threshold), "wordstat_progress")
-		}
-	}
-	taskID, err := s.waitWordstatDownload(ctx, knownTaskIDs)
+	filled, err := s.inspectWordstatInput(input, queries, expected)
 	if err != nil {
+		return nil, err
+	}
+	s.logCtx(ctx, slog.LevelInfo, "поле Wordstat заполнено", "wordstat_fill", filled.fields()...)
+	s.saveStageSnapshot(ctx, "after_fill", filled, nil)
+	if err := filled.accept(); err != nil {
+		s.saveDebugArtifacts(ctx, "wordstat_fill", err, debugState{KnownTaskIDs: knownTaskIDs, SubmittedCount: len(queries)})
+		return nil, err
+	}
+
+	submit := s.submitWordstat(ctx, button)
+	s.lastSubmit = &submit
+	s.saveStageSnapshot(ctx, "after_submit", submit, nil)
+	if submit.ClickErr != nil {
+		return nil, fmt.Errorf("start Wordstat: %w", submit.ClickErr)
+	}
+	s.logCtx(ctx, slog.LevelInfo, "кнопка запуска Wordstat нажата", "wordstat_start",
+		append([]any{"queries_count", len(queries)}, submit.fields()...)...)
+
+	// Клик сам по себе ничего не доказывает: форма отправляется фоновым запросом, адрес
+	// страницы не меняется, и отказ приёма выглядит ровно как принятый запрос. Признак
+	// приёма один — в списке задач аккаунта появился идентификатор, которого до запуска
+	// не было.
+	taskID, err := s.confirmWordstatTaskCreated(ctx, knownTaskIDs, len(queries))
+	if err != nil {
+		return nil, err
+	}
+	s.log(slog.LevelInfo, "Arsenkin принял запросы", "wordstat_start",
+		"known_task_count", len(knownTaskIDs), "task_id", taskID, "queries_count", len(queries))
+
+	if err := s.waitWordstatTaskCompleted(ctx, taskID); err != nil {
 		return nil, err
 	}
 	s.log(slog.LevelInfo, "progress 100", "wordstat_progress")
@@ -362,15 +409,23 @@ func (s *Service) snapshotWordstatTasks(ctx context.Context) ([]string, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if _, err := s.page.WaitForFunction(
-		`selector => document.querySelectorAll(selector).length > 0`,
-		wordstatTaskRowSelector,
-		playwright.PageWaitForFunctionOptions{Timeout: playwright.Float(wordstatHistoryTimeout)},
-	); err != nil {
+	if err := s.waitWordstatHistoryRendered(wordstatHistoryTimeout * time.Millisecond); err != nil {
 		s.log(slog.LevelWarn, "история задач Wordstat пуста или не отрисовалась", "wordstat_start",
 			"locator", wordstatTaskRowSelector, "timeout_ms", wordstatHistoryTimeout, "error", err)
 	}
 	return s.wordstatTaskIDs()
+}
+
+// waitWordstatHistoryRendered waits until the account task list is drawn in the document.
+// Список приходит отдельным XHR уже после DOMContentLoaded, поэтому это единственный
+// надёжный признак того, что читать идентификаторы задач уже имеет смысл.
+func (s *Service) waitWordstatHistoryRendered(timeout time.Duration) error {
+	_, err := s.page.WaitForFunction(
+		`selector => document.querySelectorAll(selector).length > 0`,
+		wordstatTaskRowSelector,
+		playwright.PageWaitForFunctionOptions{Timeout: playwright.Float(float64(timeout.Milliseconds()))},
+	)
+	return err
 }
 
 // acceptWordstatResult verifies the downloaded table answers the submitted queries.
@@ -412,9 +467,10 @@ func normalizeWordstatPhrase(value string) string {
 	return strings.Join(strings.Fields(strings.ReplaceAll(strings.ToLower(strings.TrimSpace(value)), "ё", "е")), " ")
 }
 
-// selectNewWordstatTask returns the task created by this run: the single completed task that
-// was not on the page before the start.
-func selectNewWordstatTask(known, completed []string) (string, error) {
+// selectNewWordstatTask returns the task created by this run: the single task on the page
+// that was not there before the start. Its errWordstatTaskNotCreated result is a state to
+// wait through while the list is still being refreshed, not yet a verdict.
+func selectNewWordstatTask(known, visible []string) (string, error) {
 	seen := make(map[string]struct{}, len(known))
 	for _, taskID := range known {
 		if trimmed := strings.TrimSpace(taskID); trimmed != "" {
@@ -422,7 +478,7 @@ func selectNewWordstatTask(known, completed []string) (string, error) {
 		}
 	}
 	fresh := make([]string, 0, 1)
-	for _, taskID := range completed {
+	for _, taskID := range visible {
 		trimmed := strings.TrimSpace(taskID)
 		if trimmed == "" {
 			continue
@@ -439,8 +495,8 @@ func selectNewWordstatTask(known, completed []string) (string, error) {
 		return fresh[0], nil
 	case 0:
 		return "", fmt.Errorf(
-			"Wordstat не создал новую задачу: на странице только прежние результаты (задач до запуска: %d, завершённых: %d)",
-			len(known), len(completed),
+			"%w: на странице только прежние результаты (задач до запуска: %d, сейчас на странице: %d)",
+			errWordstatTaskNotCreated, len(known), len(visible),
 		)
 	default:
 		return "", fmt.Errorf("Wordstat показал несколько новых задач %v: определить свою невозможно", fresh)
@@ -469,49 +525,438 @@ func decodeTaskIDs(raw any, reason string) ([]string, error) {
 	return taskIDs, nil
 }
 
-// waitWordstatDownload waits for the task started by this run to appear as completed.
+// wordstatInputState is what the textarea really holds after Fill. Сами запросы сюда не
+// попадают: длина, число строк и укороченный SHA-256 отвечают на вопрос «то ли лежит в поле»
+// не хуже, а в журнал и артефакты ключевые слова не утекают.
+type wordstatInputState struct {
+	Selector            string `json:"selector"`
+	QueriesCount        int    `json:"queries_count"`
+	ExpectedLength      int    `json:"expected_length"`
+	ExpectedLines       int    `json:"expected_lines"`
+	ExpectedFingerprint string `json:"expected_fingerprint"`
+	DOMLength           int    `json:"dom_length"`
+	DOMLines            int    `json:"dom_lines"`
+	DOMFingerprint      string `json:"dom_fingerprint"`
+	Visible             bool   `json:"visible"`
+	Enabled             bool   `json:"enabled"`
+	ReadOnly            bool   `json:"read_only"`
+	MaxLength           int    `json:"max_length"`
+}
+
+// Match отвечает на главный вопрос диагностики: в поле лежит ровно то, что отправляем.
+func (s wordstatInputState) Match() bool {
+	return s.DOMFingerprint == s.ExpectedFingerprint
+}
+
+func (s wordstatInputState) fields() []any {
+	return []any{
+		"locator", s.Selector, "queries_count", s.QueriesCount,
+		"expected_length", s.ExpectedLength, "expected_lines", s.ExpectedLines,
+		"expected_fingerprint", s.ExpectedFingerprint,
+		"dom_length", s.DOMLength, "dom_lines", s.DOMLines, "dom_fingerprint", s.DOMFingerprint,
+		"fingerprint_match", s.Match(),
+		"visible", s.Visible, "enabled", s.Enabled, "read_only", s.ReadOnly, "max_length", s.MaxLength,
+	}
+}
+
+// accept blocks the click when the field cannot carry the queries at all. Расхождение
+// отпечатков при совпавшем числе строк само по себе не отказ: страница нормализует перевод
+// строк на событии change, и такой прогон должен дойти до сервера и быть разобран по
+// артефактам, а не остановиться здесь.
+func (s wordstatInputState) accept() error {
+	switch {
+	case !s.Visible || !s.Enabled || s.ReadOnly:
+		return fmt.Errorf(
+			"поле запросов Wordstat недоступно для ввода: visible=%t enabled=%t read_only=%t",
+			s.Visible, s.Enabled, s.ReadOnly)
+	case s.DOMLength == 0:
+		return fmt.Errorf(
+			"после заполнения поле запросов Wordstat пустое: отправлять нечего (ожидалось строк: %d, символов: %d)",
+			s.ExpectedLines, s.ExpectedLength)
+	case s.DOMLines != s.ExpectedLines:
+		return fmt.Errorf(
+			"поле запросов Wordstat содержит %d строк вместо %d (символов %d вместо %d, отпечаток %s вместо %s)",
+			s.DOMLines, s.ExpectedLines, s.DOMLength, s.ExpectedLength, s.DOMFingerprint, s.ExpectedFingerprint)
+	default:
+		return nil
+	}
+}
+
+// inspectWordstatInput reads back the textarea instead of trusting a successful Fill.
+func (s *Service) inspectWordstatInput(input playwright.Locator, queries []string, expected string) (wordstatInputState, error) {
+	raw, err := input.Evaluate(`element => ({
+		value: element.value || '',
+		readOnly: Boolean(element.readOnly),
+		disabled: Boolean(element.disabled),
+		maxLength: Number(element.maxLength),
+		visible: element.getClientRects().length > 0
+	})`, nil)
+	if err != nil {
+		return wordstatInputState{}, fmt.Errorf("read Wordstat textarea state: %w", err)
+	}
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		return wordstatInputState{}, fmt.Errorf("encode Wordstat textarea state: %w", err)
+	}
+	var dom struct {
+		Value     string `json:"value"`
+		ReadOnly  bool   `json:"readOnly"`
+		Disabled  bool   `json:"disabled"`
+		MaxLength int    `json:"maxLength"`
+		Visible   bool   `json:"visible"`
+	}
+	if err := json.Unmarshal(encoded, &dom); err != nil {
+		return wordstatInputState{}, fmt.Errorf("decode Wordstat textarea state: %w", err)
+	}
+	return wordstatInputState{
+		Selector: keysSelector, QueriesCount: len(queries),
+		ExpectedLength: len([]rune(expected)), ExpectedLines: countLines(expected),
+		ExpectedFingerprint: fingerprint(expected),
+		DOMLength:           len([]rune(dom.Value)), DOMLines: countLines(dom.Value),
+		DOMFingerprint: fingerprint(dom.Value),
+		Visible:        dom.Visible, Enabled: !dom.Disabled, ReadOnly: dom.ReadOnly, MaxLength: dom.MaxLength,
+	}, nil
+}
+
+// submitOutcome is the observable proof of what the click actually did.
+type submitOutcome struct {
+	RequestStarted bool `json:"post_request_started"`
+	// Acknowledged — страница сама подтвердила отправку: beforeSend заблокировал кнопку
+	// или очистил #container. Признак из DOM, независимый от сетевого наблюдения.
+	Acknowledged   bool     `json:"submit_acknowledged"`
+	RequestURL     string   `json:"post_request_url,omitempty"`
+	ResponseStatus int      `json:"post_response_status,omitempty"`
+	ResponseBytes  int      `json:"post_response_bytes,omitempty"`
+	ButtonDisabled bool     `json:"button_disabled_after_click"`
+	ButtonText     string   `json:"button_text_after_click"`
+	ContainerText  string   `json:"container_sample"`
+	PageErrors     []string `json:"page_errors,omitempty"`
+	ConsoleErrors  []string `json:"console_errors,omitempty"`
+	Dialogs        []string `json:"dialogs,omitempty"`
+	Verdict        string   `json:"verdict"`
+	ClickErr       error    `json:"-"`
+}
+
+func (o submitOutcome) fields() []any {
+	return []any{
+		"verdict", o.Verdict, "post_request_started", o.RequestStarted, "submit_acknowledged", o.Acknowledged,
+		"post_response_status", o.ResponseStatus, "post_response_bytes", o.ResponseBytes,
+		"button_disabled", o.ButtonDisabled, "button_text", o.ButtonText,
+		"page_error_count", len(o.PageErrors), "console_error_count", len(o.ConsoleErrors),
+		"dialog_count", len(o.Dialogs),
+	}
+}
+
+const (
+	submitVerdictNotStarted = "post_not_started"
+	submitVerdictRejected   = "post_rejected"
+	submitVerdictAccepted   = "post_accepted"
+)
+
+// classifySubmit turns the observations into the three outcomes worth telling apart.
+func classifySubmit(outcome submitOutcome) string {
+	// Сеть и DOM подтверждают отправку независимо; хватает любого из двух признаков.
+	if !outcome.RequestStarted && !outcome.Acknowledged {
+		return submitVerdictNotStarted
+	}
+	if outcome.ResponseStatus != 0 && (outcome.ResponseStatus < 200 || outcome.ResponseStatus >= 300) {
+		return submitVerdictRejected
+	}
+	return submitVerdictAccepted
+}
+
+// submitWordstat clicks the start button and records what the page did in response.
+//
+// Формы на странице нет: кнопку обслуживает обработчик, который сам собирает поля и шлёт
+// POST. Поэтому успешный клик ничего не доказывает, а доказывает — сам запрос, блокировка
+// кнопки в beforeSend и содержимое #container, куда страница кладёт ответ.
+func (s *Service) submitWordstat(ctx context.Context, button playwright.Locator) submitOutcome {
+	var (
+		mutex   sync.Mutex
+		outcome submitOutcome
+	)
+	s.page.OnPageError(func(err error) {
+		mutex.Lock()
+		defer mutex.Unlock()
+		outcome.PageErrors = append(outcome.PageErrors, safeDiagnosticError(err))
+	})
+	s.page.OnConsole(func(message playwright.ConsoleMessage) {
+		if message.Type() != "error" {
+			return
+		}
+		mutex.Lock()
+		defer mutex.Unlock()
+		outcome.ConsoleErrors = append(outcome.ConsoleErrors, truncateRunes(message.Text(), diagnosticSampleRunes))
+	})
+	s.page.OnDialog(func(dialog playwright.Dialog) {
+		mutex.Lock()
+		outcome.Dialogs = append(outcome.Dialogs,
+			truncateRunes(dialog.Type()+": "+dialog.Message(), diagnosticSampleRunes))
+		mutex.Unlock()
+		// С зарегистрированным обработчиком Playwright больше не закрывает диалоги сам.
+		_ = dialog.Dismiss()
+	})
+	s.page.OnRequest(func(request playwright.Request) {
+		if !isWordstatSubmitRequest(request.Method(), request.URL()) {
+			return
+		}
+		mutex.Lock()
+		defer mutex.Unlock()
+		outcome.RequestStarted = true
+		outcome.RequestURL = request.URL()
+	})
+	s.page.OnResponse(func(response playwright.Response) {
+		if !isWordstatSubmitRequest(response.Request().Method(), response.URL()) {
+			return
+		}
+		mutex.Lock()
+		defer mutex.Unlock()
+		outcome.ResponseStatus = response.Status()
+		outcome.ResponseBytes = responseSize(response)
+	})
+
+	if outcome.ClickErr = button.Click(); outcome.ClickErr != nil {
+		return outcome
+	}
+	// Наблюдаемый признак того, что обработчик страницы дошёл до отправки: beforeSend
+	// блокирует кнопку и очищает #container перед самим запросом. Неудача этого ожидания —
+	// такое же свидетельство, как и удача, поэтому ошибку только записываем.
+	outcome.Acknowledged = s.waitSubmitAcknowledged() == nil
+
+	if state, err := s.readSubmitPageState(); err != nil {
+		s.logCtx(ctx, slog.LevelWarn, "не удалось прочитать состояние страницы после клика", "wordstat_start", "error", err)
+	} else {
+		mutex.Lock()
+		outcome.ButtonDisabled, outcome.ButtonText, outcome.ContainerText = state.disabled, state.text, state.container
+		mutex.Unlock()
+	}
+
+	mutex.Lock()
+	defer mutex.Unlock()
+	outcome.Verdict = classifySubmit(outcome)
+	return outcome
+}
+
+// waitSubmitAcknowledged waits for the page to admit it is sending the request.
+func (s *Service) waitSubmitAcknowledged() error {
+	_, err := s.page.WaitForFunction(`() => {
+		const button = document.querySelector('button#ok');
+		const container = document.querySelector('#container');
+		return Boolean(button && button.disabled) ||
+			Boolean(container && (container.innerText || '').trim().length > 0);
+	}`, nil, playwright.PageWaitForFunctionOptions{Timeout: playwright.Float(submitObservationWindow)})
+	return err
+}
+
+type submitPageState struct {
+	disabled  bool
+	text      string
+	container string
+}
+
+func (s *Service) readSubmitPageState() (submitPageState, error) {
+	raw, err := s.page.Evaluate(`() => {
+		const button = document.querySelector('button#ok');
+		const container = document.querySelector('#container');
+		return {
+			disabled: button ? Boolean(button.disabled) : false,
+			text: button ? (button.textContent || '').trim() : '',
+			container: container ? (container.innerText || '').trim() : ''
+		};
+	}`)
+	if err != nil {
+		return submitPageState{}, fmt.Errorf("read Wordstat submit state: %w", err)
+	}
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		return submitPageState{}, fmt.Errorf("encode Wordstat submit state: %w", err)
+	}
+	var state struct {
+		Disabled  bool   `json:"disabled"`
+		Text      string `json:"text"`
+		Container string `json:"container"`
+	}
+	if err := json.Unmarshal(encoded, &state); err != nil {
+		return submitPageState{}, fmt.Errorf("decode Wordstat submit state: %w", err)
+	}
+	return submitPageState{
+		disabled:  state.Disabled,
+		text:      truncateRunes(state.Text, diagnosticSampleRunes),
+		container: truncateRunes(state.Container, containerSampleRunes),
+	}, nil
+}
+
+// isWordstatSubmitRequest recognizes the POST the page sends instead of a form submit.
+func isWordstatSubmitRequest(method, requestURL string) bool {
+	return strings.EqualFold(method, "POST") && strings.Contains(requestURL, "/tools/wordstat/")
+}
+
+func responseSize(response playwright.Response) int {
+	value, found := response.Headers()["content-length"]
+	if !found {
+		return -1
+	}
+	size, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil {
+		return -1
+	}
+	return size
+}
+
+// fingerprint identifies a text without disclosing it.
+func fingerprint(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:])[:12]
+}
+
+func countLines(value string) int {
+	if value == "" {
+		return 0
+	}
+	return strings.Count(value, "\n") + 1
+}
+
+func truncateRunes(value string, limit int) string {
+	runes := []rune(strings.TrimSpace(value))
+	if len(runes) <= limit {
+		return string(runes)
+	}
+	return string(runes[:limit]) + "…"
+}
+
+// wordstatTaskList observes the Arsenkin task list. The browser sits behind function values,
+// so the rules of waiting can be checked without a page.
+type wordstatTaskList struct {
+	// waitRendered blocks until the task list of the account is drawn in the document.
+	waitRendered func(timeout time.Duration) error
+	// taskIDs returns every task identifier currently rendered.
+	taskIDs func() ([]string, error)
+	// reload re-renders the list: the page fills it on load only.
+	reload func() error
+	now    func() time.Time
+}
+
+// confirmWordstatTaskCreated proves that Arsenkin accepted the queries and opened a task.
+//
+// Без этой проверки отказ приёма неотличим от медленного расчёта: страница остаётся на том
+// же адресе, прогресс не появляется, и прогон молча выбирает весь бюджет ожидания
+// результата. Теперь несозданная задача — быстрая ошибка с диагностикой страницы.
+func (s *Service) confirmWordstatTaskCreated(ctx context.Context, knownTaskIDs []string, submitted int) (string, error) {
+	taskID, err := waitWordstatTaskCreated(ctx, knownTaskIDs, wordstatTaskList{
+		waitRendered: s.waitWordstatHistoryRendered,
+		taskIDs:      s.wordstatTaskIDs,
+		reload:       func() error { return s.reloadWordstatHistory(ctx) },
+		now:          time.Now,
+	}, func(attempt int, remaining time.Duration) {
+		s.logCtx(ctx, slog.LevelDebug, "подтверждение приёма запросов Wordstat", "wordstat_start",
+			"attempt", attempt, "known_task_count", len(knownTaskIDs), "remaining_ms", remaining.Milliseconds())
+	})
+	if err != nil {
+		s.saveDebugArtifacts(ctx, "wordstat_start", err, debugState{KnownTaskIDs: knownTaskIDs, SubmittedCount: submitted})
+		return "", err
+	}
+	return taskID, nil
+}
+
+// waitWordstatTaskCreated polls the task list until exactly one identifier outside known
+// appears. Перезагрузка между попытками обязательна: список отрисовывается при загрузке
+// страницы, поэтому в уже открытом документе новая задача не появится никогда.
+//
+// Порядок внутри попытки — «дождаться отрисовки, потом читать, и только потом
+// перезагружать». Список приходит отдельным XHR, и перезагрузка раньше срока обрывала его:
+// каждая попытка видела пустую страницу, а этап заканчивался выводом «задача не создана»,
+// хотя список ни разу не был прочитан отрисованным.
+func waitWordstatTaskCreated(ctx context.Context, known []string, list wordstatTaskList, onAttempt func(int, time.Duration)) (string, error) {
+	deadline := list.now().Add(wordstatStartTimeout * time.Millisecond)
+	lastVisible, renderedAtLeastOnce := 0, false
+	for attempt := 1; ; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		remaining := deadline.Sub(list.now())
+		if remaining <= 0 {
+			if !renderedAtLeastOnce {
+				return "", fmt.Errorf(
+					"список задач Wordstat ни разу не отрисовался за %s (задач до запуска: %d, попыток: %d): "+
+						"подтвердить или опровергнуть приём запросов невозможно",
+					wordstatStartTimeout*time.Millisecond, len(known), attempt-1,
+				)
+			}
+			return "", fmt.Errorf(
+				"%w за %s: Arsenkin не принял запросы, отрисованный список задач не изменился "+
+					"(задач до запуска: %d, в последнем списке: %d, попыток: %d)",
+				errWordstatTaskNotCreated, wordstatStartTimeout*time.Millisecond, len(known), lastVisible, attempt-1,
+			)
+		}
+		if onAttempt != nil {
+			onAttempt(attempt, remaining)
+		}
+		// Бюджет отрисовки — тот же, что и у снимка до запуска: там он уже доказал, что
+		// списка достаточно дождаться, а не угадывать шаг опроса.
+		rendered := list.waitRendered(min(wordstatHistoryTimeout*time.Millisecond, remaining)) == nil
+		visible, readErr := list.taskIDs()
+		if readErr != nil {
+			return "", readErr
+		}
+		if rendered || len(visible) > 0 {
+			renderedAtLeastOnce = true
+			lastVisible = len(visible)
+			taskID, selectErr := selectNewWordstatTask(known, visible)
+			// «Пока не создана» — повод перезагрузить список, а не ответ. Всё остальное,
+			// включая несколько новых задач сразу, повтором не лечится.
+			if selectErr == nil || !errors.Is(selectErr, errWordstatTaskNotCreated) {
+				return taskID, selectErr
+			}
+		}
+		if err := list.reload(); err != nil {
+			return "", err
+		}
+	}
+}
+
+// waitWordstatTaskCompleted waits for the task created by this run to become downloadable.
 //
 // Список задач Arsenkin отрисовывается при загрузке страницы: завершение задачи в уже
 // открытом документе не появляется само. Поэтому ждём короткими интервалами и между ними
 // перезагружаем страницу. Раньше этого было не видно, потому что подходила любая
 // завершённая строка — в том числе задача предыдущей статьи.
-func (s *Service) waitWordstatDownload(ctx context.Context, knownTaskIDs []string) (string, error) {
+func (s *Service) waitWordstatTaskCompleted(ctx context.Context, taskID string) error {
 	deadline := time.Now().Add(wordstatTimeout * time.Millisecond)
+	var progress wordstatProgressReporter
 	for attempt := 1; ; attempt++ {
 		if err := ctx.Err(); err != nil {
-			return "", err
+			return err
 		}
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
-			return "", fmt.Errorf(
-				"новая задача Wordstat не завершилась за %s: результат предыдущей задачи не принимается (задач до запуска: %d, перезагрузок страницы: %d)",
-				wordstatTimeout*time.Millisecond, len(knownTaskIDs), attempt-1,
+			err := fmt.Errorf(
+				"задача Wordstat task_id=%s не завершилась за %s: результат предыдущей задачи не принимается (перезагрузок страницы: %d)",
+				taskID, wordstatTimeout*time.Millisecond, attempt-1,
 			)
+			s.saveDebugArtifacts(ctx, "wait_download", err, debugState{AwaitedTaskID: taskID})
+			return err
 		}
-		wait := wordstatPollInterval * time.Millisecond
-		if remaining < wait {
-			wait = remaining
-		}
+		wait := min(wordstatPollInterval*time.Millisecond, remaining)
 		s.log(slog.LevelDebug, "ожидание файла результата Wordstat", "wait_download",
-			"attempt", attempt, "known_task_count", len(knownTaskIDs), "remaining_ms", remaining.Milliseconds())
-		_, err := s.page.WaitForFunction(`knownTaskIDs => {
-			const known = new Set(knownTaskIDs);
-			return Array.from(document.querySelectorAll('.arshis__row--body[data-task-id]')).some(row => {
-				const taskID = row.getAttribute('data-task-id');
-				const done = row.querySelector('.arshis__status--done');
-				const download = row.querySelector('a[href*="/tools/download/23/csv/"][href*="encode=xls"]');
-				return taskID && !known.has(taskID) && done && download;
-			});
-		}`, knownTaskIDs, playwright.PageWaitForFunctionOptions{Timeout: playwright.Float(float64(wait.Milliseconds()))})
+			"attempt", attempt, "task_id", taskID, "remaining_ms", remaining.Milliseconds())
+		// Идентификатор сравнивается как значение атрибута, а не подставляется в селектор:
+		// склейка строк сломалась бы на любом неожиданном символе в task_id.
+		_, err := s.page.WaitForFunction(`taskID => Array.from(
+			document.querySelectorAll('.arshis__row--body[data-task-id]')
+		).some(row => row.getAttribute('data-task-id') === taskID &&
+			row.querySelector('.arshis__status--done') &&
+			row.querySelector('a[href*="/tools/download/23/csv/"][href*="encode=xls"]'))`,
+			taskID, playwright.PageWaitForFunctionOptions{Timeout: playwright.Float(float64(wait.Milliseconds()))})
 		if err == nil {
-			completed, completedErr := s.completedWordstatTaskIDs()
-			if completedErr != nil {
-				return "", completedErr
+			return nil
+		}
+		if current, progressErr := s.currentProgress(); progressErr == nil && current > 0 {
+			for _, threshold := range progress.crossed(current) {
+				s.log(slog.LevelInfo, fmt.Sprintf("progress %d", threshold), "wordstat_progress", "task_id", taskID)
 			}
-			return selectNewWordstatTask(knownTaskIDs, completed)
 		}
 		if reloadErr := s.reloadWordstatHistory(ctx); reloadErr != nil {
-			return "", reloadErr
+			return reloadErr
 		}
 	}
 }
@@ -532,21 +977,6 @@ func (s *Service) reloadWordstatHistory(ctx context.Context) error {
 		return fmt.Errorf("Arsenkin session expired while waiting for the Wordstat result")
 	}
 	return nil
-}
-
-// completedWordstatTaskIDs returns the tasks whose result is ready for download.
-func (s *Service) completedWordstatTaskIDs() ([]string, error) {
-	raw, err := s.page.Locator("body").Evaluate(`body => Array.from(new Set(
-		Array.from(body.querySelectorAll('.arshis__row--body[data-task-id]'))
-			.filter(row => row.querySelector('.arshis__status--done') &&
-				row.querySelector('a[href*="/tools/download/23/csv/"][href*="encode=xls"]'))
-			.map(row => row.getAttribute('data-task-id'))
-			.filter(Boolean)
-	))`, nil)
-	if err != nil {
-		return nil, fmt.Errorf("read completed Wordstat task IDs: %w", err)
-	}
-	return decodeTaskIDs(raw, "completed Wordstat task IDs")
 }
 
 func (s *Service) downloadWordstatResult(taskID string) ([]KeywordFrequency, error) {
@@ -929,29 +1359,6 @@ func (s *Service) wordstatInput() (playwright.Locator, error) {
 	return nil, fmt.Errorf("visible verified Wordstat textarea not found")
 }
 
-func (s *Service) waitWordstatProgressOrDownload(ctx context.Context, threshold int, knownTaskIDs []string) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	s.log(slog.LevelDebug, "ожидание прогресса Wordstat", "wait_progress", "threshold", threshold)
-	_, err := s.page.WaitForFunction(`args => {
-		const text = document.body?.innerText || '';
-		const match = text.match(/Прогресс\s*:\s*(\d+)\s*%/i);
-		const progress = match ? Number(match[1]) : 0;
-		const known = new Set(args.knownTaskIDs);
-		const done = Array.from(document.querySelectorAll('.arshis__row--body[data-task-id]')).some(row => {
-			const taskID = row.getAttribute('data-task-id');
-			return taskID && !known.has(taskID) && row.querySelector('.arshis__status--done') &&
-				row.querySelector('a[href*="/tools/download/23/csv/"][href*="encode=xls"]');
-		});
-		return progress >= args.threshold || done;
-	}`, map[string]any{"threshold": threshold, "knownTaskIDs": knownTaskIDs}, playwright.PageWaitForFunctionOptions{Timeout: playwright.Float(wordstatTimeout)})
-	if err != nil {
-		return fmt.Errorf("wait for Wordstat progress %d%%: %w", threshold, err)
-	}
-	return nil
-}
-
 func (s *Service) currentProgress() (int, error) {
 	text, err := s.page.Locator("body").InnerText()
 	if err != nil {
@@ -962,6 +1369,30 @@ func (s *Service) currentProgress() (int, error) {
 		return 0, nil
 	}
 	return strconv.Atoi(match[1])
+}
+
+// wordstatProgressThresholds — ступени, о которых сообщается по ходу ожидания Wordstat.
+var wordstatProgressThresholds = []int{25, 50, 75}
+
+// wordstatProgressReporter reports each progress threshold once, as it is crossed.
+//
+// Ждать по-прежнему нечего, кроме готовой задачи в списке: именно доверие к прогресс-бару
+// давало зависание, когда задачи не существовало вовсе. Проценты остаются отчётностью —
+// по ним видно, что задача жива, но исход этапа они не решают. Поэтому пропущенная ступень
+// не откатывается: прогресс, перескочивший с 20 сразу на 80, сообщает 25, 50 и 75 подряд.
+type wordstatProgressReporter struct {
+	reported int
+}
+
+func (r *wordstatProgressReporter) crossed(progress int) []int {
+	var crossed []int
+	for _, threshold := range wordstatProgressThresholds {
+		if threshold > r.reported && progress >= threshold {
+			crossed = append(crossed, threshold)
+			r.reported = threshold
+		}
+	}
+	return crossed
 }
 
 func normalizeResults(rows []rawKeywordFrequency) ([]KeywordFrequency, error) {
@@ -999,6 +1430,26 @@ func normalizeResults(rows []rawKeywordFrequency) ([]KeywordFrequency, error) {
 		return nil, fmt.Errorf("Wordstat table contains no non-empty rows")
 	}
 	return result, nil
+}
+
+// SubmittedQueries returns exactly the phrases CollectResearch will type into the Wordstat
+// form: the normalized list cut to the form limit.
+//
+// Диагностике нужен именно этот набор. Считая «отправленным» весь cleaned_keywords, отчёт
+// называл отправленным и то, что осталось за лимитом, а проверка происхождения сверяла
+// ответ Wordstat с фразами, которых он не получал.
+func SubmittedQueries(queries []string) []string {
+	return limitWordstatQueries(normalizeInputQueries(queries))
+}
+
+// limitWordstatQueries keeps the first maxWordstatQueries phrases in their original order.
+// Обрезка идёт после нормализации и до сборки текста для textarea, поэтому отпечаток
+// поля считается уже по отправляемому списку.
+func limitWordstatQueries(queries []string) []string {
+	if len(queries) <= maxWordstatQueries {
+		return queries
+	}
+	return queries[:maxWordstatQueries]
 }
 
 func normalizeInputQueries(queries []string) []string {
@@ -1075,13 +1526,222 @@ func (s *Service) open(ctx context.Context, targetURL, stage string) error {
 
 func isLoginURL(value string) bool { return strings.Contains(value, "/tools/login") }
 
+// debugInfo describes the page state at the moment an Arsenkin stage failed.
+// Ни cookies, ни заголовки авторизации, ни сами запросы сюда не попадают.
+type debugInfo struct {
+	ArticleID      int64     `json:"article_id"`
+	Stage          string    `json:"stage"`
+	Operation      string    `json:"operation"`
+	URL            string    `json:"url"`
+	Title          string    `json:"title"`
+	ReadyState     string    `json:"ready_state"`
+	Timestamp      time.Time `json:"timestamp"`
+	Error          string    `json:"error"`
+	KnownTaskIDs   []string  `json:"known_task_ids,omitempty"`
+	PageTaskIDs    []string  `json:"page_task_ids,omitempty"`
+	AwaitedTaskID  string    `json:"awaited_task_id,omitempty"`
+	SubmittedCount int       `json:"submitted_count,omitempty"`
+	// Submit отвечает на вопрос, который иначе остаётся открытым при любом отказе ниже:
+	// ушёл ли POST вообще и что на него ответили.
+	Submit *submitOutcome `json:"submit,omitempty"`
+}
+
+// debugState — то, что известно о запуске на момент отказа. Сами запросы сюда не попадают:
+// для разбора хватает их количества.
+type debugState struct {
+	KnownTaskIDs   []string
+	AwaitedTaskID  string
+	SubmittedCount int
+}
+
+// formFragmentSelectors ограничивает выгружаемый DOM формой запросов и контейнером ответа:
+// весь документ для разбора отправки не нужен, а лишние 150 КБ на попытку — нужны ещё меньше.
+var formFragmentSelectors = []string{"#div-queries", "#container"}
+
+// saveStageSnapshot записывает лёгкий снимок стадии: скриншот, состояние и фрагмент формы.
+// В отличие от saveDebugArtifacts, вызывается и на успешном пути, поэтому не тянет за собой
+// полный HTML страницы.
+func (s *Service) saveStageSnapshot(ctx context.Context, stage string, payload any, failure error) {
+	if s.page == nil {
+		s.logCtx(ctx, slog.LevelWarn, "снимок стадии Arsenkin не сохранён: страница недоступна", stage)
+		return
+	}
+	directory, err := s.prepareDebugDirectory(ctx, stage)
+	if err != nil {
+		return
+	}
+	s.writeScreenshot(ctx, directory, stage)
+	s.writeFormFragment(ctx, directory, stage)
+	snapshot := struct {
+		ArticleID int64     `json:"article_id"`
+		Stage     string    `json:"stage"`
+		Operation string    `json:"operation"`
+		URL       string    `json:"url"`
+		Timestamp time.Time `json:"timestamp"`
+		Error     string    `json:"error,omitempty"`
+		State     any       `json:"state"`
+	}{
+		ArticleID: s.cfg.ArticleID, Stage: stage, Operation: "prepare", URL: s.currentURL(),
+		Timestamp: time.Now(), Error: safeDiagnosticError(failure), State: payload,
+	}
+	s.writeJSON(ctx, directory, "info.json", stage, snapshot)
+	s.logCtx(ctx, slog.LevelInfo, "снимок стадии Arsenkin сохранён", stage, "debug_path", directory)
+}
+
+func (s *Service) prepareDebugDirectory(ctx context.Context, stage string) (string, error) {
+	directory := filepath.Join(
+		debugArtifactsRoot,
+		fmt.Sprintf("article-%d", s.cfg.ArticleID),
+		fmt.Sprintf("%s-%s", time.Now().Format("20060102-150405.000000000"), stage),
+	)
+	if err := os.MkdirAll(directory, 0o750); err != nil {
+		s.logCtx(ctx, slog.LevelWarn, "не удалось создать каталог диагностики Arsenkin", stage,
+			"debug_path", directory, "error", err)
+		return "", err
+	}
+	return directory, nil
+}
+
+func (s *Service) writeScreenshot(ctx context.Context, directory, stage string) {
+	path := filepath.Join(directory, "screenshot.png")
+	sensitiveFields := s.page.Locator(`input[type="password"], input[name="email"], input[type="hidden"]`)
+	if _, err := s.page.Screenshot(playwright.PageScreenshotOptions{
+		Path: playwright.String(path), FullPage: playwright.Bool(true), Mask: []playwright.Locator{sensitiveFields},
+	}); err != nil {
+		s.logCtx(ctx, slog.LevelWarn, "не удалось сохранить screenshot Arsenkin", stage, "debug_path", path, "error", err)
+	}
+}
+
+func (s *Service) writeFormFragment(ctx context.Context, directory, stage string) {
+	raw, err := s.page.Evaluate(`selectors => selectors
+		.map(selector => {
+			const element = document.querySelector(selector);
+			return element ? '<!-- ' + selector + ' -->\n' + element.outerHTML : '<!-- ' + selector + ': not found -->';
+		})
+		.join('\n\n')`, formFragmentSelectors)
+	if err != nil {
+		s.logCtx(ctx, slog.LevelWarn, "не удалось получить фрагмент формы Arsenkin", stage, "error", err)
+		return
+	}
+	fragment := redactDiagnosticHTML(fmt.Sprint(raw), s.cfg.Email, s.cfg.Password)
+	if err := os.WriteFile(filepath.Join(directory, "form.html"), []byte(fragment), 0o600); err != nil {
+		s.logCtx(ctx, slog.LevelWarn, "не удалось сохранить фрагмент формы Arsenkin", stage,
+			"debug_path", directory, "error", err)
+	}
+}
+
+func (s *Service) writeJSON(ctx context.Context, directory, name, stage string, payload any) {
+	encoded, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		s.logCtx(ctx, slog.LevelWarn, "не удалось сформировать "+name+" Arsenkin", stage, "error", err)
+		return
+	}
+	if err := os.WriteFile(filepath.Join(directory, name), encoded, 0o600); err != nil {
+		s.logCtx(ctx, slog.LevelWarn, "не удалось сохранить "+name+" Arsenkin", stage,
+			"debug_path", directory, "error", err)
+	}
+}
+
+// saveDebugArtifacts stores the screenshot, HTML and page state of a failed Arsenkin stage,
+// the same way Keys.so does. Без этого отказ приёма запросов остаётся одной строкой лога.
+func (s *Service) saveDebugArtifacts(ctx context.Context, stage string, failure error, state debugState) {
+	if s.page == nil {
+		s.logCtx(ctx, slog.LevelWarn, "диагностика Arsenkin не сохранена: страница недоступна", stage)
+		return
+	}
+	timestamp := time.Now()
+	directory := filepath.Join(
+		debugArtifactsRoot,
+		fmt.Sprintf("article-%d", s.cfg.ArticleID),
+		fmt.Sprintf("%s-%s", timestamp.Format("20060102-150405.000000000"), stage),
+	)
+	if err := os.MkdirAll(directory, 0o750); err != nil {
+		s.logCtx(ctx, slog.LevelWarn, "не удалось создать каталог диагностики Arsenkin", stage, "debug_path", directory, "error", err)
+		return
+	}
+
+	screenshotPath := filepath.Join(directory, "screenshot.png")
+	sensitiveFields := s.page.Locator(`input[type="password"], input[name="email"], input[type="hidden"]`)
+	if _, err := s.page.Screenshot(playwright.PageScreenshotOptions{
+		Path: playwright.String(screenshotPath), FullPage: playwright.Bool(true), Mask: []playwright.Locator{sensitiveFields},
+	}); err != nil {
+		s.logCtx(ctx, slog.LevelWarn, "не удалось сохранить screenshot Arsenkin", stage, "debug_path", screenshotPath, "error", err)
+	}
+
+	html, htmlErr := s.page.Content()
+	if htmlErr != nil {
+		s.logCtx(ctx, slog.LevelWarn, "не удалось получить HTML Arsenkin", stage, "debug_path", directory, "error", htmlErr)
+	} else if err := os.WriteFile(filepath.Join(directory, "page.html"),
+		[]byte(redactDiagnosticHTML(html, s.cfg.Email, s.cfg.Password)), 0o600); err != nil {
+		s.logCtx(ctx, slog.LevelWarn, "не удалось сохранить HTML Arsenkin", stage, "debug_path", directory, "error", err)
+	}
+
+	title, titleErr := s.page.Title()
+	if titleErr != nil {
+		s.logCtx(ctx, slog.LevelWarn, "не удалось получить title для диагностики Arsenkin", stage, "error", titleErr)
+	}
+	readyState := "<unavailable>"
+	if value, evaluateErr := s.page.Evaluate(`() => document.readyState`); evaluateErr != nil {
+		s.logCtx(ctx, slog.LevelWarn, "не удалось получить readyState для диагностики Arsenkin", stage, "error", evaluateErr)
+	} else if state, ok := value.(string); ok {
+		readyState = state
+	}
+	pageTaskIDs, taskIDsErr := s.wordstatTaskIDs()
+	if taskIDsErr != nil {
+		s.logCtx(ctx, slog.LevelWarn, "не удалось прочитать задачи Wordstat для диагностики", stage, "error", taskIDsErr)
+	}
+	info := debugInfo{
+		ArticleID: s.cfg.ArticleID, Stage: stage, Operation: "prepare",
+		URL: s.currentURL(), Title: title, ReadyState: readyState,
+		Timestamp: timestamp, Error: safeDiagnosticError(failure),
+		KnownTaskIDs: state.KnownTaskIDs, PageTaskIDs: pageTaskIDs,
+		AwaitedTaskID: state.AwaitedTaskID, SubmittedCount: state.SubmittedCount,
+		Submit: s.lastSubmit,
+	}
+	encoded, encodeErr := json.MarshalIndent(info, "", "  ")
+	if encodeErr != nil {
+		s.logCtx(ctx, slog.LevelWarn, "не удалось сформировать info.json Arsenkin", stage, "error", encodeErr)
+	} else if err := os.WriteFile(filepath.Join(directory, "info.json"), encoded, 0o600); err != nil {
+		s.logCtx(ctx, slog.LevelWarn, "не удалось сохранить info.json Arsenkin", stage, "debug_path", directory, "error", err)
+	}
+	s.logCtx(ctx, slog.LevelInfo, "диагностика Arsenkin сохранена", stage, "debug_path", directory)
+}
+
+func redactDiagnosticHTML(html string, secrets ...string) string {
+	for _, secret := range secrets {
+		if strings.TrimSpace(secret) != "" {
+			html = strings.ReplaceAll(html, secret, "[REDACTED]")
+		}
+	}
+	return html
+}
+
+func safeDiagnosticError(err error) string {
+	if err == nil {
+		return ""
+	}
+	const maxRunes = 2000
+	runes := []rune(strings.TrimSpace(err.Error()))
+	if len(runes) > maxRunes {
+		return string(runes[:maxRunes]) + "…"
+	}
+	return string(runes)
+}
+
 func (s *Service) stageError(stage string, err error) error {
 	return &StageError{ArticleID: s.cfg.ArticleID, Stage: stage, CurrentURL: s.currentURL(), Duration: time.Since(s.startedAt), Err: err}
 }
 
 func (s *Service) log(level slog.Level, message, stage string, fields ...any) {
+	s.logCtx(context.Background(), level, message, stage, fields...)
+}
+
+// logCtx пишет журнал с живым контекстом. Общий log() до сих пор подставляет
+// context.Background() — это отдельный пункт бэклога аудита, и тянуть его целиком сюда
+// незачем; новый код передаёт ctx, как требуют правила интеграций.
+func (s *Service) logCtx(ctx context.Context, level slog.Level, message, stage string, fields ...any) {
 	attributes := []any{"stage", stage, "current_url", s.currentURL(), "duration_ms", time.Since(s.startedAt).Milliseconds()}
-	s.logger.Log(context.Background(), level, message, append(attributes, fields...)...)
+	s.logger.Log(ctx, level, message, append(attributes, fields...)...)
 }
 
 func (s *Service) currentURL() string {
