@@ -17,6 +17,19 @@ llm:
       headless: true
 
   stages:
+    # keywords — не стадия генерации статьи, а резервный источник исходных запросов для
+    # prepare. Вызывается только тогда, когда Keys.so не отдал ни одного запроса
+    # конкурента; результат уходит в ту же очистку Keys.so, что и обычный сбор.
+    # Провайдер один и тот же в обеих схемах: искать семантику через Gemini смысла нет,
+    # а DeepSeek уже настроен и не тратит квоту генерации.
+    keywords:
+      targets:
+        - { provider: deepseek_web, model: deepseek-web }
+      prompt: tasks/task_1/prompts/keywords.txt
+      temperature: 0.2
+      max_tokens: 3000
+      timeout: 180s
+
     # Режим Gemini: article, review и fix идут только через Gemini, без резерва на
     # DeepSeek. Смешивать провайдеров внутри одной статьи нельзя — когда токены Gemini
     # заканчиваются, статья целиком генерируется в DeepSeek-only режиме

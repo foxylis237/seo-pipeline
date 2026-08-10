@@ -51,6 +51,17 @@ type prepareArtifactWriter interface {
 
 type keyssoCollector interface {
 	CollectCleanKeywords(context.Context, string) (keysso.CollectResult, error)
+	// CleanKeywords очищает запросы, полученные не от Keys.so. Метод нужен резервному
+	// источнику: правила очистки остаются Keys.so-шными, меняется только происхождение
+	// исходного списка.
+	CleanKeywords(context.Context, []string) (keysso.CollectResult, error)
+}
+
+// keywordsFallback подбирает исходные запросы, когда Keys.so не нашёл у конкурента ни одного.
+// nil означает «резервного источника в этом прогоне нет» — тогда пустой результат Keys.so
+// остаётся ошибкой этапа, как и раньше.
+type keywordsFallback interface {
+	RawKeywords(ctx context.Context, articleName string) ([]string, error)
 }
 
 type arsenkinCollector interface {
@@ -67,6 +78,7 @@ func runPrepare(
 	logger *slog.Logger,
 	writer *articleoutput.Writer,
 	logRouter *diagnostics.ArticleLogRouter,
+	newFallback keywordsFallbackFactory,
 	targetExternalID string,
 ) error {
 	if targetExternalID == "" {
@@ -79,7 +91,7 @@ func runPrepare(
 			byExternalID[selected.ExternalID] = selected
 		}
 		return runSelectedArticles(ctx, selectedArticles, "prepare", func(ctx context.Context, externalID string) error {
-			return prepareArticle(ctx, articleRepository, cfg, logger, writer, logRouter, byExternalID[externalID])
+			return prepareArticle(ctx, articleRepository, cfg, logger, writer, logRouter, newFallback, byExternalID[externalID])
 		}, logger)
 	}
 	selectedArticles, err := articleRepository.GetAll(ctx)
@@ -94,7 +106,7 @@ func runPrepare(
 		if targetExternalID != "" && selected.ExternalID != targetExternalID {
 			continue
 		}
-		if err := prepareArticle(ctx, articleRepository, cfg, logger, writer, logRouter, selected); err != nil {
+		if err := prepareArticle(ctx, articleRepository, cfg, logger, writer, logRouter, newFallback, selected); err != nil {
 			return err
 		}
 		processed++
@@ -105,6 +117,11 @@ func runPrepare(
 	return nil
 }
 
+// keywordsFallbackFactory создаёт резервный источник исходных запросов для одной статьи.
+// nil-фабрика (или nil-результат) означает прогон без резерва: пустой результат Keys.so
+// останется ошибкой этапа.
+type keywordsFallbackFactory func(article.Article) keywordsFallback
+
 // prepareArticle собирает research одной статьи. Репозиторий принимается интерфейсом, потому
 // что demo-сборке нужен тот же сбор, но без переходов состояния статьи.
 func prepareArticle(
@@ -114,11 +131,16 @@ func prepareArticle(
 	logger *slog.Logger,
 	writer *articleoutput.Writer,
 	logRouter *diagnostics.ArticleLogRouter,
+	newFallback keywordsFallbackFactory,
 	selected article.Article,
 ) error {
 	// Каталога статьи может ещё не быть: сообщаем роутеру slug, чтобы prepare.log
 	// открылся с первой же записи.
 	logRouter.Register(selected.ID, selected.ExternalID, selected.Slug)
+	var fallback keywordsFallback
+	if newFallback != nil {
+		fallback = newFallback(selected)
+	}
 	return prepareArticleWithCollectors(
 		ctx,
 		articleRepository,
@@ -139,6 +161,7 @@ func prepareArticle(
 			Password:  cfg.ArsenkinPassword,
 			Headless:  cfg.ArsenkinHeadless,
 		}, logger),
+		fallback,
 	)
 }
 
@@ -153,10 +176,11 @@ func prepareArticleWithCollectors(
 	selected article.Article,
 	keyssoService keyssoCollector,
 	arsenkinService arsenkinCollector,
+	fallback keywordsFallback,
 ) error {
 	report := diagnostics.NewPrepareReport(selected)
 	resetPrepareDiagnostics(logger, artifacts, selected)
-	stage, err := collectPreparedResearch(ctx, articleRepository, cfg, logger, artifacts, selected, keyssoService, arsenkinService, report)
+	stage, err := collectPreparedResearch(ctx, articleRepository, cfg, logger, artifacts, selected, keyssoService, arsenkinService, fallback, report)
 	report.Finish(stage, err)
 	savePrepareDiagnostics(logger, artifacts, selected, diagnostics.PrepareReportFile, report)
 	return err
@@ -172,6 +196,7 @@ func collectPreparedResearch(
 	selected article.Article,
 	keyssoService keyssoCollector,
 	arsenkinService arsenkinCollector,
+	fallback keywordsFallback,
 	report *diagnostics.PrepareReport,
 ) (string, error) {
 	articleStarted := time.Now()
@@ -212,7 +237,7 @@ func collectPreparedResearch(
 	stageLogger.Info("обработка статьи начата", keyssoLogFields("article_start", stageStarted, "", 0, 0)...)
 
 	collectResult, source, failedStage, err := collectCleanedKeywords(
-		ctx, articleRepository, logger, stageLogger, artifacts, selected, trace, keyssoService, report, stageStarted,
+		ctx, articleRepository, logger, stageLogger, artifacts, selected, trace, keyssoService, fallback, report, stageStarted,
 	)
 	if err != nil {
 		return failedStage, err
@@ -369,6 +394,10 @@ func saveArticleInputDiagnostics(
 // Запросы, заполненные руками в article_research, имеют приоритет над Keys.so: их наличие —
 // явное указание не ходить в Keys.so за этой статьёй. Всё остальное — диагностика, проверка
 // релевантности, сохранение research — идёт дальше общим путём, независимо от источника.
+//
+// Третий источник — резервный подбор моделью. Он включается ровно в одном случае: Keys.so
+// дошёл до результата и не нашёл у конкурента ни одного запроса. Ни ручное заполнение, ни
+// технический отказ Keys.so сюда не ведут.
 func collectCleanedKeywords(
 	ctx context.Context,
 	articleRepository prepareRepository,
@@ -378,6 +407,7 @@ func collectCleanedKeywords(
 	selected article.Article,
 	trace article.Trace,
 	keyssoService keyssoCollector,
+	fallback keywordsFallback,
 	report *diagnostics.PrepareReport,
 	stageStarted time.Time,
 ) (keysso.CollectResult, string, string, error) {
@@ -421,6 +451,13 @@ func collectCleanedKeywords(
 
 	collected, err := keyssoService.CollectCleanKeywords(ctx, selected.ReferenceURL)
 	if err != nil {
+		// Отсутствие исходных запросов — единственный отказ, который лечится сменой
+		// источника. Таймауты, отказ авторизации и сломанная навигация остаются ошибками
+		// этапа: их повтор осмыслен, а подмена источника скрыла бы поломку интеграции.
+		if fallback != nil && keysso.NoRawKeywords(err) {
+			return collectFallbackKeywords(ctx, articleRepository, logger, stageLogger, artifacts,
+				selected, trace, keyssoService, fallback, report, stageStarted, err)
+		}
 		stage := "collect"
 		currentURL := ""
 		collectedCount := 0
@@ -460,6 +497,80 @@ func collectCleanedKeywords(
 		"fingerprint":     diagnostics.Fingerprint(strings.Join(collected.CleanedKeywords, "\n")),
 	})
 	return collected, diagnostics.KeywordSourceKeysSO, "", nil
+}
+
+// collectFallbackKeywords подбирает исходные запросы моделью и прогоняет их через ту же
+// очистку Keys.so, что и обычный сбор.
+//
+// Модель заменяет только источник исходного списка. Правила очистки в новом коде не
+// повторяются: за ними идём в ту же форму delete-double, поэтому cleaned_keywords остаётся
+// результатом Keys.so независимо от того, откуда пришли исходные запросы.
+func collectFallbackKeywords(
+	ctx context.Context,
+	articleRepository prepareRepository,
+	logger *slog.Logger,
+	stageLogger *slog.Logger,
+	artifacts prepareArtifactWriter,
+	selected article.Article,
+	trace article.Trace,
+	keyssoService keyssoCollector,
+	fallback keywordsFallback,
+	report *diagnostics.PrepareReport,
+	stageStarted time.Time,
+	collectErr error,
+) (keysso.CollectResult, string, string, error) {
+	stageLogger.Warn("Keys.so не нашёл исходных запросов, запускается резервный подбор",
+		append(keyssoLogFields("fallback_start", stageStarted, "", 0, 0),
+			"source", diagnostics.KeywordSourceFallback, "reason", collectErr.Error())...)
+	diagnostics.LogStep(logger, "keysso", "before", trace, "source", diagnostics.KeywordSourceFallback)
+
+	rawKeywords, err := fallback.RawKeywords(ctx, selected.Title)
+	if err != nil {
+		report.Fail("keywords_fallback", err.Error(), map[string]any{
+			"keysso_reason": collectErr.Error(),
+		})
+		return keysso.CollectResult{}, diagnostics.KeywordSourceFallback, "keywords_fallback",
+			savePipelineError(ctx, articleRepository, selected.ID, fmt.Errorf(
+				"резервный подбор запросов для статьи external_id=%s (Keys.so: %w): %w",
+				selected.ExternalID, collectErr, err,
+			))
+	}
+	report.Pass("keywords_fallback", map[string]any{
+		"keysso_reason": collectErr.Error(),
+		"raw_count":     len(rawKeywords),
+		"fingerprint":   diagnostics.Fingerprint(strings.Join(rawKeywords, "\n")),
+	})
+
+	collected, err := keyssoService.CleanKeywords(ctx, rawKeywords)
+	if err != nil {
+		report.Fail("keysso_collect", err.Error(), map[string]any{
+			"source": diagnostics.KeywordSourceFallback, "collected_count": len(rawKeywords),
+		})
+		return keysso.CollectResult{}, diagnostics.KeywordSourceFallback, "keysso_collect",
+			savePipelineError(ctx, articleRepository, selected.ID, newKeyssoRunError(
+				selected.ID, "clean_duplicates", stageStarted, "", len(rawKeywords), 0, err,
+			))
+	}
+	saveKeysSODiagnostics(logger, artifacts, selected, trace, diagnostics.KeywordSourceFallback, collected, time.Since(stageStarted))
+	if len(collected.CleanedKeywords) == 0 {
+		report.Fail("keysso_collect", "очистка Keys.so вернула пустой список запросов", map[string]any{
+			"source": diagnostics.KeywordSourceFallback, "collected_count": collected.CollectedCount, "cleaned_count": 0,
+		})
+		return keysso.CollectResult{}, diagnostics.KeywordSourceFallback, "keysso_collect", savePipelineError(
+			ctx,
+			articleRepository,
+			selected.ID,
+			newKeyssoRunError(selected.ID, "validate_result", stageStarted, "", collected.CollectedCount, 0,
+				fmt.Errorf("очистка Keys.so вернула пустой список запросов")),
+		)
+	}
+	report.Pass("keysso_collect", map[string]any{
+		"source":          diagnostics.KeywordSourceFallback,
+		"collected_count": collected.CollectedCount,
+		"cleaned_count":   len(collected.CleanedKeywords),
+		"fingerprint":     diagnostics.Fingerprint(strings.Join(collected.CleanedKeywords, "\n")),
+	})
+	return collected, diagnostics.KeywordSourceFallback, "", nil
 }
 
 func saveKeysSODiagnostics(

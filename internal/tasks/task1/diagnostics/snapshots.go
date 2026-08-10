@@ -46,6 +46,9 @@ const (
 	// KeywordSourceManual — запросы заполнены руками в article_research.cleaned_keywords,
 	// этап Keys.so пропущен.
 	KeywordSourceManual = "manual"
+	// KeywordSourceFallback — исходные запросы подобрала модель, потому что Keys.so не нашёл
+	// у конкурента ни одного. Очистка при этом всё равно прошла через Keys.so.
+	KeywordSourceFallback = "keywords_fallback"
 )
 
 // KeysSOSnapshot is everything the Keys.so stage returned for one article.

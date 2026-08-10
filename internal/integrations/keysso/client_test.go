@@ -200,3 +200,30 @@ func TestDiagnosticDataRedactsConfiguredCredentials(t *testing.T) {
 		t.Fatalf("safeDiagnosticError() = %q", got)
 	}
 }
+
+// TestNoRawKeywordsDistinguishesEmptyResultFromFailure: по этому признаку вызывающий решает,
+// искать ли запросы в другом источнике. Ошибка приезжает к нему завёрнутой в StageError,
+// поэтому проверяется вся цепочка, а не голый sentinel.
+func TestNoRawKeywordsDistinguishesEmptyResultFromFailure(t *testing.T) {
+	empty := &StageError{
+		Stage: "collect_competitor_queries",
+		Err: &resultError{Kind: resultNoData, Retryable: false,
+			Err: fmt.Errorf("%w: таблица запросов конкурента пуста", ErrNoRawKeywords)},
+	}
+	if !NoRawKeywords(empty) {
+		t.Fatal("пустой результат Keys.so не опознан как отсутствие исходных запросов")
+	}
+
+	for name, err := range map[string]error{
+		"таймаут": &StageError{Stage: "wait_search_results",
+			Err: &resultError{Kind: resultTimeout, Retryable: true, Err: errors.New("timeout")}},
+		"технические работы": &StageError{Stage: "wait_search_results",
+			Err: &resultError{Kind: resultMaintenance, Retryable: true, Err: errors.New("maintenance")}},
+		"пустая очистка": &StageError{Stage: "clean_duplicates",
+			Err: errors.New("duplicate cleanup result is empty")},
+	} {
+		if NoRawKeywords(err) {
+			t.Errorf("%s опознан как отсутствие исходных запросов", name)
+		}
+	}
+}

@@ -132,6 +132,12 @@ type fakeKeysSOCollector struct {
 	result keysso.CollectResult
 	err    error
 	calls  *int
+	// cleanResult и cleanErr отвечают на очистку запросов, пришедших не из Keys.so.
+	cleanResult keysso.CollectResult
+	cleanErr    error
+	// cleaned принимает исходный список, отданный на очистку: по нему видно, что резервный
+	// источник дошёл до формы delete-double, а не в обход неё.
+	cleaned *[]string
 }
 
 func (c fakeKeysSOCollector) CollectCleanKeywords(context.Context, string) (keysso.CollectResult, error) {
@@ -139,6 +145,13 @@ func (c fakeKeysSOCollector) CollectCleanKeywords(context.Context, string) (keys
 		(*c.calls)++
 	}
 	return c.result, c.err
+}
+
+func (c fakeKeysSOCollector) CleanKeywords(_ context.Context, queries []string) (keysso.CollectResult, error) {
+	if c.cleaned != nil {
+		*c.cleaned = append([]string(nil), queries...)
+	}
+	return c.cleanResult, c.cleanErr
 }
 
 type fakeArsenkinCollector struct {
@@ -171,7 +184,7 @@ func TestPrepareArticleReplacesResearchOnlyAfterAllCollectorsSucceed(t *testing.
 	}}
 
 	artifacts := newFakePrepareArtifacts()
-	err := prepareArticleWithCollectors(context.Background(), repository, config.Config{}, testPrepareLogger(), artifacts, testPreparedArticle(), keyssoService, arsenkinService)
+	err := prepareArticleWithCollectors(context.Background(), repository, config.Config{}, testPrepareLogger(), artifacts, testPreparedArticle(), keyssoService, arsenkinService, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,7 +209,7 @@ func TestPrepareArticleKeepsPreviousResultsOnKeysSOError(t *testing.T) {
 
 	err := prepareArticleWithCollectors(
 		context.Background(), repository, config.Config{}, testPrepareLogger(), newFakePrepareArtifacts(), testPreparedArticle(),
-		fakeKeysSOCollector{err: wantErr}, fakeArsenkinCollector{calls: &arsenkinCalls},
+		fakeKeysSOCollector{err: wantErr}, fakeArsenkinCollector{calls: &arsenkinCalls}, nil,
 	)
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("error = %v, want %v", err, wantErr)
@@ -215,7 +228,7 @@ func TestPrepareArticleKeepsPreviousResultsOnArsenkinError(t *testing.T) {
 	err := prepareArticleWithCollectors(
 		context.Background(), repository, config.Config{}, testPrepareLogger(), newFakePrepareArtifacts(), testPreparedArticle(),
 		fakeKeysSOCollector{result: keysso.CollectResult{CollectedCount: 1, CleanedKeywords: []string{"частично новый cleaned"}}},
-		fakeArsenkinCollector{err: wantErr},
+		fakeArsenkinCollector{err: wantErr}, nil,
 	)
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("error = %v, want %v", err, wantErr)
@@ -234,7 +247,7 @@ func TestPrepareArticleDoesNotSavePartiallyCollectedArsenkinResult(t *testing.T)
 		fakeArsenkinCollector{
 			result: arsenkin.Result{WordstatKeywords: []arsenkin.KeywordFrequency{{Query: "частичный wordstat", Frequency: 99}}},
 			err:    wantErr,
-		},
+		}, nil,
 	)
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("error = %v, want %v", err, wantErr)
@@ -257,7 +270,7 @@ func TestPrepareArticleReportsDatabaseFailureAsItself(t *testing.T) {
 			WordstatKeywords:    []arsenkin.KeywordFrequency{{Query: "бариста обучение", Frequency: 100}},
 			LSIWords:            []string{"кофе"},
 			CompetitorStructure: "H1 - Бариста",
-		}},
+		}}, nil,
 	)
 	if !errors.Is(err, databaseErr) {
 		t.Fatalf("error = %v, want database error", err)
@@ -329,7 +342,7 @@ func TestPrepareArticleRejectsKeysSOResultOfAnotherArticle(t *testing.T) {
 		fakeKeysSOCollector{result: keysso.CollectResult{
 			CollectedCount: 2, CleanedKeywords: []string{"монтаж пластиковых окон", "замена стеклопакета"},
 		}},
-		fakeArsenkinCollector{},
+		fakeArsenkinCollector{}, nil,
 	)
 	if err == nil || !strings.Contains(err.Error(), "не связанные") {
 		t.Fatalf("error = %v, want a keyword relevance failure", err)
@@ -353,7 +366,7 @@ func TestPrepareArticleRejectsWordstatResultOfAnotherArticle(t *testing.T) {
 			WordstatKeywords:    []arsenkin.KeywordFrequency{{Query: "монтаж пластиковых окон", Frequency: 500}},
 			LSIWords:            []string{"стеклопакет"},
 			CompetitorStructure: "структура другой статьи",
-		}},
+		}}, nil,
 	)
 	if err == nil || !strings.Contains(err.Error(), "не отправлялись") {
 		t.Fatalf("error = %v, want a Wordstat membership failure", err)
@@ -376,7 +389,7 @@ func TestPrepareSavesDiagnosticsForSuccessfulRun(t *testing.T) {
 			WordstatKeywords:    []arsenkin.KeywordFrequency{{Query: "работа бариста", Frequency: 500}},
 			LSIWords:            []string{"кофе"},
 			CompetitorStructure: "H1 Бариста",
-		}},
+		}}, nil,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -427,7 +440,7 @@ func TestPrepareReportRecordsFailedCheck(t *testing.T) {
 			WordstatKeywords:    []arsenkin.KeywordFrequency{{Query: "монтаж пластиковых окон", Frequency: 500}},
 			LSIWords:            []string{"стеклопакет"},
 			CompetitorStructure: "структура другой статьи",
-		}},
+		}}, nil,
 	)
 	if err == nil {
 		t.Fatal("прогон с чужим результатом Wordstat не остановлен")
@@ -466,7 +479,7 @@ func TestPrepareSurvivesDiagnosticsWriteFailure(t *testing.T) {
 		fakeArsenkinCollector{result: arsenkin.Result{
 			WordstatKeywords: []arsenkin.KeywordFrequency{{Query: "новый cleaned", Frequency: 20}},
 			LSIWords:         []string{"новый lsi"}, CompetitorStructure: "новая структура",
-		}},
+		}}, nil,
 	)
 	if err != nil {
 		t.Fatalf("сбой записи диагностики остановил успешный prepare: %v", err)
@@ -487,7 +500,7 @@ func TestPrepareClearsStaleDiagnosticsBeforeRun(t *testing.T) {
 
 	err := prepareArticleWithCollectors(
 		context.Background(), repository, config.Config{}, testPrepareLogger(), artifacts, testPreparedArticle(),
-		fakeKeysSOCollector{err: wantErr}, fakeArsenkinCollector{},
+		fakeKeysSOCollector{err: wantErr}, fakeArsenkinCollector{}, nil,
 	)
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("error = %v, want %v", err, wantErr)
@@ -530,7 +543,7 @@ func TestPrepareArticleUsesManualKeywordsInsteadOfKeysSO(t *testing.T) {
 	err := prepareArticleWithCollectors(
 		context.Background(), repository, config.Config{}, testPrepareLogger(), artifacts, testPreparedArticle(),
 		fakeKeysSOCollector{calls: &keyssoCalls, err: errors.New("Keys.so не должен вызываться")},
-		arsenkinService,
+		arsenkinService, nil,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -583,7 +596,7 @@ func TestPrepareArticleUsesManualKeywordsWithoutReferenceURL(t *testing.T) {
 			WordstatKeywords:    []arsenkin.KeywordFrequency{{Query: "ручной запрос", Frequency: 100}},
 			LSIWords:            []string{"новый lsi"},
 			CompetitorStructure: "новая структура",
-		}},
+		}}, nil,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -610,7 +623,7 @@ func TestPrepareArticleMarksKeysSOAsSourceWithoutManualKeywords(t *testing.T) {
 			WordstatKeywords:    []arsenkin.KeywordFrequency{{Query: "собранный запрос", Frequency: 20}},
 			LSIWords:            []string{"новый lsi"},
 			CompetitorStructure: "новая структура",
-		}},
+		}}, nil,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -662,7 +675,7 @@ func TestPrepareArticleReportsOnlyActuallySubmittedQueries(t *testing.T) {
 				{Query: wantSubmitted[1], Frequency: 400},
 			},
 			LSIWords: []string{"кофе"}, CompetitorStructure: "H1 Бариста",
-		}},
+		}}, nil,
 	)
 	if err != nil {
 		t.Fatal(err)

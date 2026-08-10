@@ -318,6 +318,9 @@ func TestTask1StageProvidersMatchConfiguredScheme(t *testing.T) {
 		// существует только ради обязательной валидации стадии.
 		{stage: "fix", providers: []string{"gemini"}},
 		{stage: "html", providers: []string{"deepseek_web"}},
+		// keywords — резервный источник исходных запросов в prepare, не стадия генерации.
+		// Провайдер тот же в обеих схемах: подбор семантики не должен тратить квоту Gemini.
+		{stage: "keywords", providers: []string{"deepseek_web"}},
 	}
 	for _, test := range tests {
 		t.Run(test.stage, func(t *testing.T) {

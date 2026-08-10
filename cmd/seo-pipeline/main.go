@@ -125,7 +125,14 @@ func main() {
 		err = runImportCheck(ctx, articleRepository, cfg.InputFilePath, os.Stdout, command.ExternalID)
 
 	case "prepare":
-		err = runPrepare(ctx, articleRepository, cfg, taskLogger, writer, logRouter, command.ExternalID)
+		// Резервный источник запросов строится заранее, но браузер провайдера не
+		// открывается: клиент DeepSeek создаёт сессию только на первом запросе, а его
+		// не будет, пока Keys.so отдаёт запросы сам.
+		newFallback, closeLLM := newPrepareKeywordsFallback(ctx, generationDeps{
+			repository: articleRepository, writer: writer, result: resultService, logger: taskLogger,
+		})
+		err = runPrepare(ctx, articleRepository, cfg, taskLogger, writer, logRouter, newFallback, command.ExternalID)
+		err = errors.Join(err, closeLLM())
 
 	case "result":
 		runResult := func(ctx context.Context, externalID string) error {
@@ -183,12 +190,15 @@ func main() {
 			err = buildErr
 			break
 		}
+		// Резервный источник исходных запросов для prepare: та же схема маршрутизации, что
+		// у генерации этой статьи.
+		newKeywordsFallback := newKeywordsFallbackFactory(mode, taskLogger)
 		// DEMO собирается отдельной операцией: статус, current_step и error_message статьи
 		// её не выбирают и ею не меняются, а маршрутизация берётся та же, что у боевого
 		// прогона этой статьи.
 		buildDemo := func(ctx context.Context, externalID string) error {
 			preparer := demo.PrepareFunc(func(ctx context.Context, externalID string) error {
-				return runDemoPrepare(ctx, articleRepository, cfg, taskLogger, writer, logRouter, externalID)
+				return runDemoPrepare(ctx, articleRepository, cfg, taskLogger, writer, logRouter, newKeywordsFallback, externalID)
 			})
 			builder := demo.NewBuilder(cfg.OutputDir, articleRepository, writer, resultService,
 				mode.routerFor(externalID), preparer, taskLogger)
@@ -213,7 +223,7 @@ func main() {
 					if validateErr := cfg.ValidatePrepare(); validateErr != nil {
 						return validateErr
 					}
-					return runPrepare(ctx, articleRepository, cfg, taskLogger, writer, logRouter, externalID)
+					return runPrepare(ctx, articleRepository, cfg, taskLogger, writer, logRouter, newKeywordsFallback, externalID)
 				case stageStructure:
 					_, stageErr := pipeline.RunStructureByExternalID(ctx, externalID)
 					return stageErr

@@ -17,7 +17,11 @@ const (
 	DefaultLLMTimeout     = 2 * time.Minute
 )
 
-var requiredLLMStages = []string{"structure", "article", "info", "review", "fix", "html"}
+// requiredLLMStages — стадии, без которых конфигурация неполна. Кроме шести стадий генерации
+// сюда входит keywords: она выполняется не в пайплайне, а в prepare, но промпт и маршрут ей
+// нужны такие же обязательные — иначе отсутствие резервного источника запросов выяснится
+// только в момент, когда Keys.so уже вернул пустой результат.
+var requiredLLMStages = []string{"structure", "article", "info", "review", "fix", "html", "keywords"}
 
 type LLMFileConfig struct {
 	LLM LLMConfig `yaml:"llm"`

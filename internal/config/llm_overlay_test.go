@@ -33,11 +33,20 @@ func TestDeepSeekOverlaySwitchesEveryStageToOneProvider(t *testing.T) {
 		if len(stage.Targets) != 1 || stage.Targets[0].Provider != "deepseek_web" {
 			t.Fatalf("стадия %q: targets = %+v, ожидался единственный deepseek_web", stageName, stage.Targets)
 		}
-		if want := "tasks/task_1/prompts/deepseek/"; len(stage.Prompt) < len(want) || stage.Prompt[:len(want)] != want {
-			t.Fatalf("стадия %q использует промпт %q вместо DeepSeek-версии", stageName, stage.Prompt)
-		}
 		if stage.PromptTemplate == "" {
 			t.Fatalf("стадия %q: шаблон промпта не загружен", stageName)
+		}
+		// keywords не участвует в диалоге статьи: она выполняется в prepare, отдельным
+		// запросом и до первой стадии генерации. Своей DeepSeek-версии промпта у неё
+		// поэтому нет и быть не должно — второй копии одного текста не заводим.
+		if stageName == "keywords" {
+			if stage.Prompt != "tasks/task_1/prompts/keywords.txt" {
+				t.Fatalf("стадия keywords использует промпт %q вместо общего", stage.Prompt)
+			}
+			continue
+		}
+		if want := "tasks/task_1/prompts/deepseek/"; len(stage.Prompt) < len(want) || stage.Prompt[:len(want)] != want {
+			t.Fatalf("стадия %q использует промпт %q вместо DeepSeek-версии", stageName, stage.Prompt)
 		}
 	}
 	if !cfg.Providers["deepseek_web"].SingleChatPerArticle {

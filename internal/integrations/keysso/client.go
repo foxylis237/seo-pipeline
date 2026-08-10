@@ -170,25 +170,13 @@ func (s *Service) CollectCleanKeywords(ctx context.Context, referenceURL string)
 	if err := checkContext(ctx, "before starting browser"); err != nil {
 		return CollectResult{}, s.stageError("start_browser", err)
 	}
-	if err := s.start(); err != nil {
+	if err := s.start(ctx); err != nil {
 		return CollectResult{}, s.stageError("start_browser", err)
 	}
 	defer func() { _ = s.Close() }()
 
-	var authenticationErr error
-	for attempt := 1; attempt <= keywordsTableMaxAttempts; attempt++ {
-		authenticationErr = s.ensureAuthenticated(ctx)
-		if authenticationErr == nil {
-			break
-		}
-		var classified *resultError
-		if !errors.As(authenticationErr, &classified) || !classified.Retryable {
-			return CollectResult{}, s.stageError("check_authorization", s.captureError("check_authorization", attempt, keywordsTableMaxAttempts, authenticationErr))
-		}
-		authenticationErr = s.captureError("check_authorization", attempt, keywordsTableMaxAttempts, authenticationErr)
-		if attempt == keywordsTableMaxAttempts {
-			return CollectResult{}, s.stageError("check_authorization", authenticationErr)
-		}
+	if err := s.authenticateWithRetries(ctx); err != nil {
+		return CollectResult{}, err
 	}
 	queries, err := s.collectCompetitorQueries(ctx, referenceURL)
 	if err != nil {
@@ -207,12 +195,82 @@ func (s *Service) CollectCleanKeywords(ctx context.Context, referenceURL string)
 	}, nil
 }
 
-func (s *Service) start() error {
+// CleanKeywords прогоняет через очистку Keys.so запросы, полученные не от самого Keys.so.
+//
+// Нужен, когда исходных запросов у конкурента не оказалось и их подобрал резервный источник:
+// правила очистки должны остаться ровно одни и те же, независимо от происхождения списка,
+// поэтому здесь открывается та же форма delete-double, а не пишется вторая очистка.
+func (s *Service) CleanKeywords(ctx context.Context, queries []string) (CollectResult, error) {
+	s.startedAt = time.Now()
+	s.collectedCount = len(queries)
+	s.cleanedCount = 0
+	s.requestedURL = ""
+	s.resultsURL = ""
+	if len(queries) == 0 {
+		return CollectResult{}, s.stageError("validate_raw_keywords", fmt.Errorf("raw keywords list is empty"))
+	}
+	if err := checkContext(ctx, "before starting browser"); err != nil {
+		return CollectResult{}, s.stageError("start_browser", err)
+	}
+	if err := s.start(ctx); err != nil {
+		return CollectResult{}, s.stageError("start_browser", err)
+	}
+	defer func() { _ = s.Close() }()
+
+	if err := s.authenticateWithRetries(ctx); err != nil {
+		return CollectResult{}, err
+	}
+	cleaned, err := s.cleanDuplicates(ctx, queries)
+	if err != nil {
+		return CollectResult{}, s.stageError("clean_duplicates", s.captureErrorContext(ctx, "clean_duplicates", 1, 1, err))
+	}
+	s.cleanedCount = len(cleaned)
+	return CollectResult{
+		CollectedCount:  len(queries),
+		CleanedKeywords: cleaned,
+	}, nil
+}
+
+// ErrNoRawKeywords — Keys.so дошёл до результата и не нашёл у конкурента ни одного запроса.
+//
+// Это окончательный ответ сервиса, а не техническая неудача: ни повтор, ни другой браузер
+// его не изменят. Ошибка объявлена в публичном виде, потому что только по ней вызывающий
+// может отличить «данных нет» от «интеграция сломалась» — и решить, искать ли запросы в
+// другом источнике.
+var ErrNoRawKeywords = errors.New("Keys.so вернул пустой список запросов конкурента")
+
+// NoRawKeywords сообщает, что этап закончился отсутствием исходных запросов.
+// Таймауты, отказ авторизации и сломанная навигация сюда не попадают.
+func NoRawKeywords(err error) bool { return errors.Is(err, ErrNoRawKeywords) }
+
+// authenticateWithRetries доводит сессию до авторизованного состояния, повторяя только
+// временные отказы. Общая для сбора и для отдельно вызванной очистки: обе открывают
+// страницы Keys.so и обе требуют живой сессии.
+func (s *Service) authenticateWithRetries(ctx context.Context) error {
+	var authenticationErr error
+	for attempt := 1; attempt <= keywordsTableMaxAttempts; attempt++ {
+		authenticationErr = s.ensureAuthenticated(ctx)
+		if authenticationErr == nil {
+			return nil
+		}
+		var classified *resultError
+		if !errors.As(authenticationErr, &classified) || !classified.Retryable {
+			return s.stageError("check_authorization", s.captureError("check_authorization", attempt, keywordsTableMaxAttempts, authenticationErr))
+		}
+		authenticationErr = s.captureError("check_authorization", attempt, keywordsTableMaxAttempts, authenticationErr)
+	}
+	return s.stageError("check_authorization", authenticationErr)
+}
+
+// start поднимает Playwright и открывает persistent-профиль. Контекст берётся параметром
+// только ради логирования: сам запуск браузера отменяемых операций не содержит, а обе точки
+// входа вызывают start уже после checkContext.
+func (s *Service) start(ctx context.Context) error {
 	if err := s.Close(); err != nil {
 		return fmt.Errorf("close previous Keys.so session: %w", err)
 	}
 
-	s.log(slog.LevelDebug, "запуск Playwright", "start_browser", "profile_path", profilePath)
+	s.logContext(ctx, slog.LevelDebug, "запуск Playwright", "start_browser", "profile_path", profilePath)
 	if err := os.MkdirAll(profilePath, 0o700); err != nil {
 		return fmt.Errorf("create persistent browser profile: %w", err)
 	}
@@ -251,7 +309,7 @@ func (s *Service) start() error {
 	s.pw = pw
 	s.browserContext = browserContext
 	s.page = page
-	s.log(slog.LevelDebug, "Playwright запущен с постоянным профилем", "start_browser")
+	s.logContext(ctx, slog.LevelDebug, "Playwright запущен с постоянным профилем", "start_browser")
 	return nil
 }
 
@@ -481,7 +539,11 @@ func (s *Service) collectCompetitorQueries(ctx context.Context, referenceURL str
 		return nil, fmt.Errorf("decode competitor queries: %w", err)
 	}
 	if len(queries) == 0 {
-		return nil, fmt.Errorf("competitor queries list is empty")
+		// Пустая таблица — окончательный ответ Keys.so о конкуренте, а не техническая
+		// неудача: повтор её не изменит. Классифицируем так же, как «Нет данных» на
+		// странице результатов, чтобы вызывающий мог отличить отсутствие данных от отказа.
+		return nil, &resultError{Kind: resultNoData, Retryable: false,
+			Err: fmt.Errorf("%w: таблица запросов конкурента пуста", ErrNoRawKeywords)}
 	}
 	s.collectedCount = len(queries)
 	s.log(slog.LevelInfo, "запросы конкурента получены", "collect_competitor_queries")
@@ -652,7 +714,7 @@ func (s *Service) waitKeywordsResultsOnce(ctx context.Context) error {
 	case resultSuccess:
 		return nil
 	case resultNoData:
-		return &resultError{Kind: resultNoData, Retryable: false, Err: fmt.Errorf("Keys.so returned no data for reference URL: %s", s.referenceURL)}
+		return &resultError{Kind: resultNoData, Retryable: false, Err: fmt.Errorf("%w: страница результатов для %s пуста", ErrNoRawKeywords, s.referenceURL)}
 	case resultMaintenance:
 		return &resultError{Kind: resultMaintenance, Retryable: true, Err: fmt.Errorf("Keys.so is unavailable: maintenance page detected")}
 	case resultNavigationError:
@@ -957,7 +1019,10 @@ func resultErrorFields(err error) (string, bool) {
 	return string(resultTimeout), true
 }
 
-func (s *Service) captureError(stage string, attempt, maxAttempts int, err error) error {
+// captureErrorContext сохраняет диагностику неудачной попытки в переданном контексте.
+// Нужен там, где у вызывающего есть ctx; captureError остался обёрткой, поэтому остальные
+// шесть точек вызова не тронуты и ведут себя как раньше.
+func (s *Service) captureErrorContext(ctx context.Context, stage string, attempt, maxAttempts int, err error) error {
 	if err == nil {
 		return nil
 	}
@@ -968,14 +1033,18 @@ func (s *Service) captureError(stage string, attempt, maxAttempts int, err error
 	if s.saveDebugArtifactsHook != nil {
 		s.saveDebugArtifactsHook(stage, attempt, maxAttempts, err)
 	} else {
-		s.saveDebugArtifacts(stage, attempt, maxAttempts, err)
+		s.saveDebugArtifacts(ctx, stage, attempt, maxAttempts, err)
 	}
 	return &debugCapturedError{err: err}
 }
 
-func (s *Service) saveDebugArtifacts(stage string, attempt, maxAttempts int, processingErr error) {
+func (s *Service) captureError(stage string, attempt, maxAttempts int, err error) error {
+	return s.captureErrorContext(context.Background(), stage, attempt, maxAttempts, err)
+}
+
+func (s *Service) saveDebugArtifacts(ctx context.Context, stage string, attempt, maxAttempts int, processingErr error) {
 	if s.page == nil {
-		s.log(slog.LevelWarn, "Keys.so debug artifacts were not saved: page is unavailable", stage, "attempt", attempt)
+		s.logContext(ctx, slog.LevelWarn, "Keys.so debug artifacts were not saved: page is unavailable", stage, "attempt", attempt)
 		return
 	}
 	timestamp := time.Now()
@@ -985,7 +1054,7 @@ func (s *Service) saveDebugArtifacts(stage string, attempt, maxAttempts int, pro
 		fmt.Sprintf("%s-attempt-%d", timestamp.Format("20060102-150405.000000000"), attempt),
 	)
 	if err := os.MkdirAll(directory, 0o750); err != nil {
-		s.log(slog.LevelWarn, "не удалось создать каталог Keys.so debug", stage, "attempt", attempt, "debug_path", directory, "error", err)
+		s.logContext(ctx, slog.LevelWarn, "не удалось создать каталог Keys.so debug", stage, "attempt", attempt, "debug_path", directory, "error", err)
 		return
 	}
 
@@ -994,23 +1063,23 @@ func (s *Service) saveDebugArtifacts(stage string, attempt, maxAttempts int, pro
 	if _, err := s.page.Screenshot(playwright.PageScreenshotOptions{
 		Path: playwright.String(screenshotPath), FullPage: playwright.Bool(true), Mask: []playwright.Locator{sensitiveFields},
 	}); err != nil {
-		s.log(slog.LevelWarn, "не удалось сохранить screenshot Keys.so", stage, "attempt", attempt, "debug_path", screenshotPath, "error", err)
+		s.logContext(ctx, slog.LevelWarn, "не удалось сохранить screenshot Keys.so", stage, "attempt", attempt, "debug_path", screenshotPath, "error", err)
 	}
 
 	html, htmlErr := s.page.Content()
 	if htmlErr != nil {
-		s.log(slog.LevelWarn, "не удалось получить HTML Keys.so", stage, "attempt", attempt, "debug_path", directory, "error", htmlErr)
+		s.logContext(ctx, slog.LevelWarn, "не удалось получить HTML Keys.so", stage, "attempt", attempt, "debug_path", directory, "error", htmlErr)
 	} else if err := os.WriteFile(filepath.Join(directory, "page.html"), []byte(redactDiagnosticHTML(html, s.cfg.Email, s.cfg.Password)), 0o600); err != nil {
-		s.log(slog.LevelWarn, "не удалось сохранить HTML Keys.so", stage, "attempt", attempt, "debug_path", directory, "error", err)
+		s.logContext(ctx, slog.LevelWarn, "не удалось сохранить HTML Keys.so", stage, "attempt", attempt, "debug_path", directory, "error", err)
 	}
 
 	title, titleErr := s.page.Title()
 	if titleErr != nil {
-		s.log(slog.LevelWarn, "не удалось получить title для Keys.so debug", stage, "attempt", attempt, "error", titleErr)
+		s.logContext(ctx, slog.LevelWarn, "не удалось получить title для Keys.so debug", stage, "attempt", attempt, "error", titleErr)
 	}
 	readyState := "<unavailable>"
 	if value, evaluateErr := s.page.Evaluate(`() => document.readyState`); evaluateErr != nil {
-		s.log(slog.LevelWarn, "не удалось получить readyState для Keys.so debug", stage, "attempt", attempt, "error", evaluateErr)
+		s.logContext(ctx, slog.LevelWarn, "не удалось получить readyState для Keys.so debug", stage, "attempt", attempt, "error", evaluateErr)
 	} else if state, ok := value.(string); ok {
 		readyState = state
 	}
@@ -1024,11 +1093,11 @@ func (s *Service) saveDebugArtifacts(stage string, attempt, maxAttempts int, pro
 	}
 	encoded, encodeErr := json.MarshalIndent(info, "", "  ")
 	if encodeErr != nil {
-		s.log(slog.LevelWarn, "не удалось сформировать Keys.so info.json", stage, "attempt", attempt, "error", encodeErr)
+		s.logContext(ctx, slog.LevelWarn, "не удалось сформировать Keys.so info.json", stage, "attempt", attempt, "error", encodeErr)
 	} else if err := os.WriteFile(filepath.Join(directory, "info.json"), encoded, 0o600); err != nil {
-		s.log(slog.LevelWarn, "не удалось сохранить Keys.so info.json", stage, "attempt", attempt, "debug_path", directory, "error", err)
+		s.logContext(ctx, slog.LevelWarn, "не удалось сохранить Keys.so info.json", stage, "attempt", attempt, "debug_path", directory, "error", err)
 	}
-	s.log(slog.LevelInfo, "Keys.so debug artifacts saved", stage, "attempt", attempt, "debug_path", directory)
+	s.logContext(ctx, slog.LevelInfo, "Keys.so debug artifacts saved", stage, "attempt", attempt, "debug_path", directory)
 }
 
 func safeDiagnosticError(err error) string {
@@ -1223,7 +1292,12 @@ func (s *Service) stageError(stage string, err error) error {
 	}
 }
 
-func (s *Service) log(level slog.Level, message, stage string, attributes ...any) {
+// logContext пишет запись этапа в переданном контексте.
+//
+// Отдельная функция нужна там, где контекст есть на руках: без неё вызывающий с ctx не может
+// залогировать ничего, не потеряв его. Общий log остался обёрткой — переписывать все четыре
+// десятка его вызовов ради этого не требуется, и остальной пакет ведёт себя как раньше.
+func (s *Service) logContext(ctx context.Context, level slog.Level, message, stage string, attributes ...any) {
 	duration := time.Duration(0)
 	if !s.startedAt.IsZero() {
 		duration = time.Since(s.startedAt)
@@ -1236,7 +1310,11 @@ func (s *Service) log(level slog.Level, message, stage string, attributes ...any
 		"cleaned_count", s.cleanedCount,
 	}
 	fields = append(fields, attributes...)
-	s.logger.Log(context.Background(), level, message, fields...)
+	s.logger.Log(ctx, level, message, fields...)
+}
+
+func (s *Service) log(level slog.Level, message, stage string, attributes ...any) {
+	s.logContext(context.Background(), level, message, stage, attributes...)
 }
 
 func (s *Service) currentURL() string {

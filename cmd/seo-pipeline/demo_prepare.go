@@ -46,6 +46,7 @@ func runDemoPrepare(
 	logger *slog.Logger,
 	writer *articleoutput.Writer,
 	logRouter *diagnostics.ArticleLogRouter,
+	newFallback keywordsFallbackFactory,
 	externalID string,
 ) error {
 	if err := cfg.ValidatePrepare(); err != nil {
@@ -58,7 +59,7 @@ func runDemoPrepare(
 	logger.Info("research отсутствует, запускается prepare", "stage", "demo_prepare",
 		"article_id", selected.ID, "external_id", externalID)
 	return prepareArticle(ctx, demoPrepareRepository{ArticleRepository: articleRepository, logger: logger},
-		cfg, logger, writer, logRouter, selected)
+		cfg, logger, writer, logRouter, newFallback, selected)
 }
 
 // articleByExternalID находит статью со slug и reference_url: prepare нужны оба, а

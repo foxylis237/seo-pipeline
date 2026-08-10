@@ -15,7 +15,9 @@ import (
 	"github.com/foxylis237/seo-pipeline/internal/llm"
 	"github.com/foxylis237/seo-pipeline/internal/llm/deepseekweb"
 	llmgemini "github.com/foxylis237/seo-pipeline/internal/llm/gemini"
+	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/article"
 	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/generation"
+	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/keywords"
 	articleoutput "github.com/foxylis237/seo-pipeline/internal/tasks/task1/output"
 	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/repository"
 	resultassembly "github.com/foxylis237/seo-pipeline/internal/tasks/task1/result"
@@ -235,6 +237,44 @@ func buildLLM(ctx context.Context, configs stageConfigs, availability geminiAvai
 	}, closeAll, nil
 }
 
+// newKeywordsFallbackFactory строит резервный источник исходных запросов для prepare.
+//
+// Схему выбирает тот же резолвер, что и генерация: у prepare не должно быть своей политики
+// маршрутизации. Нужную стадию (keywords) роутер находит в той же конфигурации.
+func newKeywordsFallbackFactory(mode *articleMode, logger *slog.Logger) keywordsFallbackFactory {
+	if mode == nil {
+		return nil
+	}
+	return func(selected article.Article) keywordsFallback {
+		return keywords.NewFallback(mode.routerFor(selected.ExternalID), selected.ID, logger)
+	}
+}
+
+// newPrepareKeywordsFallback готовит резервный источник запросов для команды prepare.
+//
+// Неудача сборки LLM не роняет prepare: команда и раньше обходилась без модели, а резерв
+// нужен ровно в том редком случае, когда Keys.so ничего не нашёл. Поэтому здесь
+// предупреждение и прогон без резерва, а не отказ команды.
+func newPrepareKeywordsFallback(ctx context.Context, deps generationDeps) (keywordsFallbackFactory, func() error) {
+	noop := func() error { return nil }
+	stages, err := loadStageConfigs(deps.logger, true)
+	if err != nil {
+		deps.logger.Warn("резервный подбор запросов недоступен: LLM-конфигурация не загрузилась",
+			"stage", keywords.StageName, "error", err)
+		return nil, noop
+	}
+	mode, closeLLM, err := buildLLM(ctx, stages, newGeminiAvailability(), deps)
+	if err != nil {
+		deps.logger.Warn("резервный подбор запросов недоступен: LLM-провайдеры не созданы",
+			"stage", keywords.StageName, "error", err)
+		if closeLLM == nil {
+			return nil, noop
+		}
+		return nil, closeLLM
+	}
+	return newKeywordsFallbackFactory(mode, deps.logger), closeLLM
+}
+
 // newLLMClient конструирует одного провайдера. Ветка default обязательна: новый тип, добавленный
 // в normalizeLLMProvider и забытый здесь, иначе давал бы не ошибку старта, а «provider is not
 // registered» в середине прогона.
@@ -304,6 +344,17 @@ func writeRoutingReport(destination io.Writer, routing resolvedRouting) error {
 			targets = append(targets, target.Provider+" / "+target.Model)
 		}
 		fmt.Fprintf(&report, "  %-10s %-34s %s%s\n", name, strings.Join(targets, " → "), stage.Timeout, stageNote(routing, name))
+	}
+	// keywords печатается отдельно от стадий статьи: она выполняется в prepare и только
+	// тогда, когда Keys.so не нашёл у конкурента ни одного запроса. В отчёте она нужна
+	// потому, что это тоже обращение к модели, а отчёт показывает, куда оно пойдёт.
+	if stage, found := routing.Config.Stages[keywords.StageName]; found && len(stage.Targets) > 0 {
+		targets := make([]string, 0, len(stage.Targets))
+		for _, target := range stage.Targets {
+			targets = append(targets, target.Provider+" / "+target.Model)
+		}
+		fmt.Fprintf(&report, "  %-10s %-34s %s  (резерв prepare: Keys.so без запросов)\n",
+			keywords.StageName, strings.Join(targets, " → "), stage.Timeout)
 	}
 	report.WriteString("\n")
 	_, err := io.WriteString(destination, report.String())
