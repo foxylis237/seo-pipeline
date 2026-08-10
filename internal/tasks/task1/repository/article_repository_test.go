@@ -921,6 +921,66 @@ func assertCompleteResearch(t *testing.T, pool *pgxpool.Pool, articleID int64, c
 	}
 }
 
+// TestResetCountsAndReset проверяет обе половины сброса на живой схеме: счётчики, которые
+// пользователь видит до подтверждения, и очистку. Список таблиц у них общий, поэтому опечатка
+// в имени таблицы валит оба запроса, а не расходится между отчётом и удалением.
+func TestResetCountsAndReset(t *testing.T) {
+	repository, pool := newTestRepository(t)
+	ctx := context.Background()
+
+	created, err := repository.Create(ctx, article.Input{
+		ExcelID: 61, Title: "Сброс", ImageSlug: "reset", ReferenceURL: "https://example.com/reset",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.SaveError(ctx, created.ID, errors.New("сбой для истории")); err != nil {
+		t.Fatal(err)
+	}
+
+	counts, err := repository.ResetCounts(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(counts) != len(resetTables) {
+		t.Fatalf("получено %d счётчиков, ожидалось %d", len(counts), len(resetTables))
+	}
+	populated := map[string]int64{}
+	for _, count := range counts {
+		populated[count.Table] = count.Rows
+	}
+	if populated["articles"] != 1 || populated["article_inputs"] != 1 || populated["article_errors"] != 1 {
+		t.Fatalf("счётчики до сброса: %#v", populated)
+	}
+
+	if err := repository.Reset(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	after, err := repository.ResetCounts(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, count := range after {
+		if count.Rows != 0 {
+			t.Fatalf("таблица %s не очищена: %d строк", count.Table, count.Rows)
+		}
+	}
+
+	// RESTART IDENTITY: новая статья должна получить id = 1, иначе проект не выглядит
+	// как до первого импорта.
+	recreated, err := repository.Create(ctx, article.Input{
+		ExcelID: 62, Title: "После сброса", ImageSlug: "after", ReferenceURL: "https://example.com/after",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recreated.ID != 1 {
+		t.Fatalf("после сброса articles.id = %d, ожидалась 1", recreated.ID)
+	}
+	assertCount(t, pool, "articles", "external_id = '62'", 1)
+}
+
 func newTestRepository(t *testing.T) (*ArticleRepository, *pgxpool.Pool) {
 	t.Helper()
 	databaseURL := os.Getenv("TEST_DATABASE_URL")

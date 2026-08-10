@@ -124,6 +124,16 @@ func main() {
 	case "import-check":
 		err = runImportCheck(ctx, articleRepository, cfg.InputFilePath, os.Stdout, command.ExternalID)
 
+	case "reset":
+		err = runReset(ctx, articleRepository, resetOptions{
+			OutputDir:   cfg.OutputDir,
+			DatabaseURL: cfg.DatabaseURL,
+			AssumeYes:   command.AssumeYes,
+			Interactive: isCharDevice(os.Stdin),
+			In:          os.Stdin,
+			Out:         os.Stdout,
+		}, taskLogger)
+
 	case "prepare":
 		// Резервный источник запросов строится заранее, но браузер провайдера не
 		// открывается: клиент DeepSeek создаёт сессию только на первом запросе, а его
@@ -417,57 +427,89 @@ type taskCommand struct {
 	// Plan печатает план возобновления, ничего не выполняя. Не путать с DryRun: тот
 	// прогоняет офлайн-пайплайн на отдельной базе.
 	Plan bool
+	// AssumeYes подтверждает reset без вопроса. Нужен там, где stdin не терминал.
+	AssumeYes bool
+}
+
+// isCharDevice reports stdin attached to a terminal. Reset спрашивает подтверждение только
+// тогда, когда его есть кому прочитать.
+func isCharDevice(file *os.File) bool {
+	info, err := file.Stat()
+	if err != nil {
+		return false
+	}
+	return info.Mode()&os.ModeCharDevice != 0
+}
+
+// taskFlags — служебные флаги, снятые с командной строки до разбора операции.
+type taskFlags struct {
+	dryRun    bool
+	plan      bool
+	assumeYes bool
+}
+
+// stripTaskFlags снимает служебные флаги и возвращает остальные аргументы. Повтор флага —
+// ошибка, а не молчаливое подтверждение.
+func stripTaskFlags(args []string) ([]string, taskFlags, error) {
+	var flags taskFlags
+	known := map[string]*bool{
+		"--dry-run": &flags.dryRun,
+		"--plan":    &flags.plan,
+		"--yes":     &flags.assumeYes,
+	}
+	filtered := make([]string, 0, len(args))
+	for index, arg := range args {
+		seen, isFlag := known[arg]
+		if index == 0 || !isFlag {
+			filtered = append(filtered, arg)
+			continue
+		}
+		if *seen {
+			return nil, taskFlags{}, fmt.Errorf("%s may be specified only once", arg)
+		}
+		*seen = true
+	}
+	return filtered, flags, nil
 }
 
 func parseCommand(args []string) (taskCommand, error) {
-	dryRun := false
-	plan := false
-	filtered := make([]string, 0, len(args))
-	for index, arg := range args {
-		if index > 0 && arg == "--dry-run" {
-			if dryRun {
-				return taskCommand{}, fmt.Errorf("--dry-run may be specified only once")
-			}
-			dryRun = true
-			continue
-		}
-		if index > 0 && arg == "--plan" {
-			if plan {
-				return taskCommand{}, fmt.Errorf("--plan may be specified only once")
-			}
-			plan = true
-			continue
-		}
-		filtered = append(filtered, arg)
+	filtered, flags, err := stripTaskFlags(args)
+	if err != nil {
+		return taskCommand{}, err
 	}
 	command, err := parseTaskCommand(filtered)
 	if err != nil {
 		return taskCommand{}, err
 	}
-	if dryRun && (command.Name != "run" || command.ExternalID != "") {
+	if flags.dryRun && (command.Name != "run" || command.ExternalID != "") {
 		return taskCommand{}, fmt.Errorf("--dry-run is supported only for task-1 run without external_id")
 	}
-	if plan && command.Name != "run" {
+	if flags.plan && command.Name != "run" {
 		return taskCommand{}, fmt.Errorf("--plan is supported only for task-1 run")
 	}
-	if plan && dryRun {
+	if flags.plan && flags.dryRun {
 		return taskCommand{}, fmt.Errorf("--plan and --dry-run cannot be combined")
 	}
-	command.DryRun = dryRun
-	command.Plan = plan
+	if flags.assumeYes && command.Name != "reset" {
+		return taskCommand{}, fmt.Errorf("--yes is supported only for task-1 reset")
+	}
+	command.DryRun = flags.dryRun
+	command.Plan = flags.plan
+	command.AssumeYes = flags.assumeYes
 	return command, nil
 }
 
 func parseTaskCommand(args []string) (taskCommand, error) {
-	const available = "available task-1 operations: import, import-check, errors, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, deepseek-login"
+	const available = "available task-1 operations: import, import-check, errors, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, reset, deepseek-login"
 	if len(args) < 3 || (args[1] != "task-1" && args[1] != "task_1") {
 		return taskCommand{}, fmt.Errorf("usage: seo-pipeline task-1 <operation> [arguments]; %s", available)
 	}
 	task := args[2]
 	switch task {
-	case "deepseek-login":
+	case "deepseek-login", "reset":
+		// Позиционных аргументов у обеих нет: сброс одной статьи — это regenerate.
 		if len(args) != 3 {
-			return taskCommand{}, fmt.Errorf("usage: seo-pipeline task-1 deepseek-login")
+			return taskCommand{}, fmt.Errorf("usage: seo-pipeline task-1 %s", task)
 		}
 		return taskCommand{Name: task}, nil
 	case "import":
@@ -528,7 +570,7 @@ func validateConfig(command string, cfg config.Config) error {
 		return cfg.ValidateGenerate()
 	case "result":
 		return cfg.ValidateReset()
-	case "errors":
+	case "errors", "reset":
 		return cfg.ValidateReset()
 	default:
 		return fmt.Errorf("unknown task %q", command)

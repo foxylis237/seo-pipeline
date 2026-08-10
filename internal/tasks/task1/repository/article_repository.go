@@ -382,6 +382,49 @@ func (r *ArticleRepository) SaveArticleInfo(ctx context.Context, articleID int64
 	return nil
 }
 
+// ResetCount — число строк в одной таблице проекта.
+type ResetCount struct {
+	Table string
+	Rows  int64
+}
+
+// resetTables перечисляет таблицы, которые очищает Reset, в порядке удаления: от зависимых
+// к articles. Один список обслуживает и подсчёт, и TRUNCATE, поэтому отчёт не может
+// разойтись с тем, что команда действительно удалит.
+var resetTables = []string{
+	"article_errors",
+	"article_outputs",
+	"article_metadata",
+	"article_research",
+	"article_inputs",
+	"articles",
+}
+
+// ResetCounts возвращает число строк в каждой таблице проекта — то, что reset показывает
+// пользователю до подтверждения.
+func (r *ArticleRepository) ResetCounts(ctx context.Context) ([]ResetCount, error) {
+	selects := make([]string, 0, len(resetTables))
+	for _, table := range resetTables {
+		selects = append(selects, fmt.Sprintf("(SELECT COUNT(*) FROM %s)", table))
+	}
+	query := "SELECT " + strings.Join(selects, ", ")
+
+	rows := make([]int64, len(resetTables))
+	targets := make([]any, len(rows))
+	for index := range rows {
+		targets[index] = &rows[index]
+	}
+	if err := r.pool.QueryRow(ctx, query).Scan(targets...); err != nil {
+		return nil, fmt.Errorf("посчитать строки таблиц проекта: %w", err)
+	}
+
+	counts := make([]ResetCount, len(resetTables))
+	for index, table := range resetTables {
+		counts[index] = ResetCount{Table: table, Rows: rows[index]}
+	}
+	return counts, nil
+}
+
 // Reset удаляет все данные проекта и сбрасывает счётчики идентификаторов.
 func (r *ArticleRepository) Reset(ctx context.Context) error {
 	tx, err := r.pool.Begin(ctx)
@@ -390,16 +433,7 @@ func (r *ArticleRepository) Reset(ctx context.Context) error {
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	const query = `
-		TRUNCATE TABLE
-			article_errors,
-			article_outputs,
-			article_metadata,
-			article_research,
-			article_inputs,
-			articles
-		RESTART IDENTITY CASCADE
-	`
+	query := "TRUNCATE TABLE " + strings.Join(resetTables, ", ") + " RESTART IDENTITY CASCADE"
 	if _, err := tx.Exec(ctx, query); err != nil {
 		return fmt.Errorf("очистить таблицы проекта: %w", err)
 	}
