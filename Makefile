@@ -14,8 +14,8 @@ DRY_RUN_DATABASE_URL ?= postgres://seo:seo@localhost:5433/seo_dry_run?sslmode=di
 TASK_OPERATION := $(word 2,$(MAKECMDGOALS))
 TASK_ARG := $(word 3,$(MAKECMDGOALS))
 TASK_EXTRA_ARGS := $(wordlist 4,$(words $(MAKECMDGOALS)),$(MAKECMDGOALS))
-TASK_OPERATIONS := import import-check errors retry run regenerate dry-run prepare generate demo-generate article info review fix html result reset deepseek-login
-OPTIONAL_ARGUMENT_OPERATIONS := import-check errors retry run regenerate prepare generate demo-generate article info review fix html result
+TASK_OPERATIONS := import import-check errors retry run regenerate dry-run prepare generate demo-generate article info review fix html result clear reset deepseek-login
+OPTIONAL_ARGUMENT_OPERATIONS := import-check errors retry run regenerate clear prepare generate demo-generate article info review fix html result
 
 .PHONY: help task-1 docker-up docker-start docker-stop docker-down docker-restart docker-logs docker-ps
 .PHONY: test test-race fmt vet lint lint-fix build
@@ -24,30 +24,44 @@ OPTIONAL_ARGUMENT_OPERATIONS := import-check errors retry run regenerate prepare
 # Help
 # ----------------------------------------------------
 
-help: ## Show all available commands
-	@printf 'SEO Pipeline commands\n\n'
-	@printf 'task_1 operations:\n'
-	@printf '  %-32s %s\n' 'make task-1 import [limit]' 'Import articles from Excel'
-	@printf '  %-32s %s\n' 'make task-1 errors [EXTERNAL_ID]' 'Show articles with recorded errors'
-	@printf '  %-32s %s\n' 'make task-1 retry [EXTERNAL_ID]' 'Clear the recorded error and rerun the full pipeline'
-	@printf '  %-32s %s\n' 'make task-1 run [ID]' 'Run every unfinished article or one article'
-	@printf '  %-32s %s\n' 'make task-1 dry-run' 'Run the isolated local pipeline'
-	@printf '  %-32s %s\n' 'make task-1 prepare [ID]' 'Collect pending research or process one article'
-	@printf '  %-32s %s\n' 'make task-1 generate [ID]' 'Run pending full flows or process one article'
-	@printf '  %-32s %s\n' 'make task-1 demo-generate [ID]' 'Rebuild the DEMO folder of every article or of one'
-	@printf '  %-32s %s\n' 'make task-1 article [ID]' 'Generate pending article text/metadata or one article'
-	@printf '  %-32s %s\n' 'make task-1 info [ID]' 'Generate pending article text/metadata or one article'
-	@printf '  %-32s %s\n' 'make task-1 review [ID]' 'Review pending generated articles or one article'
-	@printf '  %-32s %s\n' 'make task-1 fix [ID]' 'Fix pending reviewed articles or one article'
-	@printf '  %-32s %s\n' 'make task-1 html [ID]' 'Generate pending HTML or process one article'
-	@printf '  %-32s %s\n' 'make task-1 result [ID]' 'Build pending results or process one article'
-	@printf '  %-32s %s\n' 'make task-1 run plan [ID]' 'Show where the pipeline would resume, without running it'
-	@printf '  %-32s %s\n' 'make task-1 import-check [ID]' 'Check the Excel to PostgreSQL import without changing data'
-	@printf '  %-32s %s\n' 'make task-1 regenerate ID' 'Reset one article and rebuild it through the full pipeline'
-	@printf '  %-32s %s\n' 'make task-1 reset' 'Wipe all task_1 state after confirmation'
-	@printf '  %-32s %s\n' 'make task-1 deepseek-login' 'Open Chromium for manual DeepSeek login'
-	@printf '\nProject commands:\n'
-	@awk 'BEGIN {FS = ":.*## "} /^(docker|test|fmt|vet|lint|build)[a-zA-Z0-9_-]*:.*## / {printf "  make %-27s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+# help укладывается в 58 символов: команда слева, очень краткое описание справа. Список
+# целиком должен быть виден в узком окне, иначе им не пользуются.
+#
+# Формат printf с двумя %s повторяется по списку аргументов, поэтому пары идут подряд. Длинные
+# описания разбиты на строки прямо здесь, а не переносятся на ходу: системный awk на macOS
+# считает длину в байтах, и кириллицу он переносил бы вдвое раньше нужного. Продолжение — это
+# пара с пустой командой; выравнивание держит %-26s, ширина взята по самой длинной команде
+# (task-1 demo-generate [ID], 25 символов).
+help: ## этот список
+	@printf 'SEO Pipeline\n\n'
+	@printf 'task_1 — make <команда>\n'
+	@printf '  %-26s%s\n' \
+		'task-1 import [limit]'     'импорт статей из Excel' \
+		'task-1 import-check [ID]'  'сверка импорта с Excel' \
+		'task-1 errors [ID]'        'статьи с текущей ошибкой' \
+		'task-1 run [ID]'           'полный прогон, возобновляемый' \
+		'task-1 run plan [ID]'      'где возобновится, без запуска' \
+		'task-1 retry [ID]'         'снять ошибку и прогнать' \
+		'task-1 regenerate ID'      'пересоздать статью целиком' \
+		'task-1 prepare [ID]'       'research Keys.so и Arsenkin' \
+		'task-1 generate [ID]'      'генерация после prepare' \
+		'task-1 article [ID]'       'текст статьи и метаданные' \
+		'task-1 info [ID]'          'то же, что article' \
+		'task-1 review [ID]'        'проверка готовой статьи' \
+		'task-1 fix [ID]'           'правки по итогам review' \
+		'task-1 html [ID]'          'HTML из исправленной статьи' \
+		'task-1 result [ID]'        'собрать result.md' \
+		'task-1 demo-generate [ID]' 'пересобрать каталог DEMO' \
+		'task-1 clear ID'           'вернуть статью к состоянию' \
+		''                          'сразу после импорта' \
+		'task-1 reset'              'стереть всё состояние task_1' \
+		'task-1 dry-run'            'офлайн-прогон без сервисов' \
+		'task-1 deepseek-login'     'ручной вход в DeepSeek'
+	@printf '\nПроект — make <цель>\n'
+	@awk 'BEGIN {FS = ":.*## "} \
+		/^(docker|test|fmt|vet|lint|build)[a-zA-Z0-9_-]*:.*## / {printf "  %-26s%s\n", $$1, $$2}' \
+		$(MAKEFILE_LIST)
+	@printf '\nПодробности по каждой операции — README.md\n'
 
 # ----------------------------------------------------
 # task_1
@@ -107,55 +121,55 @@ task-1: ## Run a task_1 operation
 # Docker
 # ----------------------------------------------------
 
-docker-up: ## Create, start, and wait for PostgreSQL
+docker-up: ## поднять PostgreSQL и дождаться
 	$(DOCKER_COMPOSE) up -d --wait
 
-docker-start: ## Start and wait for PostgreSQL services
+docker-start: ## запустить и дождаться
 	$(DOCKER_COMPOSE) up -d --wait
 
-docker-stop: ## Stop PostgreSQL containers without removing them
+docker-stop: ## остановить контейнеры
 	$(DOCKER_COMPOSE) stop
 
-docker-down: ## Stop and remove PostgreSQL containers and network
+docker-down: ## удалить контейнеры и сеть
 	$(DOCKER_COMPOSE) down
 
-docker-restart: ## Restart and wait for PostgreSQL services
+docker-restart: ## перезапустить и дождаться
 	$(DOCKER_COMPOSE) restart
 	$(DOCKER_COMPOSE) up -d --wait
 
-docker-logs: ## Follow PostgreSQL service logs
+docker-logs: ## следить за логами
 	$(DOCKER_COMPOSE) logs --tail=100 --follow
 
-docker-ps: ## Show PostgreSQL service status
+docker-ps: ## состояние сервисов
 	$(DOCKER_COMPOSE) ps
 
 # ----------------------------------------------------
 # Tests and code quality
 # ----------------------------------------------------
 
-test: ## Run all Go tests
+test: ## все тесты
 	$(GO) test ./...
 
-test-race: ## Run all tests with the race detector
+test-race: ## тесты с race detector
 	$(GO) test -race ./...
 
-fmt: ## Format all Go packages
+fmt: ## форматирование
 	$(GO) fmt ./...
 
-vet: ## Run Go static analysis
+vet: ## статический анализ
 	$(GO) vet ./...
 
-lint: ## Run golangci-lint using .golangci.yml
+lint: ## golangci-lint по .golangci.yml
 	$(GOLANGCI_LINT) run ./...
 
-lint-fix: ## Run golangci-lint and apply the fixes it can make safely
+lint-fix: ## golangci-lint с автоправками
 	$(GOLANGCI_LINT) run --fix ./...
 
 # ----------------------------------------------------
 # Build
 # ----------------------------------------------------
 
-build: ## Build the CLI binary
+build: ## бинарник в bin/seo-pipeline
 	mkdir -p bin
 	$(GO) build -o $(BINARY) ./cmd/seo-pipeline
 

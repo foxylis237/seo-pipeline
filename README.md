@@ -96,13 +96,14 @@ Makefile — короткая оболочка над существующим C
 
 | Цель | Что делает | Параметр | Пример | Эквивалент без Makefile |
 |---|---|---|---|---|
-| `help` | Показывает все цели и описания. | Нет. | `make help` | Список формирует сам Makefile. |
+| `help` | Список целей: команда слева, краткое описание справа. Ширина 58 символов, длинные описания перенесены внутри своей колонки. | Нет. | `make help` | Список формирует сам Makefile. |
 | `task-1 import` | Импортирует все заполненные строки Excel. | Необязательный положительный лимит строк данных. | `make task-1 import` или `make task-1 import 10` | `go run ./cmd/seo-pipeline task-1 import [limit]` |
 | `task-1 import-check` | Проверяет корректность импорта Excel перед запуском генерации: полноту переноса, уникальность `external_id`, совпадение полей и связь `articles ↔ article_inputs`. Данные не изменяет, внешние сервисы не вызывает. | Необязательный `external_id` из Excel. | `make task-1 import-check` или `make task-1 import-check 37` | `go run ./cmd/seo-pipeline task-1 import-check [external_id]` |
 | `task-1 errors` | Показывает статьи с текущей сохранённой ошибкой. | Необязательный `external_id` из Excel. | `make task-1 errors` или `make task-1 errors 57` | `go run ./cmd/seo-pipeline task-1 errors [external_id]` |
 | `task-1 run` | Полный pipeline `prepare → structure → article/info → review → fix → html → result` с возобновлением: готовые этапы пропускаются. Без ID берёт все статьи, кроме `completed`. | Необязательный ID; `plan` показывает точку возобновления, ничего не выполняя. | `make task-1 run`, `make task-1 run 37`, `make task-1 run plan` | `go run ./cmd/seo-pipeline task-1 run [--plan] [external_id]` |
 | `task-1 retry` | Снимает сохранённую ошибку и проводит статью тем же полным раннером, что и `run`. | Необязательный `external_id` из Excel. | `make task-1 retry` или `make task-1 retry 57` | `go run ./cmd/seo-pipeline task-1 retry [external_id]` |
 | `task-1 regenerate` | Сбрасывает результаты генерации одной статьи и проводит её заново полным pipeline. Research сохраняется. | **Обязательный** `external_id`. | `make task-1 regenerate 37` | `go run ./cmd/seo-pipeline task-1 regenerate <external_id>` |
+| `task-1 clear` | Возвращает одну статью к состоянию сразу после импорта: удаляет research, metadata, outputs, историю ошибок и каталог статьи целиком. Строка в БД, её `id` и `external_id` сохраняются. | **Обязательный** `external_id`. | `make task-1 clear 23` | `go run ./cmd/seo-pipeline task-1 clear <external_id> [--yes]` |
 | `task-1 reset` | Приводит `task_1` к состоянию «импорта ещё не было»: пустые таблицы, сброшенные счётчики, пустые каталоги вывода. | Нет. | `make task-1 reset` | `go run ./cmd/seo-pipeline task-1 reset [--yes]` |
 | `task-1 dry-run` | Поднимает тестовую БД, запускает тесты, vet и полный локальный pipeline на stub-данных. | Нет. | `make task-1 dry-run` | См. раздел «Dry-run». |
 | `task-1 prepare` | Собирает отсутствующий research Keys.so и Arsenkin. | Необязательный ID. | `make task-1 prepare` или `make task-1 prepare 37` | `go run ./cmd/seo-pipeline task-1 prepare [external_id]` |
@@ -170,11 +171,12 @@ go run ./cmd/seo-pipeline task-1 review <external_id>
 go run ./cmd/seo-pipeline task-1 fix <external_id>
 go run ./cmd/seo-pipeline task-1 html <external_id>
 go run ./cmd/seo-pipeline task-1 result <external_id>
+go run ./cmd/seo-pipeline task-1 clear <external_id>
 go run ./cmd/seo-pipeline task-1 reset --yes
 go run ./cmd/seo-pipeline task-1 deepseek-login
 ```
 
-Флаг `--yes` поддерживается только для `reset`.
+Флаг `--yes` поддерживается только для `reset` и `clear`.
 
 При `Ctrl+C`, `SIGINT` или `SIGTERM` общий контекст отменяется, текущие операции прекращаются, а созданные ресурсы закрываются.
 
@@ -334,6 +336,24 @@ make task-1 regenerate 57 # пересоздать одну с нуля
 Недостающие артефакты не блокируют сборку: чего нет в БД, то генерируется на месте, а чего не удалось получить — пропускается с предупреждением в логе. Раскладка подпапок повторяет боевой каталог статьи.
 
 В корне `DEMO` лежит ровно то, что открывают руками при ручном прогоне: готовый `result.md` и два промпта ручного чата — `article_prompt.txt` и `fix_links_html_prompt.txt`. Второй собирается из `tasks/task_1/prompts/demo/fix_links_html.txt` — это объединённый промпт второго сообщения, существующий только для DEMO; боевые промпты он не подменяет.
+
+### Очистка одной статьи
+
+`make task-1 clear <external_id>` возвращает одну статью к состоянию сразу после импорта — как будто она ни разу не генерировалась. Число — это `external_id` из Excel, а не внутренний `articles.id`; отчёт печатает оба номера рядом, чтобы очистка не ушла в соседнюю строку.
+
+Удаляется всё, что появилось после импорта:
+
+- строки `article_research`, `article_metadata`, `article_outputs` и `article_errors` этой статьи;
+- статус возвращается в `pending`, `current_step` и `error_message` — в `NULL`;
+- каталог статьи целиком, вместе с `prepare/`, `logs/`, `prompts/`, `generated/`, `DEMO/`, `article.html` и `result.md`.
+
+Логи прошлых прогонов удаляются вместе с остальным намеренно. У ни разу не запускавшейся статьи каталога нет вовсе, а уцелевший `logs/demo-generate.log` со строкой `status=completed` описывал бы состояние, которого после очистки уже нет. Если история прогонов нужнее — это одна строка в `clearKeepsSubdirectories` (`internal/tasks/task1/output/clear.go`), логика не меняется.
+
+Сохраняется место статьи в базе: строка `articles` с прежними `id` и `external_id` и её `article_inputs`. Повторный импорт после очистки не нужен — статью сразу берёт `make task-1 run <external_id>`.
+
+Как и `reset`, команда печатает отчёт с фактическим масштабом удаления и требует ввести слово `clear`. Без терминала нужен `--yes`. Порядок тот же: сначала коммит в БД, потом файлы, поэтому команда идемпотентна и сбой на файлах чинится повторным запуском.
+
+Отличие от соседних команд: `regenerate` сохраняет research и сразу запускает пайплайн заново, `reset` чистит всю базу целиком, а `clear` трогает одну статью и ничего не запускает.
 
 ### Сброс состояния
 
@@ -506,7 +526,7 @@ make docker-up
 go run ./cmd/seo-pipeline task-1 import
 ```
 
-Если нужно очистить данные, не трогая контейнеры и схему, используйте `make task-1 reset`.
+Если нужно очистить данные, не трогая контейнеры и схему, используйте `make task-1 reset`, а для одной статьи — `make task-1 clear <external_id>`.
 
 ## Текущие ограничения
 

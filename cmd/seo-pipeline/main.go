@@ -134,6 +134,14 @@ func main() {
 			Out:         os.Stdout,
 		}, taskLogger)
 
+	case "clear":
+		err = runClear(ctx, articleRepository, writer, clearOptions{
+			AssumeYes:   command.AssumeYes,
+			Interactive: isCharDevice(os.Stdin),
+			In:          os.Stdin,
+			Out:         os.Stdout,
+		}, taskLogger, command.ExternalID)
+
 	case "prepare":
 		// Резервный источник запросов строится заранее, но браузер провайдера не
 		// открывается: клиент DeepSeek создаёт сессию только на первом запросе, а его
@@ -490,8 +498,8 @@ func parseCommand(args []string) (taskCommand, error) {
 	if flags.plan && flags.dryRun {
 		return taskCommand{}, fmt.Errorf("--plan and --dry-run cannot be combined")
 	}
-	if flags.assumeYes && command.Name != "reset" {
-		return taskCommand{}, fmt.Errorf("--yes is supported only for task-1 reset")
+	if flags.assumeYes && command.Name != "reset" && command.Name != "clear" {
+		return taskCommand{}, fmt.Errorf("--yes is supported only for task-1 reset and task-1 clear")
 	}
 	command.DryRun = flags.dryRun
 	command.Plan = flags.plan
@@ -500,7 +508,7 @@ func parseCommand(args []string) (taskCommand, error) {
 }
 
 func parseTaskCommand(args []string) (taskCommand, error) {
-	const available = "available task-1 operations: import, import-check, errors, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, reset, deepseek-login"
+	const available = "available task-1 operations: import, import-check, errors, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, clear, reset, deepseek-login"
 	if len(args) < 3 || (args[1] != "task-1" && args[1] != "task_1") {
 		return taskCommand{}, fmt.Errorf("usage: seo-pipeline task-1 <operation> [arguments]; %s", available)
 	}
@@ -539,6 +547,12 @@ func parseTaskCommand(args []string) (taskCommand, error) {
 			return taskCommand{}, fmt.Errorf("usage: seo-pipeline task-1 regenerate <external_id>")
 		}
 		return parseExternalIDCommand(task, args[3])
+	case "clear":
+		// ID обязателен: очистка без него означала бы «стереть все статьи», а это reset.
+		if len(args) != 4 {
+			return taskCommand{}, fmt.Errorf("usage: seo-pipeline task-1 clear <external_id>")
+		}
+		return parseExternalIDCommand(task, args[3])
 	case "errors", "retry", "prepare", "generate", "demo-generate", "review", "fix", "info", "html", "result", "article", "import-check":
 		if len(args) == 3 {
 			return taskCommand{Name: task}, nil
@@ -570,7 +584,7 @@ func validateConfig(command string, cfg config.Config) error {
 		return cfg.ValidateGenerate()
 	case "result":
 		return cfg.ValidateReset()
-	case "errors", "reset":
+	case "errors", "reset", "clear":
 		return cfg.ValidateReset()
 	default:
 		return fmt.Errorf("unknown task %q", command)
