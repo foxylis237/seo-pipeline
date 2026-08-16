@@ -394,23 +394,33 @@ func isGracefulCancellation(ctx context.Context, err error) bool {
 
 // newHandlerFactory builds log handlers of the configured level and format. The same factory
 // serves stdout and the per-article stage logs, so both keep one format.
-func newHandlerFactory(levelValue, formatValue string) (func(io.Writer) slog.Handler, error) {
-	var level slog.Level
+// parseLogLevel разбирает LOG_LEVEL. Вынесен из фабрики, потому что консольный pretty-формат
+// собирается мимо неё, а уровень у них общий.
+func parseLogLevel(levelValue string) (slog.Level, error) {
 	switch strings.ToLower(strings.TrimSpace(levelValue)) {
 	case "debug":
-		level = slog.LevelDebug
+		return slog.LevelDebug, nil
 	case "info":
-		level = slog.LevelInfo
+		return slog.LevelInfo, nil
 	case "warn":
-		level = slog.LevelWarn
+		return slog.LevelWarn, nil
 	case "error":
-		level = slog.LevelError
+		return slog.LevelError, nil
 	default:
-		return nil, fmt.Errorf("неподдерживаемый LOG_LEVEL %q", levelValue)
+		return 0, fmt.Errorf("неподдерживаемый LOG_LEVEL %q", levelValue)
+	}
+}
+
+func newHandlerFactory(levelValue, formatValue string) (func(io.Writer) slog.Handler, error) {
+	level, err := parseLogLevel(levelValue)
+	if err != nil {
+		return nil, err
 	}
 	options := &slog.HandlerOptions{Level: level}
+	// Фабрика обслуживает логи статей в logs/<операция>.log, поэтому pretty здесь нет и быть
+	// не должно: файл читают инструментами, а не глазами. auto и pretty сводятся к text.
 	switch strings.ToLower(strings.TrimSpace(formatValue)) {
-	case "text":
+	case "text", "auto", "pretty":
 		return func(destination io.Writer) slog.Handler { return slog.NewTextHandler(destination, options) }, nil
 	case "json":
 		return func(destination io.Writer) slog.Handler { return slog.NewJSONHandler(destination, options) }, nil
@@ -419,8 +429,32 @@ func newHandlerFactory(levelValue, formatValue string) (func(io.Writer) slog.Han
 	}
 }
 
+// resolveConsoleFormat решает, каким будет формат консоли. auto означает «по месту»: в
+// терминале человекочитаемый вывод, при перенаправлении в файл или пайп прежний text, чтобы
+// `make task-1 run | grep` и запуск из CI работали как раньше.
+func resolveConsoleFormat(formatValue string, interactive bool) string {
+	format := strings.ToLower(strings.TrimSpace(formatValue))
+	if format != "auto" {
+		return format
+	}
+	if interactive {
+		return "pretty"
+	}
+	return "text"
+}
+
 func newLogger(levelValue, formatValue string) (*slog.Logger, error) {
-	newHandler, err := newHandlerFactory(levelValue, formatValue)
+	format := resolveConsoleFormat(formatValue, isCharDevice(os.Stdout))
+	if format == "pretty" {
+		level, err := parseLogLevel(levelValue)
+		if err != nil {
+			return nil, err
+		}
+		// NO_COLOR — общепринятое соглашение: раз пользователь его выставил, цвет не наш.
+		_, noColor := os.LookupEnv("NO_COLOR")
+		return slog.New(newPrettyHandler(os.Stdout, level, terminalWidth(), !noColor)), nil
+	}
+	newHandler, err := newHandlerFactory(levelValue, format)
 	if err != nil {
 		return nil, err
 	}

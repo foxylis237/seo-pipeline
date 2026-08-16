@@ -94,8 +94,12 @@ func load(requireEnvFile bool) (Config, error) {
 	if cfg.LogLevel == "" {
 		cfg.LogLevel = "info"
 	}
+	// auto, а не text: незаданный LOG_FORMAT означает «решай по месту» — в терминале это
+	// человекочитаемый вывод, при перенаправлении в файл или пайп прежний text. Явный
+	// LOG_FORMAT=text обязан остаться text и в терминале, поэтому пустое значение и
+	// выставленное вручную нужно различать.
 	if cfg.LogFormat == "" {
-		cfg.LogFormat = "text"
+		cfg.LogFormat = "auto"
 	}
 	if !requireEnvFile {
 		cfg.DatabaseURL = os.Getenv("DRY_RUN_DATABASE_URL")
