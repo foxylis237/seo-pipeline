@@ -418,7 +418,9 @@ go run ./cmd/seo-pipeline task-1 deepseek-login
 
 ## Импорт
 
-По умолчанию импорт читается из `input/task_1/input.xlsx`. Используется лист `Лист1`, а если его нет — первый лист книги. Обязательны колонки `id`, `article_name`, `image_slug` и `reference_url`. Поддерживаются `header`, `meta_description`, `key_word`, `category`, `authors`, `links`, `professions` и старая опечатка `referense_url`.
+По умолчанию импорт читается из `input/task_1/input.xlsx`. Используется лист `Лист1`, а если его нет — первый лист книги. Обязательны колонки `id`, `article_name`, `image_slug` и `reference_url`. Поддерживаются `header`, `meta_description`, `key_word`, `category`, `authors`, `links`, `professions`, `tags` и старая опечатка `referense_url`.
+
+Колонка `tags` — метки публикации. Это готовые данные: модель их не генерирует и не изменяет. Они ложатся в `article_inputs.tags` и попадают прямо в `result.md`. Колонка необязательна, но пока её нет в файле, раздел «Метки» в `result.md` останется пустым.
 
 ```bash
 make task-1 import

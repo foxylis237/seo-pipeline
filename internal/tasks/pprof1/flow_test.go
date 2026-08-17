@@ -143,7 +143,7 @@ func newFlowFixture(t *testing.T) (*Flow, *fakeChats, *fakeRepository, *recordin
 		},
 	}
 	chats := &fakeChats{answers: map[string]string{
-		StageInfo: "Метки: логопед\nTL;DR: коротко\n",
+		StageInfo: "TLDR: коротко\nFAQ:\nВопрос: Где?\nОтвет: Тут.",
 		StageHTML: "<h2>Заголовок</h2><p>текст</p>",
 	}}
 	publisher := &recordingPublisher{}

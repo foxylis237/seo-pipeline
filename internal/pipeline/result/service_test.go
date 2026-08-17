@@ -237,7 +237,8 @@ func TestRenderForDemoRendersStoredMetadata(t *testing.T) {
 }
 
 // Метаданные, разобранные demo из article_info.txt, вытесняют сохранённые целиком: пустое
-// поле разбора остаётся пустым и не подменяется значением из PostgreSQL.
+// поле разбора остаётся пустым и не подменяется значением из PostgreSQL. Метки под это
+// правило не подпадают — они приходят из Excel, а не от модели, и остаются как есть.
 func TestRenderForDemoReplacesStoredMetadataWholesale(t *testing.T) {
 	input := article.ResultInput{
 		Article: article.Article{ID: 12, ExternalID: "42", Title: "Заголовок", Slug: "slug"},
@@ -246,18 +247,18 @@ func TestRenderForDemoReplacesStoredMetadataWholesale(t *testing.T) {
 	service := newDemoService(t, input)
 
 	rendered, err := service.RenderForDemo(context.Background(), "42", "текст статьи", &article.ArticleInfo{
-		Tags: "метки demo", TLDR: "TL;DR demo",
+		TLDR: "TL;DR demo",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertResultField(t, rendered, "Метки", "метки demo")
+	assertResultField(t, rendered, "Метки", "метки из БД")
 	assertResultField(t, rendered, "TL;DR", "TL;DR demo")
 	// FAQ разбора пуст — раздел вопросов пустой, а не взятый из БД.
 	if strings.Contains(rendered, "Из БД?") || strings.Contains(rendered, "## Вопрос 1") {
 		t.Fatalf("FAQ из БД подмешан к метаданным demo: %q", rendered)
 	}
-	for _, stored := range []string{"метки из БД", "TL;DR из БД"} {
+	for _, stored := range []string{"TL;DR из БД"} {
 		if strings.Contains(rendered, stored) {
 			t.Fatalf("сохранённое значение %q осталось в result.md: %q", stored, rendered)
 		}
@@ -267,10 +268,14 @@ func TestRenderForDemoReplacesStoredMetadataWholesale(t *testing.T) {
 // Разобранные demo метаданные с FAQ рендерятся так же, как сохранённые: demo и боевой прогон
 // дают один и тот же result.md из одних и тех же данных.
 func TestRenderForDemoRendersParsedMetadataWithFAQ(t *testing.T) {
-	input := article.ResultInput{Article: article.Article{ID: 13, ExternalID: "43", Title: "Заголовок", Slug: "slug"}}
+	// Метки приходят из импорта Excel, поэтому в ResultInput они уже есть до разбора ответа.
+	input := article.ResultInput{
+		Article: article.Article{ID: 13, ExternalID: "43", Title: "Заголовок", Slug: "slug"},
+		Tags:    "логопед",
+	}
 	service := newDemoService(t, input)
 
-	parsed, err := article.ParseArticleInfo("Метки: логопед\nTLDR: Коротко.\nFAQ:\nВопрос: Где учиться?\nОтвет: В вузе.")
+	parsed, err := article.ParseArticleInfo("TLDR: Коротко.\nFAQ:\nВопрос: Где учиться?\nОтвет: В вузе.")
 	if err != nil {
 		t.Fatal(err)
 	}

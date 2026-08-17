@@ -6,8 +6,10 @@ import (
 )
 
 // ArticleInfo is publication metadata parsed from the LLM response.
+//
+// Меток здесь нет намеренно: они приходят колонкой tags из Excel и моделью не генерируются
+// (миграция 000003). Стадия info отвечает за TL;DR и FAQ.
 type ArticleInfo struct {
-	Tags           string
 	TLDR           string
 	FAQ            string
 	AdditionalInfo string
@@ -22,7 +24,7 @@ func ParseArticleInfo(text string) (ArticleInfo, error) {
 	}
 	if info, err := parseStrictArticleInfo(text); err == nil {
 		tolerant := parseTolerantArticleInfo(text)
-		if tolerant.AdditionalInfo == "" && tolerant.Tags == info.Tags && tolerant.TLDR == info.TLDR && tolerant.FAQ == info.FAQ {
+		if tolerant.AdditionalInfo == "" && tolerant.TLDR == info.TLDR && tolerant.FAQ == info.FAQ {
 			return info, nil
 		}
 	}
@@ -39,7 +41,7 @@ func parseStrictArticleInfo(text string) (ArticleInfo, error) {
 		line   int
 		inline string
 	}
-	want := []string{"Метки", "TLDR", "FAQ"}
+	want := []string{"TLDR", "FAQ"}
 	sections := make([]section, 0, len(want))
 	for index, line := range lines {
 		trimmed := strings.TrimSpace(line)
@@ -54,7 +56,7 @@ func parseStrictArticleInfo(text string) (ArticleInfo, error) {
 	}
 
 	if len(sections) != len(want) {
-		return ArticleInfo{}, fmt.Errorf("article info must contain the sections Метки, TLDR and FAQ in this order")
+		return ArticleInfo{}, fmt.Errorf("article info must contain the sections TLDR and FAQ in this order")
 	}
 
 	values := make([]string, len(sections))
@@ -74,14 +76,13 @@ func parseStrictArticleInfo(text string) (ArticleInfo, error) {
 		}
 	}
 
-	return ArticleInfo{Tags: values[0], TLDR: values[1], FAQ: values[2]}, nil
+	return ArticleInfo{TLDR: values[0], FAQ: values[1]}, nil
 }
 
 type infoSection int
 
 const (
 	sectionUnknown infoSection = iota
-	sectionTags
 	sectionTLDR
 	sectionFAQ
 )
@@ -116,7 +117,6 @@ func parseTolerantArticleInfo(text string) ArticleInfo {
 	}
 
 	return ArticleInfo{
-		Tags:           strings.TrimSpace(strings.Join(values[sectionTags], "\n")),
 		TLDR:           strings.TrimSpace(strings.Join(values[sectionTLDR], "\n")),
 		FAQ:            strings.TrimSpace(strings.Join(values[sectionFAQ], "\n")),
 		AdditionalInfo: strings.TrimSpace(strings.Join(additional, "\n")),
@@ -135,8 +135,8 @@ func parseInfoHeading(line string) (infoSection, string, bool) {
 	}
 	normalizedName := strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(name), ";", ""))
 	switch normalizedName {
-	case "МЕТКИ":
-		return sectionTags, strings.TrimSpace(inline), true
+	// Метки моделью больше не запрашиваются. Заголовок «Метки» в ответе не распознаётся и
+	// уходит в AdditionalInfo — так видно, что промпт разошёлся с контрактом стадии.
 	case "TLDR":
 		return sectionTLDR, strings.TrimSpace(inline), true
 	case "FAQ":

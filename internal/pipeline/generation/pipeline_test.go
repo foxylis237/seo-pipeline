@@ -775,7 +775,7 @@ func successfulPipelineClient() *fakeLLMClient {
 		responses: map[string]llm.Response{
 			"structure": {Text: "H1: Тема\nH2: Раздел"},
 			"article":   {Text: "Исходная статья", InputTokens: 10, OutputTokens: 20},
-			"info":      {Text: "Метки: Профессия, Обучение, Как стать\nTLDR:\nИтог.\nFAQ:\nВопрос: Как?\nОтвет: Так."},
+			"info":      {Text: "TLDR:\nИтог.\nFAQ:\nВопрос: Как?\nОтвет: Так."},
 			"review":    {Text: "Замечания review"},
 			"fix":       {Text: "Исправленная статья"},
 			"html":      {Text: "```html\n<h2>Исправленная статья</h2>\n```"},

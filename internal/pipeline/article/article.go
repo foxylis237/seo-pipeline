@@ -56,6 +56,8 @@ type Input struct {
 	Author          string `json:"author"`
 	Links           string `json:"links"`
 	Professions     string `json:"professions"`
+	// Tags — метки публикации, готовые данные из Excel. Моделью не генерируются.
+	Tags string `json:"tags"`
 }
 
 // ImportedArticle связывает статью с сохранённой при импорте строкой Excel.

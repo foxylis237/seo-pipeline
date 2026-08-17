@@ -208,3 +208,37 @@ func writeWorkbook(t *testing.T, rows [][]any) string {
 	}
 	return path
 }
+
+// Метки — готовые данные Excel, а не результат генерации. Колонка необязательна: её
+// отсутствие не должно ломать импорт, потому что в рабочем файле её может ещё не быть.
+func TestReadRowsReadsTagsColumn(t *testing.T) {
+	withTags := writeWorkbook(t, [][]any{
+		{"id", "article_name", "image_slug", "reference_url", "tags"},
+		{"37", "Как стать логопедом", "kak-stat-logopedom", "https://example.test/a", "Логопед, Переподготовка, Как стать"},
+	})
+	rows, err := ReadRows(withTags)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || len(rows[0].Errors) != 0 {
+		t.Fatalf("строка не импортирована: %+v", rows)
+	}
+	if rows[0].Input.Tags != "Логопед, Переподготовка, Как стать" {
+		t.Fatalf("метки не прочитаны: %q", rows[0].Input.Tags)
+	}
+
+	withoutTags := writeWorkbook(t, [][]any{
+		{"id", "article_name", "image_slug", "reference_url"},
+		{"38", "Как стать поваром", "kak-stat-povarom", "https://example.test/b"},
+	})
+	rows, err = ReadRows(withoutTags)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || len(rows[0].Errors) != 0 {
+		t.Fatalf("файл без колонки tags должен импортироваться: %+v", rows)
+	}
+	if rows[0].Input.Tags != "" {
+		t.Fatalf("метки взялись ниоткуда: %q", rows[0].Input.Tags)
+	}
+}

@@ -23,7 +23,7 @@ func readyThrough(stage pipelineStage) pipelineState {
 			state.StructurePath = "37-tema/generated/structure.txt"
 		case stageArticle:
 			state.ArticlePath = "37-tema/generated/article.txt"
-			state.MetadataText = "Метки: …"
+			state.MetadataText = "TLDR: …"
 		case stageReview:
 			state.ReviewPath = "37-tema/generated/review.txt"
 		case stageFix:
@@ -139,7 +139,7 @@ func (r *fakeRunRepository) GetSavedGenerationInput(context.Context, string) (ar
 }
 
 func (r *fakeRunRepository) GetResultInput(context.Context, string) (article.ResultInput, error) {
-	return article.ResultInput{HTMLPath: r.state.HTMLPath, Tags: r.state.MetadataText}, nil
+	return article.ResultInput{HTMLPath: r.state.HTMLPath, TLDR: r.state.MetadataText}, nil
 }
 
 // advance имитирует сохранение артефакта этапом.
@@ -151,7 +151,7 @@ func (r *fakeRunRepository) advance(stage pipelineStage) {
 		r.state.StructurePath = "37-tema/generated/structure.txt"
 	case stageArticle:
 		r.state.ArticlePath = "37-tema/generated/article.txt"
-		r.state.MetadataText = "Метки: …"
+		r.state.MetadataText = "TLDR: …"
 	case stageReview:
 		r.state.ReviewPath = "37-tema/generated/review.txt"
 	case stageFix:

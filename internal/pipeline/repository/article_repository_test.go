@@ -164,22 +164,22 @@ func TestArticleRepositoryIdempotency(t *testing.T) {
 	if currentStep != "metadata_generation" {
 		t.Fatalf("current_step before info = %q, want metadata_generation", currentStep)
 	}
-	const articleInfo = "Метки: Логопед, Переподготовка, Как стать\nTLDR:\nИтог.\nFAQ:\nВопрос: Как?\nОтвет: Так."
-	parsedInfo := article.ArticleInfo{Tags: "Логопед, Переподготовка, Как стать", TLDR: "Итог.", FAQ: "Вопрос: Как?\nОтвет: Так."}
+	const articleInfo = "TLDR:\nИтог.\nFAQ:\nВопрос: Как?\nОтвет: Так."
+	parsedInfo := article.ArticleInfo{TLDR: "Итог.", FAQ: "Вопрос: Как?\nОтвет: Так."}
 	if err := repository.SaveArticleInfo(ctx, arsenkinArticle.ID, articleInfo, parsedInfo); err != nil {
 		t.Fatal(err)
 	}
-	var savedArticleInfo, savedTags, savedTLDR, savedFAQ string
+	var savedArticleInfo, savedTLDR, savedFAQ string
 	var infoError *string
 	if err := pool.QueryRow(ctx, `
-		SELECT m.metadata_text, m.tags, m.tldr, m.faq, a.current_step, a.error_message
+		SELECT m.metadata_text, m.tldr, m.faq, a.current_step, a.error_message
 		FROM article_metadata AS m
 		JOIN articles AS a ON a.id = m.article_id
 		WHERE m.article_id = $1
-	`, arsenkinArticle.ID).Scan(&savedArticleInfo, &savedTags, &savedTLDR, &savedFAQ, &currentStep, &infoError); err != nil {
+	`, arsenkinArticle.ID).Scan(&savedArticleInfo, &savedTLDR, &savedFAQ, &currentStep, &infoError); err != nil {
 		t.Fatal(err)
 	}
-	if savedArticleInfo != articleInfo || savedTags != parsedInfo.Tags || savedTLDR != parsedInfo.TLDR || savedFAQ != parsedInfo.FAQ || currentStep != "article_review" || infoError != nil {
+	if savedArticleInfo != articleInfo || savedTLDR != parsedInfo.TLDR || savedFAQ != parsedInfo.FAQ || currentStep != "article_review" || infoError != nil {
 		t.Fatalf("article info state = %q, %q, %v", savedArticleInfo, currentStep, infoError)
 	}
 	const reviewPath = "12-arsenkin/generated/review.txt"
@@ -1287,7 +1287,7 @@ func TestResetGenerationStateKeepsInputsAndResearch(t *testing.T) {
 	if err := repository.SaveStructurePath(ctx, created.ID, "71-kak-stat-logopedom/generated/structure.txt"); err != nil {
 		t.Fatal(err)
 	}
-	if err := repository.SaveArticleInfo(ctx, created.ID, "сырой ответ", article.ArticleInfo{Tags: "Метки"}); err != nil {
+	if err := repository.SaveArticleInfo(ctx, created.ID, "сырой ответ", article.ArticleInfo{TLDR: "Итог."}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1391,5 +1391,60 @@ func TestGetManualKeywordsDistinguishesManualFillFromCollectedResearch(t *testin
 	}
 	if keywords != nil {
 		t.Fatalf("после успешного prepare = %v, want nil", keywords)
+	}
+}
+
+// Метки проходят весь путь Excel → article_inputs → result.md и не зависят от стадии info.
+// Тест требует живой базы: именно она ловит рассогласование SQL и списка аргументов, которое
+// компилятор пропускает.
+func TestTagsComeFromImportAndSurviveArticleInfo(t *testing.T) {
+	repository, _ := newTestRepository(t)
+	ctx := context.Background()
+	created, err := repository.Create(ctx, article.Input{
+		ExcelID: 71, Title: "Как стать логопедом", ImageSlug: "kak-stat-logopedom",
+		Tags: "Логопед, Переподготовка, Как стать",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	input, err := repository.GetResultInput(ctx, created.ExternalID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if input.Tags != "Логопед, Переподготовка, Как стать" {
+		t.Fatalf("метки импорта не попали в result: %q", input.Tags)
+	}
+
+	// Стадия info метки не трогает: она сохраняет только TL;DR и FAQ.
+	if err := repository.SaveArticleInfo(ctx, created.ID, "сырой ответ", article.ArticleInfo{
+		TLDR: "Коротко.", FAQ: "Вопрос: Где?\nОтвет: Тут.",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	input, err = repository.GetResultInput(ctx, created.ExternalID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if input.Tags != "Логопед, Переподготовка, Как стать" {
+		t.Fatalf("метки изменились после стадии info: %q", input.Tags)
+	}
+	if input.TLDR != "Коротко." {
+		t.Fatalf("TL;DR не сохранён: %q", input.TLDR)
+	}
+
+	// Повторный импорт обновляет метки: upsert обязан переносить новое значение из Excel.
+	if _, err := repository.Create(ctx, article.Input{
+		ExcelID: 71, Title: "Как стать логопедом", ImageSlug: "kak-stat-logopedom",
+		Tags: "Логопед, Повышение квалификации",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	input, err = repository.GetResultInput(ctx, created.ExternalID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if input.Tags != "Логопед, Повышение квалификации" {
+		t.Fatalf("повторный импорт не обновил метки: %q", input.Tags)
 	}
 }

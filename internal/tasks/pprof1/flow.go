@@ -236,7 +236,7 @@ func (f *Flow) runArticleChat(ctx context.Context, logger *slog.Logger, input ar
 	}
 	if out.parsedInfo.FallbackUsed {
 		logger.Warn("metadata parsing incomplete, recognized and raw response content saved", "stage", "metadata_generation",
-			"has_tags", out.parsedInfo.Tags != "", "has_tldr", out.parsedInfo.TLDR != "", "has_faq", out.parsedInfo.FAQ != "")
+			"has_tldr", out.parsedInfo.TLDR != "", "has_faq", out.parsedInfo.FAQ != "")
 	}
 	logger.Info("article info generated", "stage", "metadata_generation")
 

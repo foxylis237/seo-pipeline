@@ -31,7 +31,7 @@ func newClearedArticle(t *testing.T, repository *ArticleRepository) article.Arti
 		t.Fatal(err)
 	}
 	if err := repository.SaveArticleInfo(ctx, created.ID, "сырой ответ", article.ArticleInfo{
-		Tags: "фреза", TLDR: "коротко", FAQ: "вопросы",
+		TLDR: "коротко", FAQ: "вопросы",
 	}); err != nil {
 		t.Fatal(err)
 	}

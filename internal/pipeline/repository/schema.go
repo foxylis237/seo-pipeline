@@ -35,6 +35,9 @@ var expectedSchema = []schemaColumn{
 	{"article_inputs", "author", "text", true},
 	{"article_inputs", "links", "text", true},
 	{"article_inputs", "professions", "text", true},
+	// tags приходят колонкой Excel, а не от модели: миграция 000003 перенесла их сюда из
+	// article_metadata.
+	{"article_inputs", "tags", "text", true},
 	{"article_research", "article_id", "bigint", false},
 	{"article_research", "competitor_structure", "text", true},
 	{"article_research", "cleaned_keywords", "jsonb", false},
@@ -43,7 +46,6 @@ var expectedSchema = []schemaColumn{
 	{"article_research", "updated_at", "timestamp with time zone", false},
 	{"article_metadata", "article_id", "bigint", false},
 	{"article_metadata", "metadata_text", "text", true},
-	{"article_metadata", "tags", "text", true},
 	{"article_metadata", "tldr", "text", true},
 	{"article_metadata", "faq", "text", true},
 	{"article_metadata", "updated_at", "timestamp with time zone", false},

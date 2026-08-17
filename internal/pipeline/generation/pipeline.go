@@ -375,7 +375,7 @@ func (p *Pipeline) runArticleAndInfo(ctx context.Context, input article.Generati
 	}
 	if parsedInfo.FallbackUsed {
 		logger.Warn("metadata parsing incomplete, recognized and raw response content saved", "stage", "info",
-			"has_tags", parsedInfo.Tags != "", "has_tldr", parsedInfo.TLDR != "", "has_faq", parsedInfo.FAQ != "",
+			"has_tldr", parsedInfo.TLDR != "", "has_faq", parsedInfo.FAQ != "",
 			"has_additional_info", parsedInfo.AdditionalInfo != "")
 	} else {
 		logger.Info("article info parsed", "stage", "info")

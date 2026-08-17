@@ -49,8 +49,7 @@ func (s articleState) title() string { return s.result.Article.Title }
 // PostgreSQL. Признак читается из того же ResultInput, по которому собирается result.md,
 // поэтому «есть метаданные» и «они попадут в result.md» — одно и то же условие.
 func (s articleState) hasStoredMetadata() bool {
-	return strings.TrimSpace(s.result.Tags) != "" ||
-		strings.TrimSpace(s.result.TLDR) != "" ||
+	return strings.TrimSpace(s.result.TLDR) != "" ||
 		strings.TrimSpace(s.result.FAQ) != ""
 }
 
@@ -256,10 +255,10 @@ func (b *Builder) articleInfo(ctx context.Context, state articleState, staging, 
 // молча пропускают глазами, а текст не по формату виден сразу.
 func (b *Builder) parseDemoMetadata(state articleState, text string) *article.ArticleInfo {
 	parsed, err := article.ParseArticleInfo(text)
-	if err == nil && (parsed.Tags != "" || parsed.TLDR != "" || parsed.FAQ != "") {
+	if err == nil && (parsed.TLDR != "" || parsed.FAQ != "") {
 		if parsed.FallbackUsed {
 			b.logger.Warn("метаданные DEMO разобраны нестрогим разбором", "external_id", state.externalID,
-				"stage", "demo_info", "has_tags", parsed.Tags != "", "has_tldr", parsed.TLDR != "", "has_faq", parsed.FAQ != "")
+				"stage", "demo_info", "has_tldr", parsed.TLDR != "", "has_faq", parsed.FAQ != "")
 		}
 		return &parsed
 	}

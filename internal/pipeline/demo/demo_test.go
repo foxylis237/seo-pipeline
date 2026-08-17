@@ -512,8 +512,8 @@ func TestBuildRendersMergedFixLinksHTMLPrompt(t *testing.T) {
 }
 
 // storedMetadata — метаданные статьи, уже прошедшей стадию info.
-func storedMetadata() (tags, tldr, faq string) {
-	return "логопед, обучение", "Логопед ставит речь.", "Вопрос: Где учиться?\nОтвет: В вузе."
+func storedMetadata() (tldr, faq string) {
+	return "Логопед ставит речь.", "Вопрос: Где учиться?\nОтвет: В вузе."
 }
 
 // Готовые метаданные в PostgreSQL — единственный источник: стадия info повторно не
@@ -521,8 +521,8 @@ func storedMetadata() (tags, tldr, faq string) {
 func TestBuildTakesMetadataFromDatabaseWithoutRunningInfo(t *testing.T) {
 	fixture := newFixture(t)
 	fixture.writeCompleteProduction(t)
-	tags, tldr, faq := storedMetadata()
-	fixture.repository.result.Tags, fixture.repository.result.TLDR, fixture.repository.result.FAQ = tags, tldr, faq
+	tldr, faq := storedMetadata()
+	fixture.repository.result.TLDR, fixture.repository.result.FAQ = tldr, faq
 	// Боевого article_info.txt нет: даже без файла стадия info не нужна — метаданные уже в БД.
 	if err := os.Remove(filepath.Join(fixture.root, filepath.FromSlash(fixture.paths.ArticleInfoPath))); err != nil {
 		t.Fatal(err)
@@ -547,8 +547,8 @@ func TestBuildParsesGeneratedArticleInfoIntoResultMetadata(t *testing.T) {
 	if err := os.Remove(filepath.Join(fixture.root, filepath.FromSlash(fixture.paths.ArticleInfoPath))); err != nil {
 		t.Fatal(err)
 	}
-	tags, tldr, faq := storedMetadata()
-	fixture.generator.answers["info"] = "Метки: " + tags + "\nTLDR: " + tldr + "\nFAQ:\n" + faq
+	tldr, faq := storedMetadata()
+	fixture.generator.answers["info"] = "TLDR: " + tldr + "\nFAQ:\n" + faq
 
 	if err := fixture.builder.Build(context.Background(), testExternalID); err != nil {
 		t.Fatalf("Build() = %v", err)
@@ -561,8 +561,8 @@ func TestBuildParsesGeneratedArticleInfoIntoResultMetadata(t *testing.T) {
 	if metadata == nil {
 		t.Fatal("result.md собран по данным БД, хотя метаданных там нет")
 	}
-	if metadata.Tags != tags || metadata.TLDR != tldr || metadata.FAQ != faq {
-		t.Fatalf("разобранные метаданные = %+v, want Tags %q, TLDR %q, FAQ %q", metadata, tags, tldr, faq)
+	if metadata.TLDR != tldr || metadata.FAQ != faq {
+		t.Fatalf("разобранные метаданные = %+v, want TLDR %q, FAQ %q", metadata, tldr, faq)
 	}
 	if got := fixture.demoFile(t, "generated/article_info.txt"); !strings.Contains(got, tldr) {
 		t.Fatalf("DEMO/generated/article_info.txt = %q", got)
@@ -570,15 +570,15 @@ func TestBuildParsesGeneratedArticleInfoIntoResultMetadata(t *testing.T) {
 }
 
 // Частично заполненные метаданные в БД не дополняются разбором article_info.txt: источник
-// выбирается целиком. Иначе result.md собрался бы из FAQ одного прогона и меток другого.
+// выбирается целиком. Иначе result.md собрался бы из FAQ одного прогона и TL;DR другого.
 func TestBuildDoesNotMixDatabaseAndDemoMetadata(t *testing.T) {
 	fixture := newFixture(t)
 	fixture.writeCompleteProduction(t)
-	_, _, faq := storedMetadata()
+	_, faq := storedMetadata()
 	fixture.repository.result.FAQ = faq
-	// На диске лежит разбираемый article_info.txt с метками и TL;DR: если бы demo дополнял
-	// пустые поля БД, они бы отсюда и приехали.
-	fixture.writeProduction(t, fixture.paths.ArticleInfoPath, "Метки: метки из файла\nTLDR: коротко из файла\nFAQ: -")
+	// На диске лежит разбираемый article_info.txt с TL;DR: если бы demo дополнял пустые
+	// поля БД, они бы отсюда и приехали.
+	fixture.writeProduction(t, fixture.paths.ArticleInfoPath, "TLDR: коротко из файла\nFAQ: -")
 
 	if err := fixture.builder.Build(context.Background(), testExternalID); err != nil {
 		t.Fatalf("Build() = %v", err)
@@ -616,8 +616,8 @@ func TestBuildDoesNotWriteMetadataToDatabase(t *testing.T) {
 	if err := os.Remove(filepath.Join(fixture.root, filepath.FromSlash(fixture.paths.ArticleInfoPath))); err != nil {
 		t.Fatal(err)
 	}
-	tags, tldr, faq := storedMetadata()
-	fixture.generator.answers["info"] = "Метки: " + tags + "\nTLDR: " + tldr + "\nFAQ:\n" + faq
+	tldr, faq := storedMetadata()
+	fixture.generator.answers["info"] = "TLDR: " + tldr + "\nFAQ:\n" + faq
 	before := fixture.repository.result
 
 	if err := fixture.builder.Build(context.Background(), testExternalID); err != nil {

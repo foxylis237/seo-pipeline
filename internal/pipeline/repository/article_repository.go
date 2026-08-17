@@ -26,7 +26,7 @@ func (r *ArticleRepository) GetResultInput(ctx context.Context, externalID strin
 	const query = `
 		SELECT a.id, a.external_id, a.title, COALESCE(i.image_slug, ''),
 			a.status, a.current_step, a.error_message, a.created_at, a.updated_at,
-			COALESCE(i.category, ''), COALESCE(m.tags, ''), COALESCE(m.tldr, ''), COALESCE(m.faq, ''),
+			COALESCE(i.category, ''), COALESCE(i.tags, ''), COALESCE(m.tldr, ''), COALESCE(m.faq, ''),
 			COALESCE(m.metadata_text, ''),
 			COALESCE(i.professions, ''), COALESCE(i.author, ''), COALESCE(i.key_word, ''),
 			COALESCE(i.meta_description, ''), COALESCE(i.header, ''),
@@ -176,12 +176,12 @@ func (r *ArticleRepository) SaveDemoArticleInfo(ctx context.Context, articleID i
 		return fmt.Errorf("сохранить путь demo-статьи: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO article_metadata (article_id, tags, tldr, faq, metadata_text, updated_at)
-		VALUES ($1, $2, $3, $4, $5, NOW())
+		INSERT INTO article_metadata (article_id, tldr, faq, metadata_text, updated_at)
+		VALUES ($1, $2, $3, $4, NOW())
 		ON CONFLICT (article_id) DO UPDATE
-		SET tags = EXCLUDED.tags, tldr = EXCLUDED.tldr, faq = EXCLUDED.faq,
+		SET tldr = EXCLUDED.tldr, faq = EXCLUDED.faq,
 			metadata_text = EXCLUDED.metadata_text, updated_at = NOW()
-	`, articleID, info.Tags, info.TLDR, info.FAQ, rawText); err != nil {
+	`, articleID, info.TLDR, info.FAQ, rawText); err != nil {
 		return fmt.Errorf("сохранить информацию demo-статьи: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -353,15 +353,14 @@ func (r *ArticleRepository) SaveArticleInfo(ctx context.Context, articleID int64
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO article_metadata (article_id, tags, tldr, faq, metadata_text, updated_at)
-		VALUES ($1, $2, $3, $4, $5, NOW())
+		INSERT INTO article_metadata (article_id, tldr, faq, metadata_text, updated_at)
+		VALUES ($1, $2, $3, $4, NOW())
 		ON CONFLICT (article_id) DO UPDATE
-		SET tags = EXCLUDED.tags,
-			tldr = EXCLUDED.tldr,
+		SET tldr = EXCLUDED.tldr,
 			faq = EXCLUDED.faq,
 			metadata_text = EXCLUDED.metadata_text,
 			updated_at = NOW()
-	`, articleID, info.Tags, info.TLDR, info.FAQ, rawText); err != nil {
+	`, articleID, info.TLDR, info.FAQ, rawText); err != nil {
 		return fmt.Errorf("сохранить информацию для публикации: %w", err)
 	}
 	result, err := tx.Exec(ctx, `
@@ -510,11 +509,12 @@ func (r *ArticleRepository) Create(
 			reference_url,
 			author,
 			links,
-			professions
+			professions,
+			tags
 		)
 		VALUES (
 			$1, $2, $3, $4, $5,
-			$6, $7, $8, $9, $10
+			$6, $7, $8, $9, $10, $11
 		)
 		ON CONFLICT (article_id) DO UPDATE
 		SET
@@ -526,7 +526,8 @@ func (r *ArticleRepository) Create(
 			reference_url = EXCLUDED.reference_url,
 			author = EXCLUDED.author,
 			links = EXCLUDED.links,
-			professions = EXCLUDED.professions
+			professions = EXCLUDED.professions,
+			tags = EXCLUDED.tags
 	`
 
 	_, err = tx.Exec(
@@ -542,6 +543,7 @@ func (r *ArticleRepository) Create(
 		input.Author,
 		input.Links,
 		input.Professions,
+		input.Tags,
 	)
 	if err != nil {
 		return article.Article{}, fmt.Errorf("сохранить входные данные статьи: %w", err)
@@ -567,9 +569,9 @@ func (r *ArticleRepository) Import(ctx context.Context, input article.Input) (ar
 		), saved_input AS (
 			INSERT INTO article_inputs (
 				article_id, category, header, image_slug, meta_description,
-				key_word, reference_url, author, links, professions
+				key_word, reference_url, author, links, professions, tags
 			)
-			SELECT id, $3, $4, $5, $6, $7, $8, $9, $10, $11 FROM created
+			SELECT id, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12 FROM created
 			RETURNING article_id
 		)
 		SELECT id, external_id, title, status, current_step, error_message, created_at, updated_at
@@ -577,6 +579,7 @@ func (r *ArticleRepository) Import(ctx context.Context, input article.Input) (ar
 		WHERE EXISTS (SELECT 1 FROM saved_input)
 	`, fmt.Sprint(input.ExcelID), input.Title, input.Category, input.Header, input.ImageSlug,
 		input.MetaDescription, input.Keyword, input.ReferenceURL, input.Author, input.Links, input.Professions,
+		input.Tags,
 	).Scan(
 		&selected.ID, &selected.ExternalID, &selected.Title, &selected.Status,
 		&selected.CurrentStep, &selected.ErrorMessage, &selected.CreatedAt, &selected.UpdatedAt,
@@ -701,7 +704,8 @@ func (r *ArticleRepository) ListImportedArticles(ctx context.Context) ([]article
 			i.article_id IS NOT NULL,
 			COALESCE(i.header, ''), COALESCE(i.image_slug, ''), COALESCE(i.meta_description, ''),
 			COALESCE(i.key_word, ''), COALESCE(i.reference_url, ''), COALESCE(i.category, ''),
-			COALESCE(i.author, ''), COALESCE(i.links, ''), COALESCE(i.professions, '')
+			COALESCE(i.author, ''), COALESCE(i.links, ''), COALESCE(i.professions, ''),
+			COALESCE(i.tags, '')
 		FROM articles AS a
 		LEFT JOIN article_inputs AS i ON i.article_id = a.id
 		ORDER BY a.id
@@ -720,7 +724,7 @@ func (r *ArticleRepository) ListImportedArticles(ctx context.Context) ([]article
 			&item.Article.CreatedAt, &item.Article.UpdatedAt, &item.HasInput,
 			&item.Input.Header, &item.Input.ImageSlug, &item.Input.MetaDescription,
 			&item.Input.Keyword, &item.Input.ReferenceURL, &item.Input.Category,
-			&item.Input.Author, &item.Input.Links, &item.Input.Professions,
+			&item.Input.Author, &item.Input.Links, &item.Input.Professions, &item.Input.Tags,
 		); err != nil {
 			return nil, fmt.Errorf("прочитать импортированную статью: %w", err)
 		}
@@ -743,13 +747,15 @@ func (r *ArticleRepository) GetArticleInput(ctx context.Context, articleID int64
 		SELECT a.external_id, a.title,
 			COALESCE(i.header, ''), COALESCE(i.image_slug, ''), COALESCE(i.meta_description, ''),
 			COALESCE(i.key_word, ''), COALESCE(i.reference_url, ''), COALESCE(i.category, ''),
-			COALESCE(i.author, ''), COALESCE(i.links, ''), COALESCE(i.professions, '')
+			COALESCE(i.author, ''), COALESCE(i.links, ''), COALESCE(i.professions, ''),
+			COALESCE(i.tags, '')
 		FROM articles AS a
 		LEFT JOIN article_inputs AS i ON i.article_id = a.id
 		WHERE a.id = $1
 	`, articleID).Scan(
 		&externalID, &input.Title, &input.Header, &input.ImageSlug, &input.MetaDescription,
 		&input.Keyword, &input.ReferenceURL, &input.Category, &input.Author, &input.Links, &input.Professions,
+		&input.Tags,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return article.Input{}, fmt.Errorf("статья %d не найдена при чтении входных данных", articleID)

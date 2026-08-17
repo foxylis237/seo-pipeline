@@ -89,6 +89,8 @@ func comparedFields() []comparedField {
 			func(im article.ImportedArticle) string { return im.Input.Links }},
 		{"professions", func(in article.Input) string { return in.Professions },
 			func(im article.ImportedArticle) string { return im.Input.Professions }},
+		{"tags", func(in article.Input) string { return in.Tags },
+			func(im article.ImportedArticle) string { return im.Input.Tags }},
 	}
 }
 

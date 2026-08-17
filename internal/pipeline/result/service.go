@@ -205,7 +205,7 @@ func (s *Service) render(input article.ResultInput, articleText string, faqItems
 // В отличие от Build отсутствующие данные здесь не ошибка: demo обязан получить result.md и на
 // статье, которая ещё не прошла пайплайн, — незаполненные поля остаются пустыми.
 //
-// metadata подменяет сохранённые Метки, TL;DR, FAQ и допинфо целиком — пополевого смешивания с
+// metadata подменяет сохранённые TL;DR, FAQ и допинфо целиком — пополевого смешивания с
 // PostgreSQL нет: набор метаданных приходит либо из БД (metadata == nil), либо из разобранного
 // demo article_info.txt. Половина одного источника с половиной другого дала бы result.md,
 // которого не существует ни в одном прогоне.
@@ -217,8 +217,10 @@ func (s *Service) RenderForDemo(ctx context.Context, externalID, articleText str
 	if input.HTMLPath != "" && !s.writer.Exists(input.HTMLPath) {
 		input.HTMLPath = ""
 	}
+	// Метки сюда не попадают намеренно: они приходят из article_inputs — колонки tags
+	// Excel — и переданный набор метаданных их не подменяет.
 	if metadata != nil {
-		input.Tags, input.TLDR, input.FAQ, input.AdditionalInfo = metadata.Tags, metadata.TLDR, metadata.FAQ, metadata.AdditionalInfo
+		input.TLDR, input.FAQ, input.AdditionalInfo = metadata.TLDR, metadata.FAQ, metadata.AdditionalInfo
 	}
 	faqItems, err := ParseFAQItems(input.FAQ)
 	if err != nil {

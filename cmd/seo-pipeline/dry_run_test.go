@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/foxylis237/seo-pipeline/internal/llm"
+	"github.com/foxylis237/seo-pipeline/internal/pipeline/article"
 )
 
 // Заглушка обязана отвечать на каждую стадию пайплайна. Стадии article и info в ней
@@ -52,5 +53,24 @@ func TestDryRunChatWithHistoryStartsFromFixMessage(t *testing.T) {
 	response, err := chat.Generate(context.Background(), "fix prompt")
 	if err != nil || !strings.Contains(response.Text, "[[ARTICLE_COMPLETE]]") {
 		t.Fatalf("fix response = %+v, %v", response, err)
+	}
+}
+
+// Заглушка стадии info обязана соответствовать контракту стадии: только TL;DR и FAQ.
+// Секция «Метки» в ней переводила разбор в нестрогий режим и уезжала в допинфо, а dry-run
+// существует ровно для того, чтобы такие расхождения ловились без внешних сервисов.
+func TestDryRunInfoStubMatchesStageContract(t *testing.T) {
+	info, err := article.ParseArticleInfo(dryRunInfo)
+	if err != nil {
+		t.Fatalf("заглушка info не разобрана: %v", err)
+	}
+	if info.FallbackUsed {
+		t.Fatalf("заглушка info разобрана нестрогим разбором: %+v", info)
+	}
+	if strings.TrimSpace(info.TLDR) == "" || strings.TrimSpace(info.FAQ) == "" {
+		t.Fatalf("заглушка info неполна: %+v", info)
+	}
+	if strings.TrimSpace(info.AdditionalInfo) != "" {
+		t.Fatalf("заглушка info содержит лишние разделы: %q", info.AdditionalInfo)
 	}
 }

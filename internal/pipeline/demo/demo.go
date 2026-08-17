@@ -67,7 +67,7 @@ type Generator interface {
 }
 
 // ResultRenderer собирает result.md из сохранённых данных, не записывая его. metadata == nil
-// означает «взять Метки, TL;DR и FAQ из PostgreSQL», иначе они берутся из переданного набора
+// означает «взять TL;DR и FAQ из PostgreSQL», иначе они берутся из переданного набора
 // целиком.
 type ResultRenderer interface {
 	RenderForDemo(ctx context.Context, externalID, articleText string, metadata *article.ArticleInfo) (string, error)

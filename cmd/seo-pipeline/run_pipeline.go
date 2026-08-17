@@ -163,7 +163,9 @@ func loadPipelineState(ctx context.Context, repository runStateRepository, exter
 	state.HTMLPath = result.HTMLPath
 	// Сырой metadata_text наружу не отдаётся, поэтому признаком выполненного info служит
 	// любая разобранная из него секция.
-	state.MetadataText = strings.TrimSpace(result.Tags + result.TLDR + result.FAQ + result.AdditionalInfo)
+	// Метки сюда не входят: они приходят из Excel при импорте и появляются раньше стадии
+	// info, поэтому признаком её выполнения служить не могут.
+	state.MetadataText = strings.TrimSpace(result.TLDR + result.FAQ + result.AdditionalInfo)
 	state.ResultReady = state.Status == "completed"
 	return state, nil
 }

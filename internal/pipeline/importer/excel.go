@@ -149,6 +149,7 @@ func ReadRows(path string) ([]Row, error) {
 			Author:          optionalCellValue(row, columnIndexes, "authors"),
 			Links:           optionalCellValue(row, columnIndexes, "links"),
 			Professions:     optionalCellValue(row, columnIndexes, "professions"),
+			Tags:            optionalCellValue(row, columnIndexes, "tags"),
 		}
 
 		result = append(result, parsed)
