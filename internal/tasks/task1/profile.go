@@ -27,7 +27,7 @@ func Profile() tasks.Profile {
 	return tasks.Profile{
 		Name:             Name,
 		Command:          Command,
-		InputPath:        "input/task_1/input.xlsx",
+		InputDir:         "input/task_1",
 		OutputDir:        "tasks/task_1/output",
 		PromptsDir:       "tasks/task_1/prompts",
 		TemplatePath:     "tasks/task_1/templates/result.md.tmpl",

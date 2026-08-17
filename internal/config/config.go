@@ -14,14 +14,19 @@ import (
 
 // Config содержит настройки приложения.
 type Config struct {
-	AppEnv        string
-	DatabaseURL   string
+	AppEnv      string
+	DatabaseURL string
+	// InputFilePath — явно заданный INPUT_FILE_PATH. Пустой означает «искать книгу в InputDir»:
+	// имя файла импорта значения не имеет, и подставлять сюда догадку нельзя — иначе отличить
+	// выбор человека от умолчания станет невозможно.
 	InputFilePath string
-	OutputDir     string
-	LogLevel      string
-	LogFormat     string
-	GeminiAPIKey  string
-	GeminiModel   string
+	// InputDir — каталог импорта задачи. Книгу в нём выбирает importer.ResolveWorkbook.
+	InputDir     string
+	OutputDir    string
+	LogLevel     string
+	LogFormat    string
+	GeminiAPIKey string
+	GeminiModel  string
 
 	KeysSOEmail      string
 	KeysSOPassword   string
@@ -37,7 +42,7 @@ type Config struct {
 // точечно; пустой префикс означает исторические имена без префикса, и переопределяют они
 // только ту задачу, у которой префикса нет.
 type TaskDefaults struct {
-	InputPath string
+	InputDir  string
 	OutputDir string
 	EnvPrefix string
 }
@@ -102,6 +107,7 @@ func load(requireEnvFile bool, defaults TaskDefaults) (Config, error) {
 		AppEnv:        os.Getenv("APP_ENV"),
 		DatabaseURL:   databaseURL,
 		InputFilePath: defaults.taskEnv("INPUT_FILE_PATH"),
+		InputDir:      defaults.InputDir,
 		OutputDir:     defaults.taskEnv("OUTPUT_DIR"),
 		LogLevel:      os.Getenv("LOG_LEVEL"),
 		LogFormat:     os.Getenv("LOG_FORMAT"),
@@ -115,9 +121,6 @@ func load(requireEnvFile bool, defaults TaskDefaults) (Config, error) {
 		ArsenkinHeadless: arsenkinHeadless,
 	}
 
-	if cfg.InputFilePath == "" {
-		cfg.InputFilePath = defaults.InputPath
-	}
 	if cfg.OutputDir == "" {
 		cfg.OutputDir = defaults.OutputDir
 	}
@@ -190,8 +193,15 @@ func (c Config) ValidateImport() error {
 	if c.DatabaseURL == "" {
 		return fmt.Errorf("DATABASE_URL is required")
 	}
-	if c.InputFilePath == "" {
-		return fmt.Errorf("INPUT_FILE_PATH is required")
+	return c.validateImportSource()
+}
+
+// validateImportSource требует хотя бы один источник книги импорта: явный путь или каталог
+// задачи. Существует ли там книга — решает importer.ResolveWorkbook: config не ходит в
+// файловую систему за данными задачи.
+func (c Config) validateImportSource() error {
+	if c.InputFilePath == "" && c.InputDir == "" {
+		return fmt.Errorf("INPUT_FILE_PATH or a task input directory is required")
 	}
 	return nil
 }
@@ -241,8 +251,8 @@ func (c Config) ValidateDryRun() error {
 	if c.DatabaseURL == "" {
 		return fmt.Errorf("DRY_RUN_DATABASE_URL is required")
 	}
-	if c.InputFilePath == "" {
-		return fmt.Errorf("INPUT_FILE_PATH is required")
+	if err := c.validateImportSource(); err != nil {
+		return err
 	}
 	parsed, err := url.Parse(c.DatabaseURL)
 	if err != nil || parsed.Scheme != "postgres" && parsed.Scheme != "postgresql" {

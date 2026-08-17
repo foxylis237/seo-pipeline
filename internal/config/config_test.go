@@ -10,7 +10,7 @@ import (
 // testTaskDefaults повторяет профиль task_1: тесты проверяют исторические дефолты, и они
 // обязаны остаться прежними.
 func testTaskDefaults() TaskDefaults {
-	return TaskDefaults{InputPath: "input/task_1/input.xlsx", OutputDir: "tasks/task_1/output"}
+	return TaskDefaults{InputDir: "input/task_1", OutputDir: "tasks/task_1/output"}
 }
 
 func TestEnvFilePathUsesConfiguredPath(t *testing.T) {
@@ -110,8 +110,8 @@ func TestLoadDryRunUsesLocalDefaultsWhenEnvIsMissing(t *testing.T) {
 	if cfg.DatabaseURL != "postgres://seo:seo@localhost:5433/seo_dry_run?sslmode=disable" {
 		t.Fatalf("DatabaseURL = %q", cfg.DatabaseURL)
 	}
-	if cfg.InputFilePath != "input/task_1/input.xlsx" {
-		t.Fatalf("InputFilePath = %q", cfg.InputFilePath)
+	if cfg.InputDir != "input/task_1" {
+		t.Fatalf("InputDir = %q", cfg.InputDir)
 	}
 	if cfg.OutputDir != filepath.Join("tasks", "task_1", "output", "dry-run") {
 		t.Fatalf("OutputDir = %q", cfg.OutputDir)
@@ -241,7 +241,7 @@ func TestTaskWithPrefixIgnoresUnprefixedPaths(t *testing.T) {
 	unsetEnv(t, "PPROF_1_INPUT_FILE_PATH")
 
 	defaults := TaskDefaults{
-		InputPath: "input/shared/input.xlsx",
+		InputDir:  "input/pprof_1",
 		OutputDir: "tasks/pprof_1/output",
 		EnvPrefix: "PPROF_1_",
 	}
@@ -252,8 +252,11 @@ func TestTaskWithPrefixIgnoresUnprefixedPaths(t *testing.T) {
 	if cfg.OutputDir != defaults.OutputDir {
 		t.Fatalf("OutputDir = %q, want %q: переменная без префикса протекла в другую задачу", cfg.OutputDir, defaults.OutputDir)
 	}
-	if cfg.InputFilePath != defaults.InputPath {
-		t.Fatalf("InputFilePath = %q, want %q", cfg.InputFilePath, defaults.InputPath)
+	if cfg.InputFilePath != "" {
+		t.Fatalf("InputFilePath = %q, want empty: INPUT_FILE_PATH протёк в задачу с префиксом", cfg.InputFilePath)
+	}
+	if cfg.InputDir != defaults.InputDir {
+		t.Fatalf("InputDir = %q, want %q", cfg.InputDir, defaults.InputDir)
 	}
 }
 
@@ -269,7 +272,7 @@ func TestPrefixedEnvOverridesTaskDefaults(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://shared-host/seo")
 
 	cfg, err := Load(TaskDefaults{
-		InputPath: "input/shared/input.xlsx",
+		InputDir:  "input/pprof_1",
 		OutputDir: "tasks/pprof_1/output",
 		EnvPrefix: "PPROF_1_",
 	})

@@ -21,6 +21,7 @@ import (
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/demo"
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/diagnostics"
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/generation"
+	"github.com/foxylis237/seo-pipeline/internal/pipeline/importer"
 	articleoutput "github.com/foxylis237/seo-pipeline/internal/pipeline/output"
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/repository"
 	resultassembly "github.com/foxylis237/seo-pipeline/internal/pipeline/result"
@@ -53,7 +54,7 @@ func main() {
 
 	profile := command.Profile
 	defaults := config.TaskDefaults{
-		InputPath: profile.InputPath,
+		InputDir:  profile.InputDir,
 		OutputDir: profile.OutputDir,
 		EnvPrefix: profile.EnvPrefix,
 	}
@@ -143,13 +144,33 @@ func main() {
 	case "errors":
 		err = runErrors(ctx, articleRepository, command.ExternalID, os.Stdout)
 
+	// Книга Excel ищется здесь, а не при загрузке конфигурации: пустой каталог импорта —
+	// причина отказать двум командам ниже, а не всей задаче.
 	case "import":
-		err = runImport(ctx, articleRepository, cfg.InputFilePath, profile.ImportReportsDir, command.ImportLimit, taskLogger)
+		var workbook string
+		if workbook, err = importer.ResolveWorkbook(cfg.InputFilePath, cfg.InputDir); err == nil {
+			err = runImport(ctx, articleRepository, workbook, profile.ImportReportsDir, command.ImportLimit, taskLogger)
+		}
 
 	case "import-check":
-		err = runImportCheck(ctx, articleRepository, cfg.InputFilePath, os.Stdout, command.ExternalID)
+		var workbook string
+		if workbook, err = importer.ResolveWorkbook(cfg.InputFilePath, cfg.InputDir); err == nil {
+			err = runImportCheck(ctx, articleRepository, workbook, os.Stdout, command.ExternalID)
+		}
 
 	case "reset":
+		// С ID сбрасывается одна статья, без ID — вся задача. Разные объёмы удаления, но
+		// одно обещание: вернуть к состоянию «импорта ещё не было».
+		if command.ExternalID != "" {
+			err = runResetArticle(ctx, articleRepository, writer, resetArticleOptions{
+				TaskCommand: profile.Command,
+				AssumeYes:   command.AssumeYes,
+				Interactive: isCharDevice(os.Stdin),
+				In:          os.Stdin,
+				Out:         os.Stdout,
+			}, taskLogger, command.ExternalID)
+			break
+		}
 		err = runReset(ctx, articleRepository, resetOptions{
 			TaskName:         profile.Name,
 			TaskCommand:      profile.Command,
@@ -666,13 +687,22 @@ func parseTaskCommand(args []string) (taskCommand, error) {
 	}
 	task := args[2]
 	switch task {
-	case "deepseek-login", "google-login", "reset":
-		// Позиционных аргументов ни у одной нет: сброс одной статьи — это regenerate,
-		// а публикация одной статьи — google-publish.
+	case "deepseek-login", "google-login":
+		// Позиционных аргументов ни у одной нет: вход в сервис общий для всех статей.
 		if len(args) != 3 {
 			return taskCommand{}, fmt.Errorf("usage: seo-pipeline %s %s", profile.Command, task)
 		}
 		return taskCommand{Profile: profile, Name: task}, nil
+	case "reset":
+		// С ID сбрасывается одна статья, без ID — вся задача. Умолчание намеренно опаснее
+		// аргумента: reset без ID и был исходной командой, менять её смысл нельзя.
+		if len(args) == 3 {
+			return taskCommand{Profile: profile, Name: task}, nil
+		}
+		if len(args) != 4 {
+			return taskCommand{}, fmt.Errorf("usage: seo-pipeline %s reset [external_id]", profile.Command)
+		}
+		return parseExternalIDCommand(profile, task, args[3])
 	case "import":
 		if len(args) > 4 {
 			return taskCommand{}, fmt.Errorf("usage: seo-pipeline %s import [limit]", profile.Command)

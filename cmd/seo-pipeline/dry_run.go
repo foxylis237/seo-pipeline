@@ -155,7 +155,11 @@ func runDryRun(
 		return fmt.Errorf("dry-run write routing report: %w", err)
 	}
 
-	inputs, err := importer.ReadArticles(cfg.InputFilePath)
+	workbook, err := importer.ResolveWorkbook(cfg.InputFilePath, cfg.InputDir)
+	if err != nil {
+		return fmt.Errorf("dry-run resolve Excel: %w", err)
+	}
+	inputs, err := importer.ReadArticles(workbook)
 	if err != nil {
 		return fmt.Errorf("dry-run read Excel: %w", err)
 	}
