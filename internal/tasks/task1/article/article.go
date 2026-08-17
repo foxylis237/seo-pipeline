@@ -121,4 +121,7 @@ type ResultInput struct {
 	Header          string
 	ArticlePath     string
 	HTMLPath        string
+	// GoogleDocURL — адрес документа с промптом статьи. Пуст, пока промпт не опубликован:
+	// result.md печатает раздел в любом случае, но с пустым значением.
+	GoogleDocURL string
 }

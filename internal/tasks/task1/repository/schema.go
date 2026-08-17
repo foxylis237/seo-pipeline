@@ -53,6 +53,8 @@ var expectedSchema = []schemaColumn{
 	{"article_outputs", "review_path", "text", true},
 	{"article_outputs", "fixed_article_path", "text", true},
 	{"article_outputs", "html_path", "text", true},
+	// google_doc_url добавлен миграцией 000002. NULL означает «промпт ещё не публиковался».
+	{"article_outputs", "google_doc_url", "text", true},
 	{"article_outputs", "updated_at", "timestamp with time zone", false},
 	{"article_errors", "id", "bigint", false},
 	{"article_errors", "article_id", "bigint", false},

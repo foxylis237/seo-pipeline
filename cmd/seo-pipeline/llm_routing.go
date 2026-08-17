@@ -171,6 +171,9 @@ type generationDeps struct {
 	writer     *articleoutput.Writer
 	result     *resultassembly.Service
 	logger     *slog.Logger
+	// promptPublisher выгружает готовый промпт статьи наружу. Необязателен: у prepare и
+	// dry-run его нет, и конвейер тогда работает ровно как раньше.
+	promptPublisher generation.PromptPublisher
 }
 
 // buildLLM создаёт клиентов и конвейеры под разрешённую маршрутизацию.
@@ -229,8 +232,14 @@ func buildLLM(ctx context.Context, configs stageConfigs, availability geminiAvai
 	for name, stageSet := range schemes {
 		router := llm.NewRouter(stageSet, clients, deps.logger)
 		routers[name] = router
-		pipelines[name] = generation.NewPipeline(deps.repository, router, router.NewStageChatFactory("review", "fix"),
+		pipeline := generation.NewPipeline(deps.repository, router, router.NewStageChatFactory("review", "fix"),
 			deps.writer, deps.logger, deps.result)
+		// Публикация подключается обеим схемам: статья, переехавшая на DeepSeek после
+		// исчерпания квоты Gemini, выгружает промпт так же, как обычная.
+		if deps.promptPublisher != nil {
+			pipeline.SetPromptPublisher(deps.promptPublisher)
+		}
+		pipelines[name] = pipeline
 	}
 	return &articleMode{
 		pipelines: pipelines, routers: routers, resolver: resolver, availability: availability, logger: deps.logger,

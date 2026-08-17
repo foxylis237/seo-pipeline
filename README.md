@@ -11,7 +11,7 @@ SEO Pipeline — CLI-приложение на Go для импорта зада
 - `config/config.deepseek.yaml` — наложение для режима `LLM_MODE=deepseek`.
 - `input/task_1/input.xlsx` — единственный Excel по умолчанию для импорта `task_1`.
 - `internal/config/` — загрузка и проверка конфигурации.
-- `internal/integrations/keysso/`, `internal/integrations/arsenkin/` — интеграции через Playwright.
+- `internal/integrations/keysso/`, `internal/integrations/arsenkin/`, `internal/integrations/google/` — интеграции через Playwright.
 - `internal/llm/` — маршрутизация стадий, таймауты и повторы; `gemini/` и `deepseekweb/` — клиенты провайдеров.
 - `internal/storage/` — подключение к PostgreSQL.
 - `internal/tasks/task1/` — предметная логика первой задачи:
@@ -30,7 +30,7 @@ SEO Pipeline — CLI-приложение на Go для импорта зада
 - `tasks/task_1/templates/` — шаблон `result.md`.
 - `tasks/task_1/output/` — создаваемые артефакты статей.
 - `output/task1/import-reports/` — исторические и актуальный JSON-отчёты импорта.
-- `output/task1/debug/` — диагностика неудачных попыток Keys.so и Arsenkin.
+- `output/task1/debug/` — диагностика неудачных попыток Keys.so, Arsenkin, DeepSeek и Google.
 - `docs/` — единый язык, ADR, аудит; `.claude/` — правила, хуки и скиллы Claude Code.
 
 ## Требования и конфигурация
@@ -115,6 +115,8 @@ Makefile — короткая оболочка над существующим C
 | `task-1 fix` | Исправляет статьи с готовым review без fixed article, продолжая чат ревью. | Необязательный ID. | `make task-1 fix` или `make task-1 fix 37` | `go run ./cmd/seo-pipeline task-1 fix [external_id]` |
 | `task-1 html` | Создаёт отсутствующий HTML из готовой fixed article. | Необязательный ID. | `make task-1 html` или `make task-1 html 37` | `go run ./cmd/seo-pipeline task-1 html [external_id]` |
 | `task-1 result` | Собирает отсутствующий `result.md` и завершает статью. | Необязательный ID. | `make task-1 result` или `make task-1 result 37` | `go run ./cmd/seo-pipeline task-1 result [external_id]` |
+| `task-1 google-login` | Удаляет сохранённый профиль, открывает видимый Chromium для ручного входа в Google и сохраняет новый persistent profile. | Нет. | `make task-1 google-login` | `go run ./cmd/seo-pipeline task-1 google-login` |
+| `task-1 google-publish` | Публикует уже сохранённый промпт статьи в Google Docs и запоминает адрес документа для `result.md`. LLM, Keys.so и Arsenkin не вызываются. | **Обязательный** `external_id`. | `make task-1 google-publish 45` | `go run ./cmd/seo-pipeline task-1 google-publish <external_id>` |
 | `task-1 deepseek-login` | Удаляет сохранённый профиль, открывает Chromium для ручного входа в DeepSeek и сохраняет новый persistent profile. | Нет. | `make task-1 deepseek-login` | `go run ./cmd/seo-pipeline task-1 deepseek-login` |
 
 Отдельной CLI-операции `structure` нет: структура создаётся внутри `generate`.
@@ -173,6 +175,8 @@ go run ./cmd/seo-pipeline task-1 html <external_id>
 go run ./cmd/seo-pipeline task-1 result <external_id>
 go run ./cmd/seo-pipeline task-1 clear <external_id>
 go run ./cmd/seo-pipeline task-1 reset --yes
+go run ./cmd/seo-pipeline task-1 google-login
+go run ./cmd/seo-pipeline task-1 google-publish <external_id>
 go run ./cmd/seo-pipeline task-1 deepseek-login
 ```
 
@@ -304,6 +308,56 @@ targets:
 ```
 
 После этого обычная команда `make task-1 generate [ID]` использует тот же pipeline и те же промпты. Клиент открывает сохранённый persistent profile, создаёт новый DeepSeek Chat, отправляет промпт и ждёт новый непустой ответ. Завершение определяется без `sleep`: видимый индикатор генерации должен исчезнуть, а текст последнего ответа — перестать изменяться. Общий LLM-router применяет настроенный stage-timeout, до трёх попыток для временных браузерных ошибок и `slog`-логирование. При истёкшей сессии возвращается ошибка `DeepSeek session expired. Run deepseek-login.` без повторных попыток.
+
+### Публикация промпта в Google Docs
+
+Как только пайплайн собрал промпт статьи и сохранил его в `prompts/article_prompt.txt`, тот же текст выгружается в Google Docs — в папку [Статьи ДПО ПРОФ](https://drive.google.com/drive/folders/1N-NRlswacwqKWUOEiA1OS3tKT_V_yLiS). Имя документа:
+
+```text
+Промт: <название статьи>
+```
+
+Публикуется **уже готовый промпт** — та самая строка, которую роутер отправил модели и writer записал в файл. Промпт не собирается второй раз, дополнительных обращений к LLM не делается.
+
+Документ с таким именем ищется до создания: если он есть — содержимое заменяется целиком, если нет — создаётся новый. Версий, копий `(1)` и истории не остаётся, после публикации существует ровно один документ с актуальным текстом.
+
+**Первый вход выполняется вручную:**
+
+```bash
+make task-1 google-login
+```
+
+Команда удаляет сохранённый профиль, открывает видимый Chromium на папке Drive и ждёт, пока вы войдёте. Логин, пароль, CAPTCHA и 2FA не автоматизируются и не обходятся. После входа обычные прогоны используют сохранённую сессию.
+
+Профиль лежит в `data/browser/google/` рядом с профилями Arsenkin и DeepSeek, исключён из Git и защищён `flock`: две одновременные публикации не испортят его LevelDB.
+
+Вход открывается в **установленном Chrome**, а не в связанном с Playwright Chromium, и с флагом `--disable-blink-features=AutomationControlled`. Иначе Google отказывает во входе с сообщением «Возможно, этот браузер или приложение небезопасны»: он видит признак автоматизации ещё до формы логина. Если Chrome не установлен, запуск откатывается на Chromium сам — но вход из него проходит хуже.
+
+**Повторная публикация без генерации:**
+
+```bash
+make task-1 google-publish 45
+```
+
+Берёт `prompts/article_prompt.txt` статьи и создаёт или перезаписывает документ. Ни LLM, ни Keys.so, ни Arsenkin не вызываются.
+
+**Что происходит при отсутствии или истечении сессии.** Публикация останавливается сразу, без повторов: следующая попытка упёрлась бы в ту же страницу входа. В логе появляется `needs_manual_login=true` и подсказка `make task-1 google-login`. То же самое при CAPTCHA и 2FA — обходить их приложение не пытается. Локальный `article_prompt.txt` при любой ошибке Google остаётся нетронутым.
+
+**Retry.** Временные отказы Google и Playwright повторяются до 3 раз с растущей паузой (2 с, 4 с, дальше не больше 15 с). Каждая попытка поднимает браузер заново — половина отказов Playwright лечится только новым контекстом. Не повторяются: истёкшая сессия, отсутствие входа, CAPTCHA, 2FA, занятый профиль и отмена команды. Каждая попытка пишется в `slog` с `article_id`, `external_id`, `stage`, `attempt`, `duration_ms`, `retryable` и причиной. Диагностика неудач — `output/task1/debug/google/article-<id>/`: `screenshot.png`, `page.html` с вычищенными адресами почты и `info.json` без cookies.
+
+**Ссылка в result.md.** После успешной публикации адрес документа сохраняется в `article_outputs.google_doc_url`, и `result.md` печатает его последним разделом:
+
+````markdown
+## Гугл Док
+
+```text
+https://docs.google.com/document/d/AbC123/edit
+```
+````
+
+Раздел выводится всегда. Если публикация не проходила или не удалась, он остаётся на месте с пустым значением — состав разделов `result.md` не зависит от того, дошла ли публикация. Перед сборкой `result.md` пайплайн дожидается очереди публикаций: генерация к этому моменту закончена, задерживать нечего. Если ссылка появилась позже, вернуть её в файл можно повторной сборкой — `make task-1 result <external_id>`.
+
+**Публикация не задерживает генерацию.** Она уходит в отдельную goroutine сразу после сохранения промпта, а стадия `info` продолжается параллельно. Задания выполняются по одному — за профилем держится `flock`. Перед выходом команда дожидается очереди, поэтому фоновых Chromium после завершения не остаётся; отмена по `Ctrl+C` доходит и до публикации. Ошибка публикации не роняет генерацию: за неё уже заплачено, и в статус статьи она не попадает.
 
 ### Run, retry и regenerate
 
@@ -545,7 +599,17 @@ ORDER BY created_at DESC;
 
 Схема состоит из таблиц `articles`, `article_inputs`, `article_research`, `article_metadata`, `article_outputs` и `article_errors`. Приложение проверяет ожидаемую схему перед выполнением команд, но не запускает миграции основной БД автоматически.
 
-Вся схема описана одной baseline-миграцией `000001_init_schema`. Цепочка `000001_create_articles` … `000008_add_article_errors` свёрнута в неё; промежуточных состояний схемы больше не существует, обновление старого volume не поддерживается — только пересоздание.
+Схема описана baseline-миграцией `000001_init_schema` и последующими. Сейчас их две: `000002_add_google_doc_url` добавляет `article_outputs.google_doc_url` для ссылки на документ с промптом.
+
+Существующий volume автоматически не мигрируется, поэтому новую миграцию нужно применить к работающей базе руками:
+
+```bash
+docker exec -i seo-postgres psql -U seo -d seo < migrations/000002_add_google_doc_url.up.sql
+```
+
+Свежий клон получает обе миграции сам при первой инициализации volume.
+
+Прежняя цепочка `000001_create_articles` … `000008_add_article_errors` свёрнута в baseline. Цепочка `000001_create_articles` … `000008_add_article_errors` свёрнута в неё; промежуточных состояний схемы больше не существует, обновление старого volume не поддерживается — только пересоздание.
 
 Чистая база с нуля:
 

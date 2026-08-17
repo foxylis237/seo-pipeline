@@ -14,8 +14,8 @@ DRY_RUN_DATABASE_URL ?= postgres://seo:seo@localhost:5433/seo_dry_run?sslmode=di
 TASK_OPERATION := $(word 2,$(MAKECMDGOALS))
 TASK_ARG := $(word 3,$(MAKECMDGOALS))
 TASK_EXTRA_ARGS := $(wordlist 4,$(words $(MAKECMDGOALS)),$(MAKECMDGOALS))
-TASK_OPERATIONS := import import-check errors retry run regenerate dry-run prepare generate demo-generate article info review fix html result clear reset deepseek-login
-OPTIONAL_ARGUMENT_OPERATIONS := import-check errors retry run regenerate clear prepare generate demo-generate article info review fix html result
+TASK_OPERATIONS := import import-check errors retry run regenerate dry-run prepare generate demo-generate article info review fix html result clear reset google-login google-publish deepseek-login
+OPTIONAL_ARGUMENT_OPERATIONS := import-check errors retry run regenerate clear google-publish prepare generate demo-generate article info review fix html result
 
 .PHONY: help task-1 docker-up docker-start docker-stop docker-down docker-restart docker-logs docker-ps
 .PHONY: test test-race fmt vet lint lint-fix build
@@ -56,6 +56,8 @@ help: ## этот список
 		''                          'сразу после импорта' \
 		'task-1 reset'              'стереть всё состояние task_1' \
 		'task-1 dry-run'            'офлайн-прогон без сервисов' \
+		'task-1 google-login'       'ручной вход в Google' \
+		'task-1 google-publish ID'  'промпт статьи в Google Docs' \
 		'task-1 deepseek-login'     'ручной вход в DeepSeek'
 	@printf '\nПроект — make <цель>\n'
 	@awk 'BEGIN {FS = ":.*## "} \
@@ -98,6 +100,10 @@ task-1: ## Run a task_1 operation
 	fi
 	@if [ "$(TASK_OPERATION)" = 'deepseek-login' ] && [ -n "$(TASK_ARG)" ]; then \
 		printf 'deepseek-login does not accept arguments.\n\nExample:\n\nmake task-1 deepseek-login\n'; \
+		exit 1; \
+	fi
+	@if [ "$(TASK_OPERATION)" = 'google-login' ] && [ -n "$(TASK_ARG)" ]; then \
+		printf 'google-login does not accept arguments.\n\nExample:\n\nmake task-1 google-login\n'; \
 		exit 1; \
 	fi
 	@if [ "$(TASK_OPERATION)" = 'reset' ] && [ -n "$(TASK_ARG)" ]; then \

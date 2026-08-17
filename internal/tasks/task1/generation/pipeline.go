@@ -73,6 +73,9 @@ type Pipeline struct {
 	chatFactory      ChatFactory
 	logger           *slog.Logger
 	resultBuilder    ResultBuilder
+	// promptPublisher выгружает готовый промпт статьи наружу. Необязателен: без него
+	// пайплайн работает ровно как раньше. Подключается через SetPromptPublisher.
+	promptPublisher PromptPublisher
 }
 
 func NewPipeline(repository PipelineRepository, router *llm.Router, chatFactory ChatFactory, writer PipelineWriter, logger *slog.Logger, resultBuilder ...ResultBuilder) *Pipeline {
@@ -147,6 +150,9 @@ func (p *Pipeline) Run(ctx context.Context, input article.GenerationInput) (Pipe
 	if p.resultBuilder == nil {
 		return PipelineOutput{}, p.fail(ctx, logger, input, "result_generation", fmt.Errorf("result builder is not configured"))
 	}
+	// result.md печатает ссылку на документ с промптом, поэтому публикацию нужно дождаться.
+	// Генерация к этому моменту закончена, задерживать больше нечего.
+	p.waitPromptPublished()
 	resultPaths, resultErr := p.resultBuilder.Build(ctx, input.Article.ExternalID)
 	if resultErr != nil {
 		return PipelineOutput{}, p.fail(ctx, logger, input, "result_generation", resultErr)
@@ -203,6 +209,9 @@ func (p *Pipeline) RunDemoByExternalID(ctx context.Context, externalID string) (
 	if p.resultBuilder == nil {
 		return PipelineOutput{}, p.fail(ctx, logger, input, "result_generation", fmt.Errorf("result builder is not configured"))
 	}
+	// result.md печатает ссылку на документ с промптом, поэтому публикацию нужно дождаться.
+	// Генерация к этому моменту закончена, задерживать больше нечего.
+	p.waitPromptPublished()
 	resultPending, err := p.resultBuilder.BuildStaged(ctx, externalID)
 	if err != nil {
 		return PipelineOutput{}, p.fail(ctx, logger, input, "result_generation", err)
@@ -238,6 +247,9 @@ func (p *Pipeline) RunQuickDemoByExternalID(ctx context.Context, externalID stri
 	if p.resultBuilder == nil {
 		return PipelineOutput{}, p.fail(ctx, logger, input, "result_generation", fmt.Errorf("result builder is not configured"))
 	}
+	// result.md печатает ссылку на документ с промптом, поэтому публикацию нужно дождаться.
+	// Генерация к этому моменту закончена, задерживать больше нечего.
+	p.waitPromptPublished()
 	resultPending, err := p.resultBuilder.BuildStaged(ctx, externalID)
 	if err != nil {
 		return PipelineOutput{}, p.fail(ctx, logger, input, "result_generation", err)
@@ -312,6 +324,17 @@ func (p *Pipeline) runArticleAndInfo(ctx context.Context, input article.Generati
 		}
 	}
 	logger.Info("article saved", "stage", "article_generation", "model", articleResult.Model, "result_path", paths.ArticlePath)
+	// Промпт статьи уже опубликован на диске и записан в состояние, поэтому его можно
+	// выгружать наружу. Вызов не блокирующий по контракту PromptPublisher: стадия info идёт
+	// следом и не ждёт чужого браузера. Ошибки публикации сюда не возвращаются — они не имеют
+	// права уронить генерацию, за которую уже заплачено.
+	p.publishArticlePrompt(ArticlePromptJob{
+		ArticleID:  input.Article.ID,
+		ExternalID: input.Article.ExternalID,
+		Title:      input.Article.Title,
+		Prompt:     articleResult.Prompt,
+		PromptPath: paths.ArticlePromptPath,
+	})
 	diagnostics.LogStep(p.logger, "llm_article", "after", trace,
 		"prompt_fingerprint", diagnostics.Fingerprint(articleResult.Prompt),
 		"response_fingerprint", diagnostics.Fingerprint(text),

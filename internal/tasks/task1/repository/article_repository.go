@@ -30,7 +30,7 @@ func (r *ArticleRepository) GetResultInput(ctx context.Context, externalID strin
 			COALESCE(m.metadata_text, ''),
 			COALESCE(i.professions, ''), COALESCE(i.author, ''), COALESCE(i.key_word, ''),
 			COALESCE(i.meta_description, ''), COALESCE(i.header, ''),
-			COALESCE(o.article_path, ''), COALESCE(o.html_path, '')
+			COALESCE(o.article_path, ''), COALESCE(o.html_path, ''), COALESCE(o.google_doc_url, '')
 		FROM articles AS a
 		LEFT JOIN article_inputs AS i ON i.article_id = a.id
 		LEFT JOIN article_metadata AS m ON m.article_id = a.id
@@ -45,7 +45,7 @@ func (r *ArticleRepository) GetResultInput(ctx context.Context, externalID strin
 		&input.Article.CreatedAt, &input.Article.UpdatedAt,
 		&input.Category, &input.Tags, &input.TLDR, &input.FAQ, &rawMetadata, &input.Professions, &input.Author,
 		&input.Keyword, &input.MetaDescription, &input.Header,
-		&input.ArticlePath, &input.HTMLPath,
+		&input.ArticlePath, &input.HTMLPath, &input.GoogleDocURL,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return article.ResultInput{}, fmt.Errorf("статья с external_id %q не найдена", externalID)

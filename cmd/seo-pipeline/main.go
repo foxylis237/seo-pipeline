@@ -15,6 +15,7 @@ import (
 
 	"github.com/foxylis237/seo-pipeline/internal/config"
 	"github.com/foxylis237/seo-pipeline/internal/integrations/arsenkin"
+	"github.com/foxylis237/seo-pipeline/internal/integrations/google"
 	"github.com/foxylis237/seo-pipeline/internal/storage"
 	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/article"
 	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/demo"
@@ -34,6 +35,15 @@ func main() {
 	if err != nil {
 		logger.Error(err.Error())
 		os.Exit(1)
+	}
+	if command.Name == "google-login" {
+		// Ручной вход не трогает ни базу, ни конфигурацию задачи: человеку нужен только
+		// браузер, поэтому команда обрабатывается до подключения к PostgreSQL.
+		if err := google.Login(ctx, googleConfig(false), logger); err != nil {
+			logger.Error("вход в Google не выполнен", "error", err)
+			os.Exit(1)
+		}
+		return
 	}
 	if command.Name == "deepseek-login" {
 		if err := runDeepSeekLogin(ctx, logger); err != nil {
@@ -134,6 +144,14 @@ func main() {
 			Out:         os.Stdout,
 		}, taskLogger)
 
+	case "google-publish":
+		// Ни LLM, ни Keys.so, ни Arsenkin: команда берёт уже сохранённый промпт с диска.
+		publisher := google.NewPublisher(
+			google.NewSessionFactory(googleConfig(true), taskLogger, 0),
+			google.DefaultRetryPolicy(),
+		)
+		err = runGooglePublish(ctx, articleRepository, writer, publisher.Publish, taskLogger, os.Stdout, command.ExternalID)
+
 	case "clear":
 		err = runClear(ctx, articleRepository, writer, clearOptions{
 			AssumeYes:   command.AssumeYes,
@@ -201,8 +219,13 @@ func main() {
 			taskLogger.Info("Gemini is available again, its disable period has expired",
 				"was_disabled_until", until.UTC().Format(time.RFC3339), "previous_reason", reason)
 		}
+		// Публикация промпта идёт рядом с генерацией и не задерживает её. Wait обязателен:
+		// без него команда завершилась бы с живым Chromium и недописанным документом.
+		promptPublisher := newGooglePublisher(ctx, googleConfig(true), articleRepository, taskLogger)
+		defer promptPublisher.Wait()
 		mode, closeLLM, buildErr := buildLLM(ctx, stages, availability, generationDeps{
 			repository: articleRepository, writer: writer, result: resultService, logger: taskLogger,
+			promptPublisher: promptPublisher,
 		})
 		if buildErr != nil {
 			err = buildErr
@@ -542,14 +565,15 @@ func parseCommand(args []string) (taskCommand, error) {
 }
 
 func parseTaskCommand(args []string) (taskCommand, error) {
-	const available = "available task-1 operations: import, import-check, errors, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, clear, reset, deepseek-login"
+	const available = "available task-1 operations: import, import-check, errors, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, clear, reset, google-login, google-publish, deepseek-login"
 	if len(args) < 3 || (args[1] != "task-1" && args[1] != "task_1") {
 		return taskCommand{}, fmt.Errorf("usage: seo-pipeline task-1 <operation> [arguments]; %s", available)
 	}
 	task := args[2]
 	switch task {
-	case "deepseek-login", "reset":
-		// Позиционных аргументов у обеих нет: сброс одной статьи — это regenerate.
+	case "deepseek-login", "google-login", "reset":
+		// Позиционных аргументов ни у одной нет: сброс одной статьи — это regenerate,
+		// а публикация одной статьи — google-publish.
 		if len(args) != 3 {
 			return taskCommand{}, fmt.Errorf("usage: seo-pipeline task-1 %s", task)
 		}
@@ -587,6 +611,13 @@ func parseTaskCommand(args []string) (taskCommand, error) {
 			return taskCommand{}, fmt.Errorf("usage: seo-pipeline task-1 clear <external_id>")
 		}
 		return parseExternalIDCommand(task, args[3])
+	case "google-publish":
+		// ID обязателен: массовая публикация в чужой Google Drive не должна запускаться
+		// одним словом без аргумента.
+		if len(args) != 4 {
+			return taskCommand{}, fmt.Errorf("usage: seo-pipeline task-1 google-publish <external_id>")
+		}
+		return parseExternalIDCommand(task, args[3])
 	case "errors", "retry", "prepare", "generate", "demo-generate", "review", "fix", "info", "html", "result", "article", "import-check":
 		if len(args) == 3 {
 			return taskCommand{Name: task}, nil
@@ -618,7 +649,7 @@ func validateConfig(command string, cfg config.Config) error {
 		return cfg.ValidateGenerate()
 	case "result":
 		return cfg.ValidateReset()
-	case "errors", "reset", "clear":
+	case "errors", "reset", "clear", "google-publish":
 		return cfg.ValidateReset()
 	default:
 		return fmt.Errorf("unknown task %q", command)
