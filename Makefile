@@ -23,7 +23,7 @@ TASK_OPERATION := $(word 2,$(MAKECMDGOALS))
 TASK_ARG := $(word 3,$(MAKECMDGOALS))
 TASK_EXTRA_ARGS := $(wordlist 4,$(words $(MAKECMDGOALS)),$(MAKECMDGOALS))
 TASK_OPERATIONS := import import-check errors retry run regenerate dry-run prepare generate demo-generate article info review fix html result clear reset google-login google-publish deepseek-login
-OPTIONAL_ARGUMENT_OPERATIONS := import-check errors retry run regenerate clear google-publish prepare generate demo-generate article info review fix html result
+OPTIONAL_ARGUMENT_OPERATIONS := import-check errors retry run regenerate clear reset google-publish prepare generate demo-generate article info review fix html result
 
 .PHONY: help task-1 pprof-1 login docker-up docker-start docker-stop docker-down docker-restart docker-logs docker-ps
 .PHONY: test test-race fmt vet lint lint-fix build
@@ -32,8 +32,12 @@ OPTIONAL_ARGUMENT_OPERATIONS := import-check errors retry run regenerate clear g
 # Help
 # ----------------------------------------------------
 
-# help печатает команды обеих задач явно, а не через плейсхолдер задачи: из шаблона строку
-# всё равно приходится собирать руками, и это первое, обо что спотыкаются.
+# help печатает команды задачи явно, а не через плейсхолдер: из шаблона строку всё равно
+# приходится собирать руками, и это первое, обо что спотыкаются.
+#
+# task_1 здесь не печатается намеренно. Она в проде и все её команды работают — но это
+# старая реализация, её ждёт удаление, и предлагать её тому, кто открыл help, незачем.
+# Список её операций — в CLAUDE.md и README.md.
 #
 # Выравнивает только левая колонка, и она вся латиницей. Это важно: printf на macOS считает
 # ширину в байтах, поэтому кириллица в выравниваемом поле съезжает вдвое раньше нужного.
@@ -41,29 +45,7 @@ OPTIONAL_ARGUMENT_OPERATIONS := import-check errors retry run regenerate clear g
 help: ## этот список
 	@printf 'SEO Pipeline. [ID] — external_id из Excel, необязателен: без него берутся все\n'
 	@printf 'подходящие статьи. ID без скобок — обязателен.\n\n'
-	@printf 'task_1\n'
-	@printf '  %-34s%s\n' \
-		'make task-1 import [limit]'      'импорт статей из Excel' \
-		'make task-1 import-check [ID]'   'сверка импорта с Excel' \
-		'make task-1 errors [ID]'         'статьи с текущей ошибкой' \
-		'make task-1 prepare [ID]'        'research Keys.so и Arsenkin' \
-		'make task-1 generate [ID]'       'генерация после prepare' \
-		'make task-1 article [ID]'        'текст статьи и метаданные' \
-		'make task-1 info [ID]'           'то же, что article' \
-		'make task-1 review [ID]'         'проверка готовой статьи' \
-		'make task-1 fix [ID]'            'правки по итогам review' \
-		'make task-1 html [ID]'           'HTML из исправленной статьи' \
-		'make task-1 run [ID]'            'полный прогон, возобновляемый' \
-		'make task-1 run plan [ID]'       'где возобновится, без запуска' \
-		'make task-1 retry [ID]'          'снять ошибку и прогнать' \
-		'make task-1 regenerate ID'       'пересоздать статью целиком' \
-		'make task-1 result [ID]'         'собрать result.md' \
-		'make task-1 demo-generate [ID]'  'пересобрать каталог DEMO' \
-		'make task-1 google-publish [ID]' 'промпты в Google Docs' \
-		'make task-1 dry-run'             'офлайн-прогон без сервисов' \
-		'make task-1 clear ID'            'статью к состоянию импорта' \
-		'make task-1 reset'               'стереть состояние task_1'
-	@printf '\npprof_1 — DeepSeek-only, три чата\n'
+	@printf 'pprof_1 — DeepSeek-only, три чата\n'
 	@printf '  %-34s%s\n' \
 		'make pprof-1 import [limit]'      'импорт статей из Excel' \
 		'make pprof-1 import-check [ID]'   'сверка импорта с Excel' \
@@ -84,13 +66,11 @@ help: ## этот список
 		'make pprof-1 google-publish [ID]' 'промпты в Google Docs' \
 		'make pprof-1 dry-run'             'офлайн-прогон без сервисов' \
 		'make pprof-1 clear ID'            'статью к состоянию импорта' \
-		'make pprof-1 reset'               'стереть состояние pprof_1'
+		'make pprof-1 reset [ID]'          'статью или всю pprof_1 к нулю'
 	@printf '\nВход в сервисы — общий для задач\n'
 	@printf '  %-34s%s\n' \
 		'make login deepseek'              'ручной вход в DeepSeek' \
-		'make login google'                'ручной вход в Google' \
-		'make task-1 deepseek-login'       'алиас make login deepseek' \
-		'make task-1 google-login'         'алиас make login google'
+		'make login google'                'ручной вход в Google'
 	@printf '\nПроект\n'
 	@awk 'BEGIN {FS = ":.*## "} \
 		/^(docker|test|fmt|vet|lint|build)[a-zA-Z0-9_-]*:.*## / {printf "  make %-29s%s\n", $$1, $$2}' \
@@ -143,10 +123,6 @@ define run_task_operation
 	fi
 	@if [ "$(TASK_OPERATION)" = 'google-login' ] && [ -n "$(TASK_ARG)" ]; then \
 		printf 'google-login does not accept arguments.\n\nExample:\n\nmake $(TASK_NAME) google-login\n'; \
-		exit 1; \
-	fi
-	@if [ "$(TASK_OPERATION)" = 'reset' ] && [ -n "$(TASK_ARG)" ]; then \
-		printf 'reset does not accept arguments.\n\nExample:\n\nmake $(TASK_NAME) reset\n'; \
 		exit 1; \
 	fi
 	@if [ "$(TASK_OPERATION)" = 'dry-run' ]; then \
