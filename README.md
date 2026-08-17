@@ -12,7 +12,7 @@ SEO Pipeline — CLI-приложение на Go для импорта зада
 - `config/config.yaml` — маршрутизация LLM-стадий `task_1` и параметры моделей.
 - `config/config.deepseek.yaml` — наложение для режима `LLM_MODE=deepseek` (`task_1`).
 - `config/pprof_1.yaml` — самостоятельная схема стадий `pprof_1`, без наложения.
-- `input/task_1/input.xlsx` — Excel импорта. Общий у обеих задач: путь задаётся полем профиля, а не выводится из имени задачи, поэтому развести их позже можно одной строкой.
+- `input/task_1/`, `input/pprof_1/` — каталоги Excel импорта, у каждой задачи свой. Имя книги значения не имеет: импорт берёт единственный `.xlsx` каталога.
 - `internal/config/` — загрузка и проверка конфигурации.
 - `internal/integrations/keysso/`, `internal/integrations/arsenkin/`, `internal/integrations/google/` — интеграции через Playwright.
 - `internal/llm/` — маршрутизация стадий, таймауты и повторы; `gemini/` и `deepseekweb/` — клиенты провайдеров.
@@ -56,7 +56,7 @@ SEO Pipeline — CLI-приложение на Go для импорта зада
 | Промпты | `tasks/task_1/prompts/` | `tasks/pprof_1/prompts/` |
 | Артефакты | `tasks/task_1/output/` | `tasks/pprof_1/output/` |
 | Схема PostgreSQL | `public` | `pprof_1` |
-| Excel | `input/task_1/input.xlsx` | тот же файл |
+| Excel | `input/task_1/*.xlsx` | `input/pprof_1/*.xlsx` |
 
 ### Поток генерации `pprof_1`: три чата
 
@@ -103,7 +103,7 @@ tasks/pprof_1/prompts/
 | `APP_ENV` | Окружение; dry-run разрешён только для `local` и `test`. |
 | `DRY_RUN_DATABASE_URL` | Отдельная БД dry-run; по умолчанию `seo_dry_run` на `localhost:5433`. |
 | `TEST_DATABASE_URL` | БД для тестов `internal/pipeline/repository`. Без неё 15 тестов молча пропускаются, а `make test` остаётся зелёным. |
-| `INPUT_FILE_PATH` | Excel импорта `task_1`; по умолчанию `input/task_1/input.xlsx`. |
+| `INPUT_FILE_PATH` | Конкретная книга Excel для `task_1`. Не задана — импорт берёт единственный `.xlsx` из `input/task_1/`. |
 | `OUTPUT_DIR` | Каталог артефактов `task_1`; по умолчанию `tasks/task_1/output`. |
 | `PPROF_1_*` | Точечное переопределение `pprof_1`: `PPROF_1_OUTPUT_DIR`, `PPROF_1_INPUT_FILE_PATH`, `PPROF_1_DATABASE_URL`, `PPROF_1_DRY_RUN_DATABASE_URL`. |
 | `LLM_MODE` | Режим маршрутизации `task_1`: пусто или `gemini` — обычная схема, `deepseek` — все стадии через DeepSeek Web. На `pprof_1` не влияет: у него одна схема. |
@@ -225,6 +225,7 @@ make task-1 google-publish 45       # одной статьи
 
 # Очистка                           !
 make task-1 clear 37                # вернуть одну статью к состоянию после импорта
+make task-1 reset 37                # вернуть одну статью к состоянию до импорта
 make task-1 reset                   # стереть всё состояние task_1
 ```
 
@@ -285,6 +286,7 @@ make pprof-1 demo-generate 45       # одной статье
 
 # Очистка                           !
 make pprof-1 clear 37               # вернуть одну статью к состоянию после импорта
+make pprof-1 reset 37               # вернуть одну статью к состоянию до импорта
 make pprof-1 reset                  # стереть состояние только pprof_1
 ```
 
@@ -333,7 +335,7 @@ make help                           # короткий список команд
 | `task-1 retry` | Снимает сохранённую ошибку и проводит статью тем же полным раннером, что и `run`. | Необязательный `external_id` из Excel. | `make task-1 retry` или `make task-1 retry 57` | `go run ./cmd/seo-pipeline task-1 retry [external_id]` |
 | `task-1 regenerate` | Сбрасывает результаты генерации одной статьи и проводит её заново полным pipeline. Research сохраняется. | **Обязательный** `external_id`. | `make task-1 regenerate 37` | `go run ./cmd/seo-pipeline task-1 regenerate <external_id>` |
 | `task-1 clear` | Возвращает одну статью к состоянию сразу после импорта: удаляет research, metadata, outputs, историю ошибок и каталог статьи целиком. Строка в БД, её `id` и `external_id` сохраняются. | **Обязательный** `external_id`. | `make task-1 clear 23` | `go run ./cmd/seo-pipeline task-1 clear <external_id> [--yes]` |
-| `task-1 reset` | Приводит `task_1` к состоянию «импорта ещё не было»: пустые таблицы, сброшенные счётчики, пустые каталоги вывода. | Нет. | `make task-1 reset` | `go run ./cmd/seo-pipeline task-1 reset [--yes]` |
+| `task-1 reset` | С ID приводит одну статью к состоянию «импорта ещё не было»: удаляет её research, metadata, outputs, ошибки, входные данные импорта и каталог статьи; строка `articles` с прежними `id` и `external_id` остаётся. Без ID — то же для всей задачи: пустые таблицы, сброшенные счётчики, пустые каталоги вывода. | Необязательный `external_id` из Excel. | `make task-1 reset 23`, `make task-1 reset` | `go run ./cmd/seo-pipeline task-1 reset [external_id] [--yes]` |
 | `task-1 dry-run` | Поднимает тестовую БД, запускает тесты, vet и полный локальный pipeline на stub-данных. | Нет. | `make task-1 dry-run` | См. раздел «Dry-run». |
 | `task-1 prepare` | Собирает отсутствующий research Keys.so и Arsenkin. | Необязательный ID. | `make task-1 prepare` или `make task-1 prepare 37` | `go run ./cmd/seo-pipeline task-1 prepare [external_id]` |
 | `task-1 generate` | Запускает требуемый полный flow `structure → article/info → review → fix → html → result`. | Необязательный ID. | `make task-1 generate` или `make task-1 generate 37` | `go run ./cmd/seo-pipeline task-1 generate [external_id]` |
@@ -422,7 +424,7 @@ go run ./cmd/seo-pipeline task-1 deepseek-login
 
 ## Импорт
 
-По умолчанию импорт читается из `input/task_1/input.xlsx`. Используется лист `Лист1`, а если его нет — первый лист книги. Обязательны колонки `id`, `article_name`, `image_slug` и `reference_url`. Поддерживаются `header`, `meta_description`, `key_word`, `category`, `authors`, `links`, `professions`, `tags` и старая опечатка `referense_url`.
+Книга Excel берётся из каталога задачи — `input/task_1/` у `task_1`, `input/pprof_1/` у `pprof_1`. Имя файла значения не имеет: подходит единственный `.xlsx` в каталоге. Если файлов нет или их несколько, импорт называет каталог и перечисляет найденное; выбрать книгу вручную можно через `INPUT_FILE_PATH` (`PPROF_1_INPUT_FILE_PATH` для `pprof_1`). Используется лист `Лист1`, а если его нет — первый лист книги. Обязательны колонки `id`, `article_name`, `image_slug` и `reference_url`. Поддерживаются `header`, `meta_description`, `key_word`, `category`, `authors`, `links`, `professions`, `tags` и старая опечатка `referense_url`.
 
 Колонка `tags` — метки публикации. Это готовые данные: модель их не генерирует и не изменяет. Они ложатся в `article_inputs.tags` и попадают прямо в `result.md`. Колонка необязательна, но пока её нет в файле, раздел «Метки» в `result.md` останется пустым.
 
@@ -651,7 +653,7 @@ make task-1 regenerate 57 # пересоздать одну с нуля
 
 Как и `reset`, команда печатает отчёт с фактическим масштабом удаления и требует ввести слово `clear`. Без терминала нужен `--yes`. Порядок тот же: сначала коммит в БД, потом файлы, поэтому команда идемпотентна и сбой на файлах чинится повторным запуском.
 
-Отличие от соседних команд: `regenerate` сохраняет research и сразу запускает пайплайн заново, `reset` чистит всю базу целиком, а `clear` трогает одну статью и ничего не запускает.
+Отличие от соседних команд: `regenerate` сохраняет research и сразу запускает пайплайн заново, `reset` без ID чистит всю базу целиком, `reset <external_id>` стирает ещё и результат импорта статьи, а `clear` трогает одну статью, сохраняет её `article_inputs` и ничего не запускает.
 
 ### Сброс состояния
 
@@ -660,6 +662,20 @@ make task-1 regenerate 57 # пересоздать одну с нуля
 До удаления печатается отчёт с фактическим масштабом: имя базы без учётных данных, количество записей по таблицам и число элементов в каждом каталоге. Для подтверждения нужно ввести слово `reset` — одной буквы для необратимой операции мало. Без терминала команда откажется работать, если не передан `--yes`.
 
 Порядок намеренный: сначала коммит в БД, потом файлы. Команда идемпотентна, поэтому сбой на файлах чинится повторным запуском.
+
+#### Сброс одной статьи
+
+`make task-1 reset <external_id>` делает то же самое для одной статьи, но сохраняет её место в базе: строка `articles` остаётся, внутренний `articles.id` и `external_id` не меняются.
+
+Удаляется всё, что со статьёй связано:
+
+- строки `article_errors`, `article_outputs`, `article_metadata`, `article_research` и `article_inputs` этой статьи;
+- статус возвращается в `pending`, `current_step` и `error_message` — в `NULL`;
+- каталог статьи целиком, вместе с `prepare/`, `logs/`, `prompts/`, `generated/`, `DEMO/`, `article.html` и `result.md`.
+
+Отличие от `clear` ровно одно: стирается ещё и `article_inputs`, то есть результат импорта. Поэтому после `clear` статью можно сразу запускать (`make task-1 run <external_id>`), а после `reset <external_id>` ей нужен повторный `make task-1 import` — он видит, что у существующей статьи нет входных данных, и записывает их заново, не создавая второй строки и не меняя `id`. Уже импортированные статьи с целыми `article_inputs` импорт по-прежнему не переписывает.
+
+Отчёт, слово подтверждения `reset`, требование `--yes` без терминала и порядок «сначала БД, потом файлы» — те же, что у сброса всей задачи. Команда идемпотентна.
 
 ## Dry-run
 
@@ -866,7 +882,7 @@ make docker-up
 go run ./cmd/seo-pipeline task-1 import
 ```
 
-Если нужно очистить данные, не трогая контейнеры и схему, используйте `make <task> reset`, а для одной статьи — `make <task> clear <external_id>`. Обе команды работают только в схеме своей задачи и данные другой не трогают.
+Если нужно очистить данные, не трогая контейнеры и схему, используйте `make <task> reset`, а для одной статьи — `make <task> clear <external_id>` (сохраняет импорт) или `make <task> reset <external_id>` (удаляет и его). Все три команды работают только в схеме своей задачи и данные другой не трогают.
 
 ### Схема на задачу
 
