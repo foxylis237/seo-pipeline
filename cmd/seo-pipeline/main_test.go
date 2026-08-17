@@ -1,8 +1,12 @@
 package main
 
 import (
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/foxylis237/seo-pipeline/internal/tasks/pprof1"
+	"github.com/foxylis237/seo-pipeline/internal/tasks/task1"
 )
 
 func TestParseCommand(t *testing.T) {
@@ -58,6 +62,25 @@ func TestParseCommand(t *testing.T) {
 		{[]string{"seo-pipeline", "task-1", "generate", "37", "--dry-run"}, taskCommand{}, "supported only"},
 		{[]string{"seo-pipeline", "task-1", "run", "37", "--dry-run"}, taskCommand{}, "supported only"},
 		{[]string{"seo-pipeline", "task-1", "run", "--dry-run", "--dry-run"}, taskCommand{}, "only once"},
+
+		// pprof_1 — те же операции в своём пространстве имён.
+		{[]string{"seo-pipeline", "pprof-1", "import"}, taskCommand{Profile: mustProfile(pprof1.Command), Name: "import"}, ""},
+		{[]string{"seo-pipeline", "pprof-1", "run", "37"}, taskCommand{Profile: mustProfile(pprof1.Command), Name: "run", ExternalID: "37"}, ""},
+		{[]string{"seo-pipeline", "pprof_1", "prepare"}, taskCommand{Profile: mustProfile(pprof1.Command), Name: "prepare"}, ""},
+		{[]string{"seo-pipeline", "pprof-1", "clear", "37"}, taskCommand{Profile: mustProfile(pprof1.Command), Name: "clear", ExternalID: "37"}, ""},
+		{[]string{"seo-pipeline", "pprof-1", "reset"}, taskCommand{Profile: mustProfile(pprof1.Command), Name: "reset"}, ""},
+		{[]string{"seo-pipeline", "pprof-1", "unknown"}, taskCommand{}, `unknown pprof-1 operation "unknown"`},
+		{[]string{"seo-pipeline", "pprof-1", "clear"}, taskCommand{}, "usage: seo-pipeline pprof-1 clear <external_id>"},
+		{[]string{"seo-pipeline", "pprof-1"}, taskCommand{}, "available pprof-1 operations"},
+		{[]string{"seo-pipeline", "unknown-task", "run"}, taskCommand{}, `unknown task "unknown-task"`},
+
+		// Глобальный вход: вне пространства задач, профиль у команды пуст.
+		{[]string{"seo-pipeline", "login", "deepseek"}, taskCommand{Name: "login", Service: "deepseek"}, ""},
+		{[]string{"seo-pipeline", "login", "google"}, taskCommand{Name: "login", Service: "google"}, ""},
+		{[]string{"seo-pipeline", "login", "keysso"}, taskCommand{}, "входит автоматически"},
+		{[]string{"seo-pipeline", "login", "arsenkin"}, taskCommand{}, "входит автоматически"},
+		{[]string{"seo-pipeline", "login", "unknown"}, taskCommand{}, "unknown login service"},
+		{[]string{"seo-pipeline", "login"}, taskCommand{}, "usage: seo-pipeline login"},
 	}
 	for _, test := range tests {
 		got, err := parseCommand(test.args)
@@ -67,8 +90,14 @@ func TestParseCommand(t *testing.T) {
 			}
 			continue
 		}
-		if err != nil || got != test.want {
-			t.Fatalf("parseCommand(%v) = %+v, %v; want %+v", test.args, got, err, test.want)
+		// Профиль task_1 подставляется в ожидание, а не переписывается в каждую строку:
+		// таблица про разбор аргументов, а не про содержимое профилей.
+		want := test.want
+		if want.Name != loginCommandName && want.Profile.Name == "" {
+			want.Profile = mustProfile(task1.Command)
+		}
+		if err != nil || !reflect.DeepEqual(got, want) {
+			t.Fatalf("parseCommand(%v) = %+v, %v; want %+v", test.args, got, err, want)
 		}
 	}
 }

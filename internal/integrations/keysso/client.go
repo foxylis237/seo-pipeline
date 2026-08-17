@@ -33,8 +33,18 @@ const (
 	operationTimeoutMilliseconds     = 30_000
 	longOperationTimeoutMilliseconds = 60_000
 	keywordsTableMaxAttempts         = 3
-	debugArtifactsRoot               = "output/task1/debug/keysso"
+	// defaultDebugArtifactsRoot используется, когда каталог не задан вызывающим. Имени задачи
+	// здесь нет намеренно: интеграция не знает, что задач больше одной, — корень ей передают.
+	defaultDebugArtifactsRoot = "output/debug/keysso"
 )
+
+// debugArtifactsRoot возвращает каталог диагностики этого прогона.
+func (s *Service) debugArtifactsRoot() string {
+	if root := strings.TrimSpace(s.cfg.DebugDir); root != "" {
+		return root
+	}
+	return defaultDebugArtifactsRoot
+}
 
 // Config содержит настройки интеграции с Keys.so.
 type Config struct {
@@ -43,6 +53,9 @@ type Config struct {
 	Email      string
 	Password   string
 	Headless   bool
+	// DebugDir — корень диагностики этой интеграции. Задаётся вызывающим, чтобы дампы разных
+	// пайплайнов не смешивались; пустое значение включает общий каталог по умолчанию.
+	DebugDir string
 }
 
 // CollectResult содержит данные, полученные на этапе Keys.so.
@@ -1049,7 +1062,7 @@ func (s *Service) saveDebugArtifacts(ctx context.Context, stage string, attempt,
 	}
 	timestamp := time.Now()
 	directory := filepath.Join(
-		debugArtifactsRoot,
+		s.debugArtifactsRoot(),
 		fmt.Sprintf("article-%d", s.cfg.ArticleID),
 		fmt.Sprintf("%s-attempt-%d", timestamp.Format("20060102-150405.000000000"), attempt),
 	)

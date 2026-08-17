@@ -69,7 +69,9 @@ const (
 	// отбрасываются с конца, порядок оставшихся сохраняется.
 	maxWordstatQueries = 49
 
-	debugArtifactsRoot = "output/task1/debug/arsenkin"
+	// defaultDebugArtifactsRoot используется, когда каталог не задан вызывающим. Имени задачи
+	// здесь нет намеренно: интеграция не знает, что задач больше одной, — корень ей передают.
+	defaultDebugArtifactsRoot = "output/debug/arsenkin"
 )
 
 // errWordstatTaskNotCreated marks the state in which the start button was clicked but the
@@ -100,6 +102,17 @@ type Config struct {
 	Email     string
 	Password  string
 	Headless  bool
+	// DebugDir — корень диагностики этой интеграции. Задаётся вызывающим, чтобы дампы разных
+	// пайплайнов не смешивались; пустое значение включает общий каталог по умолчанию.
+	DebugDir string
+}
+
+// debugArtifactsRoot возвращает каталог диагностики этого прогона.
+func (s *Service) debugArtifactsRoot() string {
+	if root := strings.TrimSpace(s.cfg.DebugDir); root != "" {
+		return root
+	}
+	return defaultDebugArtifactsRoot
 }
 
 // StageError содержит обязательный контекст ошибки этапа.
@@ -1590,7 +1603,7 @@ func (s *Service) saveStageSnapshot(ctx context.Context, stage string, payload a
 
 func (s *Service) prepareDebugDirectory(ctx context.Context, stage string) (string, error) {
 	directory := filepath.Join(
-		debugArtifactsRoot,
+		s.debugArtifactsRoot(),
 		fmt.Sprintf("article-%d", s.cfg.ArticleID),
 		fmt.Sprintf("%s-%s", time.Now().Format("20060102-150405.000000000"), stage),
 	)
@@ -1651,7 +1664,7 @@ func (s *Service) saveDebugArtifacts(ctx context.Context, stage string, failure 
 	}
 	timestamp := time.Now()
 	directory := filepath.Join(
-		debugArtifactsRoot,
+		s.debugArtifactsRoot(),
 		fmt.Sprintf("article-%d", s.cfg.ArticleID),
 		fmt.Sprintf("%s-%s", timestamp.Format("20060102-150405.000000000"), stage),
 	)

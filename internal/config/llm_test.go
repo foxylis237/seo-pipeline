@@ -92,7 +92,7 @@ func TestValidateLLMConfigSupportsConfiguredProviderTypes(t *testing.T) {
 				provider.APIKeyEnv = ""
 			}
 			cfg.Providers = map[string]LLMProviderConfig{"selected": provider}
-			if err := validateLLMConfig(&cfg, false); err != nil {
+			if err := validateLLMConfig(&cfg, nil, false); err != nil {
 				t.Fatal(err)
 			}
 			if cfg.Providers["selected"].Type != test.wantType {
@@ -147,21 +147,21 @@ func TestEmptyModelIsRejectedOnlyWhereCredentialsAreRequired(t *testing.T) {
 
 	relaxed := testLLMConfig(prompt, "selected", "${EMPTY_MODEL_TEST}", "model-b")
 	relaxed.Providers = map[string]LLMProviderConfig{"selected": {Type: "gemini", APIKeyEnv: "KEY"}}
-	if err := validateLLMConfig(&relaxed, false); err != nil {
+	if err := validateLLMConfig(&relaxed, nil, false); err != nil {
 		t.Fatalf("незаданная модель остановила загрузку без учётных данных: %v", err)
 	}
 
 	strict := testLLMConfig(prompt, "selected", "${EMPTY_MODEL_TEST}", "model-b")
 	strict.Providers = map[string]LLMProviderConfig{"selected": {Type: "gemini", APIKeyEnv: "KEY"}}
 	t.Setenv("KEY", "value")
-	if err := validateLLMConfig(&strict, true); err == nil || !strings.Contains(err.Error(), "EMPTY_MODEL_TEST") {
+	if err := validateLLMConfig(&strict, nil, true); err == nil || !strings.Contains(err.Error(), "EMPTY_MODEL_TEST") {
 		t.Fatalf("error = %v, want отказ по незаданной модели", err)
 	}
 
 	// Литерально пустая модель — ошибка конфигурации всегда, окружение тут ни при чём.
 	literal := testLLMConfig(prompt, "selected", "", "model-b")
 	literal.Providers = map[string]LLMProviderConfig{"selected": {Type: "gemini", APIKeyEnv: "KEY"}}
-	if err := validateLLMConfig(&literal, false); err == nil || !strings.Contains(err.Error(), "empty model") {
+	if err := validateLLMConfig(&literal, nil, false); err == nil || !strings.Contains(err.Error(), "empty model") {
 		t.Fatalf("error = %v, want отказ по пустой модели", err)
 	}
 }
@@ -173,7 +173,7 @@ func TestValidateLLMConfigRejectsUnknownProviderTypeWithAllowedTypes(t *testing.
 	}
 	cfg := testLLMConfig(prompt, "selected", "model-a", "model-b")
 	cfg.Providers = map[string]LLMProviderConfig{"selected": {Type: "openrouter", APIKeyEnv: "KEY"}}
-	err := validateLLMConfig(&cfg, false)
+	err := validateLLMConfig(&cfg, nil, false)
 	if err == nil || !strings.Contains(err.Error(), "supported types: gemini, openai_compatible, deepseek_web") {
 		t.Fatalf("error = %v", err)
 	}
@@ -245,7 +245,7 @@ func TestDeepSeekWebDoesNotRequireAPICredentials(t *testing.T) {
 	}
 	cfg := testLLMConfig(prompt, "deepseek", "deepseek-chat", "deepseek-chat")
 	cfg.Providers = map[string]LLMProviderConfig{"deepseek": {Type: "deepseek_web"}}
-	if err := validateLLMConfig(&cfg, true); err != nil {
+	if err := validateLLMConfig(&cfg, nil, true); err != nil {
 		t.Fatal(err)
 	}
 	provider := cfg.Providers["deepseek"]

@@ -7,8 +7,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/article"
-	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/generation"
+	"github.com/foxylis237/seo-pipeline/internal/pipeline/article"
+	"github.com/foxylis237/seo-pipeline/internal/pipeline/generation"
 )
 
 type pendingOperationRepository interface {

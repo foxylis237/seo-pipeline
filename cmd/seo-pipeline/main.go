@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -16,14 +17,17 @@ import (
 	"github.com/foxylis237/seo-pipeline/internal/config"
 	"github.com/foxylis237/seo-pipeline/internal/integrations/arsenkin"
 	"github.com/foxylis237/seo-pipeline/internal/integrations/google"
+	"github.com/foxylis237/seo-pipeline/internal/pipeline/article"
+	"github.com/foxylis237/seo-pipeline/internal/pipeline/demo"
+	"github.com/foxylis237/seo-pipeline/internal/pipeline/diagnostics"
+	"github.com/foxylis237/seo-pipeline/internal/pipeline/generation"
+	articleoutput "github.com/foxylis237/seo-pipeline/internal/pipeline/output"
+	"github.com/foxylis237/seo-pipeline/internal/pipeline/repository"
+	resultassembly "github.com/foxylis237/seo-pipeline/internal/pipeline/result"
 	"github.com/foxylis237/seo-pipeline/internal/storage"
-	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/article"
-	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/demo"
-	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/diagnostics"
-	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/generation"
-	articleoutput "github.com/foxylis237/seo-pipeline/internal/tasks/task1/output"
-	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/repository"
-	resultassembly "github.com/foxylis237/seo-pipeline/internal/tasks/task1/result"
+	"github.com/foxylis237/seo-pipeline/internal/tasks"
+	"github.com/foxylis237/seo-pipeline/internal/tasks/pprof1"
+	"github.com/foxylis237/seo-pipeline/internal/tasks/task1"
 )
 
 func main() {
@@ -36,29 +40,28 @@ func main() {
 		logger.Error(err.Error())
 		os.Exit(1)
 	}
-	if command.Name == "google-login" {
-		// Ручной вход не трогает ни базу, ни конфигурацию задачи: человеку нужен только
-		// браузер, поэтому команда обрабатывается до подключения к PostgreSQL.
-		if err := google.Login(ctx, googleConfig(false), logger); err != nil {
-			logger.Error("вход в Google не выполнен", "error", err)
+	// Вход в сервисы — общая инфраструктура проекта: он не трогает ни базу, ни конфигурацию
+	// задачи, поэтому обрабатывается до подключения к PostgreSQL и вне пространства задач.
+	// Формы task-1 deepseek-login и task-1 google-login остались алиасами.
+	if service, found := loginService(command); found {
+		if err := runLogin(ctx, service, logger); err != nil {
+			logger.Error("вход в сервис не выполнен", "service", service, "error", err)
 			os.Exit(1)
 		}
-		return
-	}
-	if command.Name == "deepseek-login" {
-		if err := runDeepSeekLogin(ctx, logger); err != nil {
-			logger.Error("DeepSeek login failed", "error", err)
-			os.Exit(1)
-		}
-		logger.Info("DeepSeek login completed")
 		return
 	}
 
+	profile := command.Profile
+	defaults := config.TaskDefaults{
+		InputPath: profile.InputPath,
+		OutputDir: profile.OutputDir,
+		EnvPrefix: profile.EnvPrefix,
+	}
 	var cfg config.Config
 	if command.DryRun {
-		cfg, err = config.LoadDryRun()
+		cfg, err = config.LoadDryRun(defaults)
 	} else {
-		cfg, err = config.Load()
+		cfg, err = config.Load(defaults)
 	}
 	if err != nil {
 		logger.Error("не удалось загрузить конфигурацию", "error", err)
@@ -80,7 +83,16 @@ func main() {
 		os.Exit(1)
 	}
 
-	pool, err := storage.NewPostgres(ctx, cfg.DatabaseURL)
+	// Изоляция задач в базе держится на схеме из профиля, а не на переменной окружения:
+	// забытый search_path увёл бы новую задачу в таблицы task_1. Схема public возвращает DSN
+	// нетронутым, поэтому у task_1 подключение остаётся прежним.
+	databaseURL, err := profile.DatabaseURL(cfg.DatabaseURL)
+	if err != nil {
+		logger.Error("не удалось определить схему PostgreSQL задачи", "task", profile.Name, "error", err)
+		os.Exit(1)
+	}
+
+	pool, err := storage.NewPostgres(ctx, databaseURL)
 	if err != nil {
 		if isGracefulCancellation(ctx, err) {
 			logger.Info("завершение приложения по сигналу", "stage", "shutdown")
@@ -118,9 +130,12 @@ func main() {
 			logger.Warn("не удалось закрыть логи статей", "stage", "shutdown", "error", closeErr)
 		}
 	}()
-	taskLogger := slog.New(logRouter.Handler(logger.Handler())).With("task", "task_1", "operation", command.Name)
+	taskLogger := slog.New(logRouter.Handler(logger.Handler())).With("task", profile.Name, "operation", command.Name)
 	articleRepository := repository.NewArticleRepository(pool, taskLogger)
-	resultService := resultassembly.NewService(articleRepository, writer, taskLogger)
+	resultService := resultassembly.NewService(articleRepository, writer, taskLogger, profile.TemplatePath)
+	// Корни диагностики разводятся по задачам здесь, один раз: сами интеграции о задачах не
+	// знают и получают готовый путь.
+	debugDirs := newDiagnosticsDirs(profile)
 
 	taskStarted := time.Now()
 	taskLogger.Info("task started", "stage", "start")
@@ -129,31 +144,36 @@ func main() {
 		err = runErrors(ctx, articleRepository, command.ExternalID, os.Stdout)
 
 	case "import":
-		err = runImport(ctx, articleRepository, cfg.InputFilePath, "output/task1/import-reports", command.ImportLimit, taskLogger)
+		err = runImport(ctx, articleRepository, cfg.InputFilePath, profile.ImportReportsDir, command.ImportLimit, taskLogger)
 
 	case "import-check":
 		err = runImportCheck(ctx, articleRepository, cfg.InputFilePath, os.Stdout, command.ExternalID)
 
 	case "reset":
 		err = runReset(ctx, articleRepository, resetOptions{
-			OutputDir:   cfg.OutputDir,
-			DatabaseURL: cfg.DatabaseURL,
-			AssumeYes:   command.AssumeYes,
-			Interactive: isCharDevice(os.Stdin),
-			In:          os.Stdin,
-			Out:         os.Stdout,
+			TaskName:         profile.Name,
+			TaskCommand:      profile.Command,
+			OutputDir:        cfg.OutputDir,
+			ImportReportsDir: profile.ImportReportsDir,
+			DiagnosticsDir:   profile.DiagnosticsDir,
+			DatabaseURL:      databaseURL,
+			AssumeYes:        command.AssumeYes,
+			Interactive:      isCharDevice(os.Stdin),
+			In:               os.Stdin,
+			Out:              os.Stdout,
 		}, taskLogger)
 
 	case "google-publish":
 		// Ни LLM, ни Keys.so, ни Arsenkin: команда берёт уже сохранённый промпт с диска.
 		publisher := google.NewPublisher(
-			google.NewSessionFactory(googleConfig(true), taskLogger, 0),
+			google.NewSessionFactory(googleConfig(true, debugDirs.google), taskLogger, 0),
 			google.DefaultRetryPolicy(),
 		)
-		err = runGooglePublish(ctx, articleRepository, writer, publisher.Publish, taskLogger, os.Stdout, command.ExternalID)
+		err = runGooglePublish(ctx, articleRepository, writer, publisher.Publish, taskLogger, os.Stdout, profile.Command, command.ExternalID)
 
 	case "clear":
 		err = runClear(ctx, articleRepository, writer, clearOptions{
+			TaskCommand: profile.Command,
 			AssumeYes:   command.AssumeYes,
 			Interactive: isCharDevice(os.Stdin),
 			In:          os.Stdin,
@@ -166,8 +186,9 @@ func main() {
 		// не будет, пока Keys.so отдаёт запросы сам.
 		newFallback, closeLLM := newPrepareKeywordsFallback(ctx, generationDeps{
 			repository: articleRepository, writer: writer, result: resultService, logger: taskLogger,
+			profile: profile, debugDirs: debugDirs,
 		})
-		err = runPrepare(ctx, articleRepository, cfg, taskLogger, writer, logRouter, newFallback, command.ExternalID)
+		err = runPrepare(ctx, articleRepository, cfg, taskLogger, writer, logRouter, newFallback, debugDirs, command.ExternalID)
 		err = errors.Join(err, closeLLM())
 
 	case "result":
@@ -202,10 +223,10 @@ func main() {
 
 	case "run", "regenerate", "generate", "demo-generate", "retry", "article", "info", "review", "fix", "html":
 		if command.DryRun {
-			err = runDryRun(ctx, articleRepository, cfg, taskLogger, writer, resultService, os.Stdout)
+			err = runDryRun(ctx, articleRepository, cfg, profile, taskLogger, writer, resultService, os.Stdout)
 			break
 		}
-		stages, configErr := loadStageConfigs(taskLogger, true)
+		stages, configErr := loadStageConfigs(profile, taskLogger, true)
 		if configErr != nil {
 			err = configErr
 			break
@@ -221,11 +242,11 @@ func main() {
 		}
 		// Публикация промпта идёт рядом с генерацией и не задерживает её. Wait обязателен:
 		// без него команда завершилась бы с живым Chromium и недописанным документом.
-		promptPublisher := newGooglePublisher(ctx, googleConfig(true), articleRepository, taskLogger)
+		promptPublisher := newGooglePublisher(ctx, googleConfig(true, debugDirs.google), articleRepository, taskLogger)
 		defer promptPublisher.Wait()
 		mode, closeLLM, buildErr := buildLLM(ctx, stages, availability, generationDeps{
 			repository: articleRepository, writer: writer, result: resultService, logger: taskLogger,
-			promptPublisher: promptPublisher,
+			promptPublisher: promptPublisher, profile: profile, debugDirs: debugDirs,
 		})
 		if buildErr != nil {
 			err = buildErr
@@ -234,26 +255,49 @@ func main() {
 		// Резервный источник исходных запросов для prepare: та же схема маршрутизации, что
 		// у генерации этой статьи.
 		newKeywordsFallback := newKeywordsFallbackFactory(mode, taskLogger)
+		// pprof_1 идёт своим потоком: три чата и свои стадии. Всё остальное — репозиторий,
+		// writer, сборка result.md, публикация промпта — у задач общее.
+		var pprofFlow *pprof1.Flow
+		if profile.Name == pprof1.Name {
+			pprofFlow, err = newPProf1Flow(articleRepository, writer, mode.routers[schemeDeepSeek], taskLogger, promptPublisher)
+			if err != nil {
+				break
+			}
+		}
 		// DEMO собирается отдельной операцией: статус, current_step и error_message статьи
 		// её не выбирают и ею не меняются, а маршрутизация берётся та же, что у боевого
 		// прогона этой статьи.
 		buildDemo := func(ctx context.Context, externalID string) error {
 			preparer := demo.PrepareFunc(func(ctx context.Context, externalID string) error {
-				return runDemoPrepare(ctx, articleRepository, cfg, taskLogger, writer, logRouter, newKeywordsFallback, externalID)
+				return runDemoPrepare(ctx, articleRepository, cfg, taskLogger, writer, logRouter, newKeywordsFallback, debugDirs, externalID)
 			})
-			builder := demo.NewBuilder(cfg.OutputDir, articleRepository, writer, resultService,
+			builder := demo.NewBuilder(cfg.OutputDir, filepath.Join(profile.PromptsDir, demo.FixLinksHTMLPromptFile),
+				articleRepository, writer, resultService,
 				mode.routerFor(externalID), preparer, taskLogger)
-			return builder.Build(ctx, externalID)
+			buildDemoErr := builder.Build(ctx, externalID)
+			// Промпт выгружается и после неудачной сборки: он рендерится до обращения к модели,
+			// и именно ради него DEMO собирают, когда генерация не удалась. Ошибка Build
+			// возвращается нетронутой — публикация не имеет права её подменить.
+			publishDemoArticlePrompt(ctx, articleRepository, writer, promptPublisher, taskLogger, externalID)
+			return buildDemoErr
 		}
 		// Одна форма для всех одностадийных команд: схема выбирается на статью, режим не
 		// переключается. Раньше эти восемь веток отличались только именем операции.
 		stageOperation := func(name string, run func(context.Context, *generation.Pipeline, string) error) error {
-			if command.ExternalID != "" {
-				return mode.stage(ctx, command.ExternalID, run)
-			}
-			return runBatchOperation(ctx, articleRepository, name, func(ctx context.Context, externalID string) error {
+			runOneArticle := func(ctx context.Context, externalID string) error {
 				return mode.stage(ctx, externalID, run)
-			}, taskLogger)
+			}
+			if pprofFlow != nil {
+				flowRun, runErr := pprof1StageRunner(pprofFlow, name)
+				if runErr != nil {
+					return runErr
+				}
+				runOneArticle = flowRun
+			}
+			if command.ExternalID != "" {
+				return runOneArticle(ctx, command.ExternalID)
+			}
+			return runBatchOperation(ctx, articleRepository, name, runOneArticle, taskLogger)
 		}
 		// Полный пайплайн с возобновлением: этапы выполняются существующими сервисами,
 		// раннер лишь выбирает, с какого продолжить.
@@ -264,7 +308,7 @@ func main() {
 					if validateErr := cfg.ValidatePrepare(); validateErr != nil {
 						return validateErr
 					}
-					return runPrepare(ctx, articleRepository, cfg, taskLogger, writer, logRouter, newKeywordsFallback, externalID)
+					return runPrepare(ctx, articleRepository, cfg, taskLogger, writer, logRouter, newKeywordsFallback, debugDirs, externalID)
 				case stageStructure:
 					_, stageErr := pipeline.RunStructureByExternalID(ctx, externalID)
 					return stageErr
@@ -299,17 +343,34 @@ func main() {
 		// и не переводило статью на DeepSeek.
 		runOne := func(ctx context.Context, externalID string) error {
 			scheme, pipeline := mode.pipelineFor(externalID)
-			runErr := runFullPipeline(ctx, articleRepository, execute(pipeline), taskLogger, externalID)
+			stages := execute(pipeline)
+			if pprofFlow != nil {
+				// Этапы prepare и result у задач общие, поэтому берутся у того же исполнителя.
+				stages = pprof1StageExecutor(pprofFlow,
+					func(ctx context.Context, externalID string) error {
+						return execute(pipeline)(ctx, stagePrepare, externalID)
+					},
+					func(ctx context.Context, externalID string) error {
+						return execute(pipeline)(ctx, stageResult, externalID)
+					})
+			}
+			runErr := runFullPipeline(ctx, articleRepository, stages, taskLogger, externalID)
 			return mode.guard(ctx, externalID, scheme, runErr)
 		}
 		switch command.Name {
 		case "generate":
+			// У pprof_1 генерация — это его собственный поток, и отдельного «прогнать все
+			// стадии одним вызовом» у него нет: им и является полный прогон.
+			generateOne := func(ctx context.Context, externalID string) error {
+				return mode.run(ctx, externalID, runGenerate)
+			}
+			if pprofFlow != nil {
+				generateOne = runOne
+			}
 			if command.ExternalID == "" {
-				err = runBatchOperation(ctx, articleRepository, "generate", func(ctx context.Context, externalID string) error {
-					return mode.run(ctx, externalID, runGenerate)
-				}, taskLogger)
+				err = runBatchOperation(ctx, articleRepository, "generate", generateOne, taskLogger)
 			} else {
-				err = mode.run(ctx, command.ExternalID, runGenerate)
+				err = generateOne(ctx, command.ExternalID)
 			}
 		case "run", "regenerate":
 			if command.Plan {
@@ -330,6 +391,12 @@ func main() {
 				err = runOne(ctx, command.ExternalID)
 			}
 		case "demo-generate":
+			if pprofFlow != nil {
+				// DEMO собран вокруг ручного чата task_1 (article_prompt + fix_links_html).
+				// У pprof_1 поток другой, и переносить DEMO на него отдельная задача.
+				err = fmt.Errorf("операция demo-generate не поддерживается задачей %s", profile.Command)
+				break
+			}
 			if command.ExternalID == "" {
 				// Все статьи, а не подмножество по состоянию: DEMO пересобирается и для
 				// completed, и для failed. Ошибка одной статьи не прекращает обход, но
@@ -485,6 +552,11 @@ func newLogger(levelValue, formatValue string) (*slog.Logger, error) {
 }
 
 type taskCommand struct {
+	// Profile — задача, в пространстве которой выполняется операция. У глобальных команд
+	// (login) он пуст: они не принадлежат ни одной задаче.
+	Profile tasks.Profile
+	// Service — сервис глобальной команды входа.
+	Service     string
 	Name        string
 	ExternalID  string
 	ImportLimit int
@@ -546,17 +618,20 @@ func parseCommand(args []string) (taskCommand, error) {
 	if err != nil {
 		return taskCommand{}, err
 	}
+	// Имя задачи подставляется в тексты: у task-1 сообщения остаются теми же, что были до
+	// появления второй задачи, а у pprof-1 называют её собственные команды.
+	task := command.Profile.Command
 	if flags.dryRun && (command.Name != "run" || command.ExternalID != "") {
-		return taskCommand{}, fmt.Errorf("--dry-run is supported only for task-1 run without external_id")
+		return taskCommand{}, fmt.Errorf("--dry-run is supported only for %s run without external_id", task)
 	}
 	if flags.plan && command.Name != "run" {
-		return taskCommand{}, fmt.Errorf("--plan is supported only for task-1 run")
+		return taskCommand{}, fmt.Errorf("--plan is supported only for %s run", task)
 	}
 	if flags.plan && flags.dryRun {
 		return taskCommand{}, fmt.Errorf("--plan and --dry-run cannot be combined")
 	}
 	if flags.assumeYes && command.Name != "reset" && command.Name != "clear" {
-		return taskCommand{}, fmt.Errorf("--yes is supported only for task-1 reset and task-1 clear")
+		return taskCommand{}, fmt.Errorf("--yes is supported only for %s reset and %s clear", task, task)
 	}
 	command.DryRun = flags.dryRun
 	command.Plan = flags.plan
@@ -564,10 +639,30 @@ func parseCommand(args []string) (taskCommand, error) {
 	return command, nil
 }
 
+// availableOperations перечисляет операции задачи. Набор у задач один и тот же: pprof_1
+// отличается путями и схемой стадий, а не составом команд.
+func availableOperations(task string) string {
+	return "available " + task + " operations: import, import-check, errors, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, clear, reset, google-login, google-publish, deepseek-login"
+}
+
 func parseTaskCommand(args []string) (taskCommand, error) {
-	const available = "available task-1 operations: import, import-check, errors, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, clear, reset, google-login, google-publish, deepseek-login"
-	if len(args) < 3 || (args[1] != "task-1" && args[1] != "task_1") {
-		return taskCommand{}, fmt.Errorf("usage: seo-pipeline task-1 <operation> [arguments]; %s", available)
+	if len(args) >= 2 && args[1] == loginCommandName {
+		return parseLoginCommand(args)
+	}
+	usage := func() error {
+		return fmt.Errorf("usage: seo-pipeline <%s|%s> <operation> [arguments]; %s",
+			strings.Join(taskCommands(), "|"), loginCommandName, availableOperations(task1.Command))
+	}
+	if len(args) < 2 {
+		return taskCommand{}, usage()
+	}
+	profile, err := lookupTask(args[1])
+	if err != nil {
+		return taskCommand{}, fmt.Errorf("%w; %s", err, availableOperations(task1.Command))
+	}
+	available := availableOperations(profile.Command)
+	if len(args) < 3 {
+		return taskCommand{}, fmt.Errorf("usage: seo-pipeline %s <operation> [arguments]; %s", profile.Command, available)
 	}
 	task := args[2]
 	switch task {
@@ -575,14 +670,14 @@ func parseTaskCommand(args []string) (taskCommand, error) {
 		// Позиционных аргументов ни у одной нет: сброс одной статьи — это regenerate,
 		// а публикация одной статьи — google-publish.
 		if len(args) != 3 {
-			return taskCommand{}, fmt.Errorf("usage: seo-pipeline task-1 %s", task)
+			return taskCommand{}, fmt.Errorf("usage: seo-pipeline %s %s", profile.Command, task)
 		}
-		return taskCommand{Name: task}, nil
+		return taskCommand{Profile: profile, Name: task}, nil
 	case "import":
 		if len(args) > 4 {
-			return taskCommand{}, fmt.Errorf("usage: seo-pipeline task-1 import [limit]")
+			return taskCommand{}, fmt.Errorf("usage: seo-pipeline %s import [limit]", profile.Command)
 		}
-		command := taskCommand{Name: task}
+		command := taskCommand{Profile: profile, Name: task}
 		if len(args) == 4 {
 			value := strings.TrimSpace(args[3])
 			limit, err := strconv.Atoi(value)
@@ -594,49 +689,45 @@ func parseTaskCommand(args []string) (taskCommand, error) {
 		return command, nil
 	case "run":
 		if len(args) == 3 {
-			return taskCommand{Name: task}, nil
+			return taskCommand{Profile: profile, Name: task}, nil
 		}
 		if len(args) != 4 {
-			return taskCommand{}, fmt.Errorf("usage: seo-pipeline task-1 run [external_id]")
+			return taskCommand{}, fmt.Errorf("usage: seo-pipeline %s run [external_id]", profile.Command)
 		}
-		return parseExternalIDCommand(task, args[3])
+		return parseExternalIDCommand(profile, task, args[3])
 	case "regenerate":
 		if len(args) != 4 {
-			return taskCommand{}, fmt.Errorf("usage: seo-pipeline task-1 regenerate <external_id>")
+			return taskCommand{}, fmt.Errorf("usage: seo-pipeline %s regenerate <external_id>", profile.Command)
 		}
-		return parseExternalIDCommand(task, args[3])
+		return parseExternalIDCommand(profile, task, args[3])
 	case "clear":
 		// ID обязателен: очистка без него означала бы «стереть все статьи», а это reset.
 		if len(args) != 4 {
-			return taskCommand{}, fmt.Errorf("usage: seo-pipeline task-1 clear <external_id>")
+			return taskCommand{}, fmt.Errorf("usage: seo-pipeline %s clear <external_id>", profile.Command)
 		}
-		return parseExternalIDCommand(task, args[3])
-	case "google-publish":
-		// ID обязателен: массовая публикация в чужой Google Drive не должна запускаться
-		// одним словом без аргумента.
-		if len(args) != 4 {
-			return taskCommand{}, fmt.Errorf("usage: seo-pipeline task-1 google-publish <external_id>")
-		}
-		return parseExternalIDCommand(task, args[3])
-	case "errors", "retry", "prepare", "generate", "demo-generate", "review", "fix", "info", "html", "result", "article", "import-check":
+		return parseExternalIDCommand(profile, task, args[3])
+	case "errors", "retry", "prepare", "generate", "demo-generate", "review", "fix", "info", "html", "result", "article", "import-check",
+		// google-publish без ID публикует все статьи с сохранённым промптом. Публикация
+		// идемпотентна: документ ищется по имени и перезаписывается.
+		"google-publish":
 		if len(args) == 3 {
-			return taskCommand{Name: task}, nil
+			return taskCommand{Profile: profile, Name: task}, nil
 		}
 		if len(args) != 4 {
-			return taskCommand{}, fmt.Errorf("usage: seo-pipeline task-1 %s [external_id]", task)
+			return taskCommand{}, fmt.Errorf("usage: seo-pipeline %s %s [external_id]", profile.Command, task)
 		}
-		return parseExternalIDCommand(task, args[3])
+		return parseExternalIDCommand(profile, task, args[3])
 	default:
-		return taskCommand{}, fmt.Errorf("unknown task-1 operation %q; %s", task, available)
+		return taskCommand{}, fmt.Errorf("unknown %s operation %q; %s", profile.Command, task, available)
 	}
 }
 
-func parseExternalIDCommand(name, value string) (taskCommand, error) {
+func parseExternalIDCommand(profile tasks.Profile, name, value string) (taskCommand, error) {
 	externalID, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
 	if err != nil || externalID <= 0 {
 		return taskCommand{}, fmt.Errorf("external_id must be a positive integer: %q", value)
 	}
-	return taskCommand{Name: name, ExternalID: strconv.FormatInt(externalID, 10)}, nil
+	return taskCommand{Profile: profile, Name: name, ExternalID: strconv.FormatInt(externalID, 10)}, nil
 }
 
 func validateConfig(command string, cfg config.Config) error {

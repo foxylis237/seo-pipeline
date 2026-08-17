@@ -13,8 +13,8 @@ import (
 	"github.com/foxylis237/seo-pipeline/internal/config"
 	"github.com/foxylis237/seo-pipeline/internal/integrations/arsenkin"
 	"github.com/foxylis237/seo-pipeline/internal/integrations/keysso"
-	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/article"
-	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/diagnostics"
+	"github.com/foxylis237/seo-pipeline/internal/pipeline/article"
+	"github.com/foxylis237/seo-pipeline/internal/pipeline/diagnostics"
 )
 
 type fakePrepareRepository struct {

@@ -17,10 +17,9 @@ const (
 	DefaultLLMTimeout     = 2 * time.Minute
 )
 
-// requiredLLMStages — стадии, без которых конфигурация неполна. Кроме шести стадий генерации
-// сюда входит keywords: она выполняется не в пайплайне, а в prepare, но промпт и маршрут ей
-// нужны такие же обязательные — иначе отсутствие резервного источника запросов выяснится
-// только в момент, когда Keys.so уже вернул пустой результат.
+// requiredLLMStages — стадии схемы task_1: шесть стадий генерации плюс keywords, резервный
+// источник запросов для prepare. Список остаётся значением по умолчанию для вызовов без явного
+// набора; у задачи со своим потоком генерации набор свой и приходит из её профиля.
 var requiredLLMStages = []string{"structure", "article", "info", "review", "fix", "html", "keywords"}
 
 type LLMFileConfig struct {
@@ -87,12 +86,20 @@ type LLMTargetConfig struct {
 }
 
 func LoadLLMConfig(path string) (LLMConfig, error) {
-	return loadLLMConfig(path, true)
+	return loadLLMConfig(path, requiredLLMStages, true)
 }
 
 // LoadLLMConfigForDryRun loads prompt templates without requiring provider credentials.
 func LoadLLMConfigForDryRun(path string) (LLMConfig, error) {
-	return loadLLMConfig(path, false)
+	return loadLLMConfig(path, requiredLLMStages, false)
+}
+
+// LoadLLMConfigForStages проверяет схему по набору стадий самой задачи.
+//
+// Набор приходит снаружи, потому что он у задач разный: task_1 генерирует статью шестью
+// стадиями, задача со своим потоком — своими. Пустой набор означает набор task_1.
+func LoadLLMConfigForStages(path string, stages []string, requireCredentials bool) (LLMConfig, error) {
+	return loadLLMConfig(path, stages, requireCredentials)
 }
 
 // LoadLLMProviderConfig loads one provider without validating stages, prompt
@@ -120,6 +127,12 @@ func LoadLLMProviderConfig(path, name string) (LLMProviderConfig, error) {
 // Всё остальное — таймауты, температуры, max_tokens — остаётся в одном месте, в базовом
 // файле, и не расходится между режимами.
 func LoadLLMConfigWithOverlay(basePath, overlayPath string, requireCredentials bool) (LLMConfig, error) {
+	return LoadLLMConfigWithOverlayForStages(basePath, overlayPath, requiredLLMStages, requireCredentials)
+}
+
+// LoadLLMConfigWithOverlayForStages накладывает overlay и проверяет схему по набору стадий
+// задачи. Пустой набор означает набор task_1.
+func LoadLLMConfigWithOverlayForStages(basePath, overlayPath string, stages []string, requireCredentials bool) (LLMConfig, error) {
 	base, err := readLLMFile(basePath)
 	if err != nil {
 		return LLMConfig{}, err
@@ -129,7 +142,7 @@ func LoadLLMConfigWithOverlay(basePath, overlayPath string, requireCredentials b
 		return LLMConfig{}, err
 	}
 	mergeLLMConfig(&base.LLM, overlay.LLM)
-	if err := validateLLMConfig(&base.LLM, requireCredentials); err != nil {
+	if err := validateLLMConfig(&base.LLM, stages, requireCredentials); err != nil {
 		return LLMConfig{}, fmt.Errorf("LLM config %q с наложенным %q: %w", basePath, overlayPath, err)
 	}
 	return base.LLM, nil
@@ -189,18 +202,21 @@ func readLLMFile(path string) (LLMFileConfig, error) {
 	return fileConfig, nil
 }
 
-func loadLLMConfig(path string, requireCredentials bool) (LLMConfig, error) {
+func loadLLMConfig(path string, stages []string, requireCredentials bool) (LLMConfig, error) {
 	fileConfig, err := readLLMFile(path)
 	if err != nil {
 		return LLMConfig{}, err
 	}
-	if err := validateLLMConfig(&fileConfig.LLM, requireCredentials); err != nil {
+	if err := validateLLMConfig(&fileConfig.LLM, stages, requireCredentials); err != nil {
 		return LLMConfig{}, err
 	}
 	return fileConfig.LLM, nil
 }
 
-func validateLLMConfig(cfg *LLMConfig, requireCredentials bool) error {
+func validateLLMConfig(cfg *LLMConfig, stages []string, requireCredentials bool) error {
+	if len(stages) == 0 {
+		stages = requiredLLMStages
+	}
 	for name, provider := range cfg.Providers {
 		normalized, err := normalizeLLMProvider(name, provider)
 		if err != nil {
@@ -209,7 +225,7 @@ func validateLLMConfig(cfg *LLMConfig, requireCredentials bool) error {
 		cfg.Providers[name] = normalized
 	}
 	usedProviders := make(map[string]struct{})
-	for _, stageName := range requiredLLMStages {
+	for _, stageName := range stages {
 		stage, found := cfg.Stages[stageName]
 		if !found {
 			return fmt.Errorf("LLM stage %q is missing", stageName)

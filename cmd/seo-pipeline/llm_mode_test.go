@@ -13,7 +13,9 @@ import (
 	"time"
 
 	"github.com/foxylis237/seo-pipeline/internal/llm"
-	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/generation"
+	"github.com/foxylis237/seo-pipeline/internal/pipeline/generation"
+	"github.com/foxylis237/seo-pipeline/internal/tasks/pprof1"
+	"github.com/foxylis237/seo-pipeline/internal/tasks/task1"
 )
 
 func modeTestLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
@@ -33,7 +35,7 @@ func TestBothSchemesLoadWhenGeminiIsConfigured(t *testing.T) {
 	t.Setenv("GEMINI_MODEL", "gemini-2.5-flash")
 	t.Setenv("LLM_MODE", "")
 
-	configs, err := loadStageConfigs(modeTestLogger(), true)
+	configs, err := loadStageConfigs(mustProfile(task1.Command), modeTestLogger(), true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +66,7 @@ func TestMissingGeminiKeyLeavesDeepSeekOnly(t *testing.T) {
 	if err := os.Unsetenv("GEMINI_API_KEY"); err != nil {
 		t.Fatal(err)
 	}
-	configs, err := loadStageConfigs(modeTestLogger(), true)
+	configs, err := loadStageConfigs(mustProfile(task1.Command), modeTestLogger(), true)
 	if err != nil {
 		t.Fatalf("отсутствие ключа Gemini остановило запуск: %v", err)
 	}
@@ -81,7 +83,7 @@ func TestPinnedDeepSeekModeSkipsGemini(t *testing.T) {
 	t.Setenv("GEMINI_API_KEY", "test-gemini")
 	t.Setenv("GEMINI_MODEL", "gemini-2.5-flash")
 	t.Setenv("LLM_MODE", "deepseek")
-	configs, err := loadStageConfigs(modeTestLogger(), true)
+	configs, err := loadStageConfigs(mustProfile(task1.Command), modeTestLogger(), true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +95,7 @@ func TestPinnedDeepSeekModeSkipsGemini(t *testing.T) {
 func TestUnknownLLMModeIsRejected(t *testing.T) {
 	chdirProjectRoot(t)
 	t.Setenv("LLM_MODE", "openrouter")
-	if _, err := loadStageConfigs(modeTestLogger(), true); err == nil || !strings.Contains(err.Error(), "LLM_MODE") {
+	if _, err := loadStageConfigs(mustProfile(task1.Command), modeTestLogger(), true); err == nil || !strings.Contains(err.Error(), "LLM_MODE") {
 		t.Fatalf("error = %v, want отказ по неизвестному режиму", err)
 	}
 }
@@ -282,5 +284,89 @@ func TestBrokenGeminiStateDoesNotDisableProviderForever(t *testing.T) {
 	state := geminiAvailability{path: path, now: func() time.Time { return clock }}
 	if _, _, blocked, _ := state.state(); blocked {
 		t.Fatal("битый маркер выключил Gemini")
+	}
+}
+
+// Схемы стадий каждой задачи должны загружаться и указывать только на свои промпты. Тест
+// читает боевые config/*.yaml и файлы промптов, поэтому ловит и опечатку в пути, и промпт,
+// который забыли создать. Внешних вызовов здесь нет: конфигурация только разбирается.
+func TestEveryTaskLoadsItsOwnPromptsOnly(t *testing.T) {
+	chdirProjectRoot(t)
+	t.Setenv("GEMINI_API_KEY", "test-gemini")
+	t.Setenv("GEMINI_MODEL", "gemini-2.5-flash")
+	t.Setenv("LLM_MODE", "")
+
+	for _, name := range taskCommands() {
+		t.Run(name, func(t *testing.T) {
+			profile := mustProfile(name)
+			configs, err := loadStageConfigs(profile, modeTestLogger(), true)
+			if err != nil {
+				t.Fatalf("схемы задачи %s не загрузились: %v", name, err)
+			}
+			for _, stageSet := range configs.stageSets() {
+				for stage, settings := range stageSet.Stages {
+					if !strings.HasPrefix(settings.Prompt, profile.PromptsDir+"/") {
+						t.Fatalf("%s: стадия %s читает чужой промпт %q, ожидался каталог %s",
+							name, stage, settings.Prompt, profile.PromptsDir)
+					}
+					if strings.TrimSpace(settings.PromptTemplate) == "" {
+						t.Fatalf("%s: промпт стадии %s пуст", name, stage)
+					}
+				}
+			}
+			for _, stage := range profile.LLMStages {
+				if _, found := configs.deepseek.Stages[stage]; !found {
+					t.Fatalf("%s: стадия %s объявлена в профиле, но отсутствует в схеме", name, stage)
+				}
+			}
+		})
+	}
+}
+
+// У pprof_1 одна схема стадий: он DeepSeek-only, и второй схемы для выбора у него нет.
+func TestPProf1HasSingleScheme(t *testing.T) {
+	chdirProjectRoot(t)
+	t.Setenv("GEMINI_API_KEY", "test-gemini")
+	t.Setenv("GEMINI_MODEL", "gemini-2.5-flash")
+	t.Setenv("LLM_MODE", "")
+
+	configs, err := loadStageConfigs(mustProfile(pprof1.Command), modeTestLogger(), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if configs.geminiFound {
+		t.Fatal("у pprof_1 не должно быть схемы Gemini")
+	}
+	for stage, settings := range configs.deepseek.Stages {
+		for _, target := range settings.Targets {
+			if target.Provider != "deepseek_web" {
+				t.Fatalf("стадия %s идёт к провайдеру %q, а pprof_1 сейчас DeepSeek-only", stage, target.Provider)
+			}
+		}
+	}
+}
+
+// Старый базовый промпт статьи обязан оставаться собираемым: он не уходит в модель, но
+// сохраняется артефактом и публикуется в Google Docs. Проверяем, что стадия существует и
+// её шаблон непуст, — иначе публиковать станет нечего.
+func TestPProf1KeepsBaseArticlePromptRenderable(t *testing.T) {
+	chdirProjectRoot(t)
+	t.Setenv("LLM_MODE", "")
+
+	configs, err := loadStageConfigs(mustProfile(pprof1.Command), modeTestLogger(), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stage, found := configs.deepseek.Stages[pprof1.StageArticle]
+	if !found {
+		t.Fatal("стадия базового промпта статьи отсутствует в схеме pprof_1")
+	}
+	if strings.TrimSpace(stage.PromptTemplate) == "" {
+		t.Fatal("базовый промпт статьи пуст")
+	}
+	for _, placeholder := range []string{"{{.Title}}", "{{.GeneratedStructure}}", "{{.Keywords}}", "{{.LSIWords}}"} {
+		if !strings.Contains(stage.PromptTemplate, placeholder) {
+			t.Fatalf("базовый промпт статьи потерял %s: он обязан собираться из входных данных и research", placeholder)
+		}
 	}
 }

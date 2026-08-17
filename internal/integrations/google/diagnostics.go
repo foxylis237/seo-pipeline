@@ -8,13 +8,23 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/mxschmitt/playwright-go"
 )
 
-// diagnosticsDir — тот же корень, что у браузерных интеграций Keys.so, Arsenkin и DeepSeek.
-const diagnosticsDir = "output/task1/debug/google"
+// defaultDiagnosticsDir используется, когда каталог не задан вызывающим. Имени задачи здесь
+// нет намеренно: интеграция не знает, что задач больше одной, — корень ей передают.
+const defaultDiagnosticsDir = "output/debug/google"
+
+// diagnosticsDir возвращает каталог диагностики этого прогона.
+func (s *playwrightSession) diagnosticsDir() string {
+	if root := strings.TrimSpace(s.cfg.DiagnosticsDir); root != "" {
+		return root
+	}
+	return defaultDiagnosticsDir
+}
 
 // emailRE вычищает адреса из сохранённой разметки: в интерфейсе Google виден адрес аккаунта,
 // а дампы лежат на диске без ротации.
@@ -29,7 +39,7 @@ func isDarwin() bool { return runtime.GOOS == "darwin" }
 // на живом аккаунте, поэтому диагностика здесь особенно нужна. Ошибки записи наверх не
 // поднимаются: диагностика не должна подменять исходную ошибку.
 func (s *playwrightSession) saveDiagnostics(ctx context.Context, stage string) {
-	directory := filepath.Join(diagnosticsDir, fmt.Sprintf("article-%d", s.articleID))
+	directory := filepath.Join(s.diagnosticsDir(), fmt.Sprintf("article-%d", s.articleID))
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		s.logger.Warn("каталог диагностики Google не создан", "error", err)
 		return

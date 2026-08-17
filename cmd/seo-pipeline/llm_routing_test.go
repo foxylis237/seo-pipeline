@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/foxylis237/seo-pipeline/internal/llm"
+	"github.com/foxylis237/seo-pipeline/internal/tasks/task1"
 )
 
 // wantGeminiStages — распределение стадий, когда Gemini доступен. Зафиксировано тестом,
@@ -24,7 +25,7 @@ var wantGeminiStages = map[string]string{
 
 func testResolver(t *testing.T, clock time.Time, requireCredentials bool) llmResolver {
 	t.Helper()
-	configs, err := loadStageConfigs(modeTestLogger(), requireCredentials)
+	configs, err := loadStageConfigs(mustProfile(task1.Command), modeTestLogger(), requireCredentials)
 	if err != nil {
 		t.Fatal(err)
 	}

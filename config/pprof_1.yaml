@@ -1,0 +1,103 @@
+# Схема стадий pprof_1.
+#
+# Задача сегодня DeepSeek-only: провайдер один, наложения нет, выбирать между схемами не из
+# чего. Файл самостоятельный, а не наложение на config/config.yaml, — task_1 и pprof_1
+# должны расходиться свободно, и правка одного не имеет права менять другой.
+#
+# Поток генерации — три чата, границы между ними значимы:
+#
+#   чат 1: structure
+#   чат 2: expert → seo_editor → info → review
+#   чат 3: html
+#
+# Внутри чата 2 каждое следующее сообщение опирается на историю, поэтому промпты этих стадий
+# статью повторно не передают.
+llm:
+  providers:
+    deepseek_web:
+      type: deepseek_web
+      chat_url: https://chat.deepseek.com/
+      login_url: https://chat.deepseek.com/sign_in
+      profile_dir: data/browser/deepseek
+      headless: true
+      # Один диалог на статью: без него браузерный клиент открывал бы новую беседу на каждое
+      # сообщение, и история внутри чата 2 терялась бы. Границы между тремя чатами задаёт сам
+      # поток — первое сообщение каждого чата просит начать новую беседу.
+      single_chat_per_article: true
+
+  stages:
+    # keywords — резервный источник исходных запросов для prepare, а не стадия генерации.
+    # Вызывается, только когда Keys.so не нашёл у конкурента ни одного запроса.
+    keywords:
+      targets:
+        - { provider: deepseek_web, model: deepseek-web }
+      prompt: tasks/pprof_1/prompts/keywords.txt
+      temperature: 0.2
+      max_tokens: 3000
+      timeout: 180s
+
+    # article — старый базовый промпт статьи. В модель НЕ отправляется: поток собирает его из
+    # входных данных и research, кладёт в prompts/article_prompt.txt и выгружает в Google Docs.
+    # Текст статьи пишет стадия expert.
+    article:
+      targets:
+        - { provider: deepseek_web, model: deepseek-web }
+      prompt: tasks/pprof_1/prompts/article.txt
+      temperature: 0.7
+      max_tokens: 10000
+      timeout: 300s
+
+    # Чат 1.
+    structure:
+      targets:
+        - { provider: deepseek_web, model: deepseek-web }
+      prompt: tasks/pprof_1/prompts/structure.txt
+      temperature: 0.3
+      max_tokens: 3000
+      timeout: 180s
+
+    # Чат 2, сообщение 1: статью пишет практикующий специалист по структуре из чата 1.
+    expert:
+      targets:
+        - { provider: deepseek_web, model: deepseek-web }
+      prompt: tasks/pprof_1/prompts/1_expert.txt
+      temperature: 0.7
+      max_tokens: 12000
+      timeout: 420s
+
+    # Чат 2, сообщение 2: SEO-редактура готового текста ключами и LSI.
+    seo_editor:
+      targets:
+        - { provider: deepseek_web, model: deepseek-web }
+      prompt: tasks/pprof_1/prompts/2_seo_editor.txt
+      temperature: 0.4
+      max_tokens: 12000
+      timeout: 420s
+
+    # Чат 2, сообщение 3: метаданные по статье из этого же чата.
+    info:
+      targets:
+        - { provider: deepseek_web, model: deepseek-web }
+      prompt: tasks/pprof_1/prompts/info.txt
+      temperature: 0.2
+      max_tokens: 4000
+      timeout: 300s
+
+    # Чат 2, сообщение 4: ревью, которое сразу возвращает исправленную статью. Отдельного
+    # шага fix у pprof_1 нет — этот промпт отдаёт готовый текст, а не список замечаний.
+    review:
+      targets:
+        - { provider: deepseek_web, model: deepseek-web }
+      prompt: tasks/pprof_1/prompts/3_review.txt
+      temperature: 0.3
+      max_tokens: 12000
+      timeout: 420s
+
+    # Чат 3: разметка и перелинковка. Начинается с чистой истории, поэтому статью получает явно.
+    html:
+      targets:
+        - { provider: deepseek_web, model: deepseek-web }
+      prompt: tasks/pprof_1/prompts/4_html.txt
+      temperature: 0.1
+      max_tokens: 14000
+      timeout: 420s

@@ -329,8 +329,12 @@ func (c *Client) stage(name string, fields ...any) {
 // shouldOpenNewChat решает, начинать ли новую беседу.
 //
 // Без режима одного диалога поведение прежнее: новая беседа на каждый запрос. В режиме
-// одного диалога беседа переоткрывается только при смене статьи или после потери сессии.
+// одного диалога беседа переоткрывается только при смене статьи, по явному требованию
+// запроса или после потери сессии.
 func (c *Client) shouldOpenNewChat(request llm.Request) bool {
+	if request.NewChat {
+		return true
+	}
 	if !request.SingleChat || request.ArticleID == 0 {
 		return true
 	}

@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/article"
-	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/repository"
+	"github.com/foxylis237/seo-pipeline/internal/pipeline/article"
+	"github.com/foxylis237/seo-pipeline/internal/pipeline/repository"
 )
 
 type fakeClearRepository struct {

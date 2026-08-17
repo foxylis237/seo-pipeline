@@ -12,19 +12,15 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/repository"
+	"github.com/foxylis237/seo-pipeline/internal/pipeline/repository"
 )
 
 // confirmationWord — слово, которое нужно ввести, чтобы reset выполнился. Одной буквы для
 // необратимой операции мало: y жмётся рефлекторно, слово требует прочитать отчёт.
 const confirmationWord = "reset"
 
-// importReportsDir и debugArtifactsDir лежат вне OUTPUT_DIR и захардкожены теми же
-// литералами, что в runImport и в клиентах интеграций.
-const (
-	importReportsDir  = "output/task1/import-reports"
-	debugArtifactsDir = "output/task1/debug"
-)
+// Отчёты импорта и диагностика лежат вне OUTPUT_DIR, поэтому их каталоги приходят в
+// resetOptions отдельно. Оба — из профиля задачи: reset обязан чистить только свою задачу.
 
 // resetRepository — то, что reset требует от хранилища.
 type resetRepository interface {
@@ -35,8 +31,16 @@ type resetRepository interface {
 // resetOptions собирает окружение команды: что чистить, куда печатать и откуда читать
 // подтверждение.
 type resetOptions struct {
+	// TaskName и TaskCommand попадают в отчёт: команда обязана называть ту задачу, которую
+	// сбросила, иначе pprof-1 reset отчитается о сбросе task_1.
+	TaskName    string
+	TaskCommand string
 	OutputDir   string
-	DatabaseURL string
+	// ImportReportsDir и DiagnosticsDir принадлежат этой же задаче. Общих каталогов здесь
+	// быть не должно: reset одной задачи не имеет права стирать данные другой.
+	ImportReportsDir string
+	DiagnosticsDir   string
+	DatabaseURL      string
 	// AssumeYes — флаг --yes: подтверждение без вопроса, для автоматизации.
 	AssumeYes bool
 	// Interactive сообщает, что In — терминал. Вычисляется вызывающим, чтобы команда
@@ -66,8 +70,8 @@ func runReset(ctx context.Context, articleRepository resetRepository, options re
 	}
 	targets := []resetTarget{
 		{label: filepath.ToSlash(outputDir) + "/", path: outputDir},
-		{label: importReportsDir + "/", path: importReportsDir},
-		{label: debugArtifactsDir + "/", path: debugArtifactsDir},
+		{label: options.ImportReportsDir + "/", path: options.ImportReportsDir},
+		{label: options.DiagnosticsDir + "/", path: options.DiagnosticsDir},
 	}
 	for index := range targets {
 		entries, countErr := countDirectoryEntries(targets[index].path)
@@ -114,8 +118,8 @@ func runReset(ctx context.Context, articleRepository resetRepository, options re
 	}
 
 	fmt.Fprintln(options.Out)
-	fmt.Fprintln(options.Out, "Состояние task_1 сброшено: таблицы очищены, счётчики ID сброшены, каталоги вывода пусты.")
-	fmt.Fprintln(options.Out, "Дальше: make task-1 import")
+	fmt.Fprintf(options.Out, "Состояние %s сброшено: таблицы очищены, счётчики ID сброшены, каталоги вывода пусты.\n", options.TaskName)
+	fmt.Fprintf(options.Out, "Дальше: make %s import\n", options.TaskCommand)
 	return nil
 }
 

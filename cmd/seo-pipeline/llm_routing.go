@@ -15,12 +15,13 @@ import (
 	"github.com/foxylis237/seo-pipeline/internal/llm"
 	"github.com/foxylis237/seo-pipeline/internal/llm/deepseekweb"
 	llmgemini "github.com/foxylis237/seo-pipeline/internal/llm/gemini"
-	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/article"
-	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/generation"
-	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/keywords"
-	articleoutput "github.com/foxylis237/seo-pipeline/internal/tasks/task1/output"
-	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/repository"
-	resultassembly "github.com/foxylis237/seo-pipeline/internal/tasks/task1/result"
+	"github.com/foxylis237/seo-pipeline/internal/pipeline/article"
+	"github.com/foxylis237/seo-pipeline/internal/pipeline/generation"
+	"github.com/foxylis237/seo-pipeline/internal/pipeline/keywords"
+	articleoutput "github.com/foxylis237/seo-pipeline/internal/pipeline/output"
+	"github.com/foxylis237/seo-pipeline/internal/pipeline/repository"
+	resultassembly "github.com/foxylis237/seo-pipeline/internal/pipeline/result"
+	"github.com/foxylis237/seo-pipeline/internal/tasks"
 )
 
 // schemeName — имя схемы стадий. Схема, а не провайдер: gemini-схема сама смешивает
@@ -129,7 +130,7 @@ func (r llmResolver) providerStatus(name string, provider config.LLMProviderConf
 	switch provider.Type {
 	case "deepseek_web":
 		if _, err := os.Stat(provider.ProfileDir); err != nil {
-			return failedStatus(status, fmt.Sprintf("профиль %s отсутствует — нужен вход через deepseek-login", provider.ProfileDir))
+			return failedStatus(status, fmt.Sprintf("профиль %s отсутствует — нужен вход: make login deepseek", provider.ProfileDir))
 		}
 		if until, reason, blocked := deepseekweb.BlockedUntil(provider.ProfileDir, now); blocked {
 			detail := fmt.Sprintf("аккаунт недоступен до %s", until.UTC().Format(time.RFC3339))
@@ -174,6 +175,10 @@ type generationDeps struct {
 	// promptPublisher выгружает готовый промпт статьи наружу. Необязателен: у prepare и
 	// dry-run его нет, и конвейер тогда работает ровно как раньше.
 	promptPublisher generation.PromptPublisher
+	// profile и debugDirs — уже разрешённые пути задачи. Дальше в движок они не уходят:
+	// туда попадают только конкретные значения, которые из них собраны.
+	profile   tasks.Profile
+	debugDirs diagnosticsDirs
 }
 
 // buildLLM создаёт клиентов и конвейеры под разрешённую маршрутизацию.
@@ -215,7 +220,7 @@ func buildLLM(ctx context.Context, configs stageConfigs, availability geminiAvai
 		return errors.Join(errs...)
 	}
 	for _, name := range sortedKeys(used) {
-		client, closer, err := newLLMClient(ctx, name, providers[name], models[name], deps.logger)
+		client, closer, err := newLLMClient(ctx, name, providers[name], models[name], deps.debugDirs.deepseek, deps.logger)
 		if err != nil {
 			return nil, closeAll, fmt.Errorf("создать LLM provider %q: %w", name, err)
 		}
@@ -266,7 +271,7 @@ func newKeywordsFallbackFactory(mode *articleMode, logger *slog.Logger) keywords
 // предупреждение и прогон без резерва, а не отказ команды.
 func newPrepareKeywordsFallback(ctx context.Context, deps generationDeps) (keywordsFallbackFactory, func() error) {
 	noop := func() error { return nil }
-	stages, err := loadStageConfigs(deps.logger, true)
+	stages, err := loadStageConfigs(deps.profile, deps.logger, true)
 	if err != nil {
 		deps.logger.Warn("резервный подбор запросов недоступен: LLM-конфигурация не загрузилась",
 			"stage", keywords.StageName, "error", err)
@@ -287,7 +292,7 @@ func newPrepareKeywordsFallback(ctx context.Context, deps generationDeps) (keywo
 // newLLMClient конструирует одного провайдера. Ветка default обязательна: новый тип, добавленный
 // в normalizeLLMProvider и забытый здесь, иначе давал бы не ошибку старта, а «provider is not
 // registered» в середине прогона.
-func newLLMClient(ctx context.Context, name string, provider config.LLMProviderConfig, model string, logger *slog.Logger) (llm.Client, func() error, error) {
+func newLLMClient(ctx context.Context, name string, provider config.LLMProviderConfig, model, diagnosticsDir string, logger *slog.Logger) (llm.Client, func() error, error) {
 	switch provider.Type {
 	case "gemini":
 		client, err := llmgemini.NewClient(ctx, os.Getenv(provider.APIKeyEnv), model)
@@ -308,7 +313,7 @@ func newLLMClient(ctx context.Context, name string, provider config.LLMProviderC
 		}
 		client, err := deepseekweb.NewClient(deepseekweb.Config{
 			ChatURL: provider.ChatURL, LoginURL: provider.LoginURL,
-			ProfileDir: provider.ProfileDir, Headless: headless,
+			ProfileDir: provider.ProfileDir, Headless: headless, DiagnosticsDir: diagnosticsDir,
 		}, logger.With("provider", name))
 		if err != nil {
 			return nil, nil, err

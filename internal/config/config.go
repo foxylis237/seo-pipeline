@@ -30,19 +30,41 @@ type Config struct {
 	ArsenkinHeadless bool
 }
 
+// TaskDefaults — то, чем задача подменяет общие настройки.
+//
+// Пакет намеренно не знает, какие задачи существуют: он получает готовые значения из
+// composition root. EnvPrefix задаёт имена переменных, которыми задачу можно переопределить
+// точечно; пустой префикс означает исторические имена без префикса, и переопределяют они
+// только ту задачу, у которой префикса нет.
+type TaskDefaults struct {
+	InputPath string
+	OutputDir string
+	EnvPrefix string
+}
+
 // Load загружает настройки из .env и переменных окружения.
 //
 // Переменные окружения имеют приоритет над значениями из файла .env.
-func Load() (Config, error) {
-	return load(true)
+func Load(defaults TaskDefaults) (Config, error) {
+	return load(true, defaults)
 }
 
 // LoadDryRun loads local settings without requiring an environment file or paid-service credentials.
-func LoadDryRun() (Config, error) {
-	return load(false)
+func LoadDryRun(defaults TaskDefaults) (Config, error) {
+	return load(false, defaults)
 }
 
-func load(requireEnvFile bool) (Config, error) {
+// taskEnv читает переменную задачи: сначала с префиксом, затем — только для задачи без
+// префикса — историческое имя. Переменная без префикса не должна протекать в другую задачу:
+// иначе один OUTPUT_DIR в .env увёл бы артефакты обеих задач в один каталог.
+func (d TaskDefaults) taskEnv(name string) string {
+	if d.EnvPrefix != "" {
+		return os.Getenv(d.EnvPrefix + name)
+	}
+	return os.Getenv(name)
+}
+
+func load(requireEnvFile bool, defaults TaskDefaults) (Config, error) {
 	envPath, err := envFilePath()
 	if err != nil {
 		return Config{}, err
@@ -68,11 +90,19 @@ func load(requireEnvFile bool) (Config, error) {
 		}
 	}
 
+	// DATABASE_URL — исключение из правила о префиксах: сервер PostgreSQL у задач общий, а
+	// разводит их search_path из профиля. Префикс здесь лишь позволяет увести задачу на
+	// другой сервер, не трогая остальные.
+	databaseURL := os.Getenv("DATABASE_URL")
+	if prefixed := defaults.taskEnv("DATABASE_URL"); prefixed != "" {
+		databaseURL = prefixed
+	}
+
 	cfg := Config{
 		AppEnv:        os.Getenv("APP_ENV"),
-		DatabaseURL:   os.Getenv("DATABASE_URL"),
-		InputFilePath: os.Getenv("INPUT_FILE_PATH"),
-		OutputDir:     os.Getenv("OUTPUT_DIR"),
+		DatabaseURL:   databaseURL,
+		InputFilePath: defaults.taskEnv("INPUT_FILE_PATH"),
+		OutputDir:     defaults.taskEnv("OUTPUT_DIR"),
 		LogLevel:      os.Getenv("LOG_LEVEL"),
 		LogFormat:     os.Getenv("LOG_FORMAT"),
 		GeminiAPIKey:  os.Getenv("GEMINI_API_KEY"),
@@ -86,10 +116,10 @@ func load(requireEnvFile bool) (Config, error) {
 	}
 
 	if cfg.InputFilePath == "" {
-		cfg.InputFilePath = "input/task_1/input.xlsx"
+		cfg.InputFilePath = defaults.InputPath
 	}
 	if cfg.OutputDir == "" {
-		cfg.OutputDir = "tasks/task_1/output"
+		cfg.OutputDir = defaults.OutputDir
 	}
 	if cfg.LogLevel == "" {
 		cfg.LogLevel = "info"
@@ -103,6 +133,9 @@ func load(requireEnvFile bool) (Config, error) {
 	}
 	if !requireEnvFile {
 		cfg.DatabaseURL = os.Getenv("DRY_RUN_DATABASE_URL")
+		if prefixed := defaults.taskEnv("DRY_RUN_DATABASE_URL"); prefixed != "" {
+			cfg.DatabaseURL = prefixed
+		}
 		if cfg.DatabaseURL == "" {
 			cfg.DatabaseURL = "postgres://seo:seo@localhost:5433/seo_dry_run?sslmode=disable"
 		}

@@ -14,12 +14,12 @@ import (
 var (
 	// ErrSessionExpired — сохранённый профиль есть, но Google больше не считает его
 	// авторизованным.
-	ErrSessionExpired = errors.New("сессия Google истекла: выполните make task-1 google-login")
+	ErrSessionExpired = errors.New("сессия Google истекла: выполните make login google")
 	// ErrLoginRequired — профиля нет вовсе, входа никогда не было.
-	ErrLoginRequired = errors.New("нет профиля Google: выполните make task-1 google-login")
+	ErrLoginRequired = errors.New("нет профиля Google: выполните make login google")
 	// ErrManualVerification — Google показал CAPTCHA или запросил 2FA. Обходить их нельзя,
 	// и повторять тоже: следующая попытка упрётся в ту же проверку.
-	ErrManualVerification = errors.New("требуется ручная проверка Google (CAPTCHA или 2FA): выполните make task-1 google-login")
+	ErrManualVerification = errors.New("требуется ручная проверка Google (CAPTCHA или 2FA): выполните make login google")
 	// ErrProfileBusy — профилем уже пользуется другой процесс.
 	ErrProfileBusy = errors.New("профиль Google занят другим процессом")
 )

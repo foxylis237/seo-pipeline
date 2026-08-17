@@ -11,7 +11,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/article"
+	"github.com/foxylis237/seo-pipeline/internal/pipeline/article"
 )
 
 type fakeRetryRepository struct {

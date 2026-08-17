@@ -26,6 +26,9 @@ type Request struct {
 	// один и тот же браузерный клиент обслуживает обе схемы стадий, и в схеме Gemini этот
 	// режим не нужен.
 	SingleChat bool
+	// NewChat требует начать новую беседу даже в режиме одного диалога. Так поток с
+	// несколькими чатами на статью отделяет их друг от друга.
+	NewChat bool
 }
 
 type Response struct {
@@ -138,6 +141,11 @@ type Call struct {
 	Stage     string
 	ArticleID int64
 	Data      any
+	// NewChat просит провайдера начать новую беседу вместо продолжения текущей. Нужен
+	// потокам, у которых чатов на статью несколько: без него провайдер с режимом одного
+	// диалога склеил бы их в один. Стадии task_1 флаг не выставляют, и для них ничего
+	// не меняется.
+	NewChat bool
 }
 
 type RoutedResponse struct {
@@ -212,9 +220,18 @@ func (r *Router) NewStageChatFactory(stages ...string) *StageChatFactory {
 	return &StageChatFactory{router: r, stages: stages}
 }
 
+// NewIsolatedChatFactory — то же самое, но первое сообщение чата просит провайдера начать
+// новую беседу. Нужно там, где чатов на статью несколько и граница между ними значима.
+func (r *Router) NewIsolatedChatFactory(stages ...string) *StageChatFactory {
+	return &StageChatFactory{router: r, stages: stages, isolated: true}
+}
+
 type StageChatFactory struct {
 	router *Router
 	stages []string
+	// isolated включает NewChat на первом сообщении. По умолчанию выключен: чат task_1
+	// продолжает беседу, начатую предыдущими стадиями статьи.
+	isolated bool
 }
 
 func (f *StageChatFactory) NewChat(_ context.Context, articleID int64) (Chat, error) {
@@ -264,7 +281,7 @@ func (c *stageChat) Generate(ctx context.Context, prompt string) (Response, erro
 		fmt.Fprintf(&transcript, "user:\n%s", prompt)
 	}
 	stage := c.factory.stages[c.next]
-	call := Call{Stage: stage, ArticleID: c.articleID}
+	call := Call{Stage: stage, ArticleID: c.articleID, NewChat: c.factory.isolated && c.next == 0}
 	var result RoutedResponse
 	var err error
 	if c.bound != nil {
@@ -313,6 +330,7 @@ func (r *Router) generateTarget(ctx context.Context, call Call, prompt string, s
 	request := Request{
 		Prompt: prompt, Model: target.Model, Temperature: *stage.Temperature, MaxTokens: stage.MaxTokens,
 		ArticleID: call.ArticleID, SingleChat: r.config.Providers[target.Provider].SingleChatPerArticle,
+		NewChat: call.NewChat,
 	}
 	// Самоограничение провайдера выдерживается до наложения таймаута стадии: пауза между
 	// запросами — не работа модели, и вычитать её из бюджета генерации нельзя.

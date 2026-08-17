@@ -6,10 +6,10 @@ import (
 	"log/slog"
 
 	"github.com/foxylis237/seo-pipeline/internal/config"
-	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/article"
-	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/diagnostics"
-	articleoutput "github.com/foxylis237/seo-pipeline/internal/tasks/task1/output"
-	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/repository"
+	"github.com/foxylis237/seo-pipeline/internal/pipeline/article"
+	"github.com/foxylis237/seo-pipeline/internal/pipeline/diagnostics"
+	articleoutput "github.com/foxylis237/seo-pipeline/internal/pipeline/output"
+	"github.com/foxylis237/seo-pipeline/internal/pipeline/repository"
 )
 
 // demoPrepareRepository нейтрализует переходы состояния боевого prepare, оставляя сбор и
@@ -47,6 +47,7 @@ func runDemoPrepare(
 	writer *articleoutput.Writer,
 	logRouter *diagnostics.ArticleLogRouter,
 	newFallback keywordsFallbackFactory,
+	debugDirs diagnosticsDirs,
 	externalID string,
 ) error {
 	if err := cfg.ValidatePrepare(); err != nil {
@@ -59,7 +60,7 @@ func runDemoPrepare(
 	logger.Info("research отсутствует, запускается prepare", "stage", "demo_prepare",
 		"article_id", selected.ID, "external_id", externalID)
 	return prepareArticle(ctx, demoPrepareRepository{ArticleRepository: articleRepository, logger: logger},
-		cfg, logger, writer, logRouter, newFallback, selected)
+		cfg, logger, writer, logRouter, newFallback, debugDirs, selected)
 }
 
 // articleByExternalID находит статью со slug и reference_url: prepare нужны оба, а

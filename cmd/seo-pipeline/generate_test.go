@@ -8,7 +8,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/article"
+	"github.com/foxylis237/seo-pipeline/internal/pipeline/article"
 )
 
 // Пакетная demo-сборка обходит выборку GetAll: статус и сохранённая ошибка не исключают

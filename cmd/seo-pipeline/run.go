@@ -13,10 +13,10 @@ import (
 	"github.com/foxylis237/seo-pipeline/internal/config"
 	"github.com/foxylis237/seo-pipeline/internal/integrations/arsenkin"
 	"github.com/foxylis237/seo-pipeline/internal/integrations/keysso"
-	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/article"
-	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/diagnostics"
-	articleoutput "github.com/foxylis237/seo-pipeline/internal/tasks/task1/output"
-	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/repository"
+	"github.com/foxylis237/seo-pipeline/internal/pipeline/article"
+	"github.com/foxylis237/seo-pipeline/internal/pipeline/diagnostics"
+	articleoutput "github.com/foxylis237/seo-pipeline/internal/pipeline/output"
+	"github.com/foxylis237/seo-pipeline/internal/pipeline/repository"
 )
 
 // minWordstatMembershipRatio is the share of Wordstat phrases that must come from the list
@@ -79,6 +79,7 @@ func runPrepare(
 	writer *articleoutput.Writer,
 	logRouter *diagnostics.ArticleLogRouter,
 	newFallback keywordsFallbackFactory,
+	debugDirs diagnosticsDirs,
 	targetExternalID string,
 ) error {
 	if targetExternalID == "" {
@@ -91,7 +92,7 @@ func runPrepare(
 			byExternalID[selected.ExternalID] = selected
 		}
 		return runSelectedArticles(ctx, selectedArticles, "prepare", func(ctx context.Context, externalID string) error {
-			return prepareArticle(ctx, articleRepository, cfg, logger, writer, logRouter, newFallback, byExternalID[externalID])
+			return prepareArticle(ctx, articleRepository, cfg, logger, writer, logRouter, newFallback, debugDirs, byExternalID[externalID])
 		}, logger)
 	}
 	selectedArticles, err := articleRepository.GetAll(ctx)
@@ -106,7 +107,7 @@ func runPrepare(
 		if targetExternalID != "" && selected.ExternalID != targetExternalID {
 			continue
 		}
-		if err := prepareArticle(ctx, articleRepository, cfg, logger, writer, logRouter, newFallback, selected); err != nil {
+		if err := prepareArticle(ctx, articleRepository, cfg, logger, writer, logRouter, newFallback, debugDirs, selected); err != nil {
 			return err
 		}
 		processed++
@@ -132,6 +133,7 @@ func prepareArticle(
 	writer *articleoutput.Writer,
 	logRouter *diagnostics.ArticleLogRouter,
 	newFallback keywordsFallbackFactory,
+	debugDirs diagnosticsDirs,
 	selected article.Article,
 ) error {
 	// Каталога статьи может ещё не быть: сообщаем роутеру slug, чтобы prepare.log
@@ -154,12 +156,14 @@ func prepareArticle(
 			Email:      cfg.KeysSOEmail,
 			Password:   cfg.KeysSOPassword,
 			Headless:   true,
+			DebugDir:   debugDirs.keysso,
 		}, logger),
 		arsenkin.New(arsenkin.Config{
 			ArticleID: selected.ID,
 			Email:     cfg.ArsenkinEmail,
 			Password:  cfg.ArsenkinPassword,
 			Headless:  cfg.ArsenkinHeadless,
+			DebugDir:  debugDirs.arsenkin,
 		}, logger),
 		fallback,
 	)

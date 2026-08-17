@@ -7,7 +7,7 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/article"
+	"github.com/foxylis237/seo-pipeline/internal/pipeline/article"
 )
 
 // maxStageIterations страхует цикл раннера: этапов семь, поэтому больше девяти проходов

@@ -50,6 +50,9 @@ type Config struct {
 	// OperationTimeout ограничивает одно ожидание, PublishTimeout — попытку целиком.
 	OperationTimeout time.Duration
 	PublishTimeout   time.Duration
+	// DiagnosticsDir — корень диагностики этой интеграции. Задаётся вызывающим, чтобы дампы
+	// разных пайплайнов не смешивались; пустое значение включает общий каталог по умолчанию.
+	DiagnosticsDir string
 }
 
 // DefaultConfig возвращает конфигурацию обычного прогона.

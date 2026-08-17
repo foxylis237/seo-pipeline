@@ -9,7 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/repository"
+	"github.com/foxylis237/seo-pipeline/internal/pipeline/repository"
+	"github.com/foxylis237/seo-pipeline/internal/tasks"
+	"github.com/foxylis237/seo-pipeline/internal/tasks/pprof1"
+	"github.com/foxylis237/seo-pipeline/internal/tasks/task1"
 )
 
 type fakeResetRepository struct {
@@ -30,9 +33,22 @@ func discardResetLogger() *slog.Logger {
 	return slog.New(slog.DiscardHandler)
 }
 
-// resetOutputDir — путь, который получает reset в тестах: тот же относительный вид, что и
-// значение OUTPUT_DIR по умолчанию.
-var resetOutputDir = filepath.Join("tasks", "task_1", "output")
+// Каталоги reset берутся из профиля task_1: тесты обязаны проверять те же пути, что получит
+// команда в бою, а не их копию.
+var (
+	resetProfile      = mustProfile(task1.Command)
+	resetOutputDir    = filepath.FromSlash(resetProfile.OutputDir)
+	importReportsDir  = filepath.FromSlash(resetProfile.ImportReportsDir)
+	debugArtifactsDir = filepath.FromSlash(resetProfile.DiagnosticsDir)
+)
+
+func mustProfile(name string) tasks.Profile {
+	profile, err := lookupTask(name)
+	if err != nil {
+		panic(err)
+	}
+	return profile
+}
 
 // newResetProject builds a temporary project with populated output directories and makes it
 // the working directory, потому что reset проверяет пути относительно корня проекта.
@@ -67,11 +83,13 @@ func newResetProject(t *testing.T) {
 
 func newResetOptions(out io.Writer, in io.Reader, interactive bool) resetOptions {
 	return resetOptions{
-		OutputDir:   resetOutputDir,
-		DatabaseURL: "postgres://seo:sup3rsecret@localhost:5432/seo?sslmode=disable",
-		Interactive: interactive,
-		In:          in,
-		Out:         out,
+		OutputDir:        resetOutputDir,
+		ImportReportsDir: importReportsDir,
+		DiagnosticsDir:   debugArtifactsDir,
+		DatabaseURL:      "postgres://seo:sup3rsecret@localhost:5432/seo?sslmode=disable",
+		Interactive:      interactive,
+		In:               in,
+		Out:              out,
 	}
 }
 
@@ -290,6 +308,68 @@ func TestParseCommandReset(t *testing.T) {
 			}
 			if command.AssumeYes != testCase.assumeYes {
 				t.Fatalf("AssumeYes=%v, ожидалось %v", command.AssumeYes, testCase.assumeYes)
+			}
+		})
+	}
+}
+
+// Reset одной задачи не имеет права трогать данные другой: каталоги приходят из профиля, и
+// эта проверка ловит возврат к общим захардкоженным путям.
+func TestRunResetTouchesOnlyItsOwnTask(t *testing.T) {
+	tests := []struct {
+		name  string
+		reset string
+		other string
+	}{
+		{name: "task-1 не трогает pprof_1", reset: task1.Command, other: pprof1.Command},
+		{name: "pprof-1 не трогает task_1", reset: pprof1.Command, other: task1.Command},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Chdir(t.TempDir())
+			resetProfile := mustProfile(test.reset)
+			otherProfile := mustProfile(test.other)
+
+			otherFiles := []string{
+				filepath.Join(filepath.FromSlash(otherProfile.OutputDir), "37-tema", "result.md"),
+				filepath.Join(filepath.FromSlash(otherProfile.ImportReportsDir), "latest.json"),
+				filepath.Join(filepath.FromSlash(otherProfile.DiagnosticsDir), "keysso", "page.html"),
+			}
+			resetFiles := []string{
+				filepath.Join(filepath.FromSlash(resetProfile.OutputDir), "37-tema", "result.md"),
+				filepath.Join(filepath.FromSlash(resetProfile.ImportReportsDir), "latest.json"),
+				filepath.Join(filepath.FromSlash(resetProfile.DiagnosticsDir), "keysso", "page.html"),
+			}
+			for _, file := range append(append([]string{}, otherFiles...), resetFiles...) {
+				if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			options := resetOptions{
+				OutputDir:        filepath.FromSlash(resetProfile.OutputDir),
+				ImportReportsDir: filepath.FromSlash(resetProfile.ImportReportsDir),
+				DiagnosticsDir:   filepath.FromSlash(resetProfile.DiagnosticsDir),
+				DatabaseURL:      "postgres://seo:sup3rsecret@localhost:5432/seo?sslmode=disable",
+				AssumeYes:        true,
+				Out:              &strings.Builder{},
+			}
+			if err := runReset(context.Background(), &fakeResetRepository{}, options, discardResetLogger()); err != nil {
+				t.Fatalf("reset %s завершился ошибкой: %v", test.reset, err)
+			}
+
+			for _, file := range resetFiles {
+				if _, err := os.Stat(file); !os.IsNotExist(err) {
+					t.Fatalf("reset %s не удалил свой файл %s: %v", test.reset, file, err)
+				}
+			}
+			for _, file := range otherFiles {
+				if _, err := os.Stat(file); err != nil {
+					t.Fatalf("reset %s удалил чужой файл %s: %v", test.reset, file, err)
+				}
 			}
 		})
 	}

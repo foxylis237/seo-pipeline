@@ -11,12 +11,13 @@ import (
 
 	"github.com/foxylis237/seo-pipeline/internal/config"
 	"github.com/foxylis237/seo-pipeline/internal/llm"
-	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/article"
-	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/generation"
-	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/importer"
-	articleoutput "github.com/foxylis237/seo-pipeline/internal/tasks/task1/output"
-	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/repository"
-	resultassembly "github.com/foxylis237/seo-pipeline/internal/tasks/task1/result"
+	"github.com/foxylis237/seo-pipeline/internal/pipeline/article"
+	"github.com/foxylis237/seo-pipeline/internal/pipeline/generation"
+	"github.com/foxylis237/seo-pipeline/internal/pipeline/importer"
+	articleoutput "github.com/foxylis237/seo-pipeline/internal/pipeline/output"
+	"github.com/foxylis237/seo-pipeline/internal/pipeline/repository"
+	resultassembly "github.com/foxylis237/seo-pipeline/internal/pipeline/result"
+	"github.com/foxylis237/seo-pipeline/internal/tasks"
 )
 
 const dryRunModelPrefix = "dry-run-"
@@ -138,6 +139,7 @@ func runDryRun(
 	ctx context.Context,
 	articleRepository *repository.ArticleRepository,
 	cfg config.Config,
+	profile tasks.Profile,
 	logger *slog.Logger,
 	writer *articleoutput.Writer,
 	resultService *resultassembly.Service,
@@ -145,7 +147,7 @@ func runDryRun(
 ) error {
 	// Учётные данные не требуются: отчёт обязан назвать причину недоступности провайдера,
 	// а не упасть на ней.
-	stages, err := loadStageConfigs(logger, false)
+	stages, err := loadStageConfigs(profile, logger, false)
 	if err != nil {
 		return fmt.Errorf("dry-run load LLM config: %w", err)
 	}

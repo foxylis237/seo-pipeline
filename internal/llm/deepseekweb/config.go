@@ -48,6 +48,9 @@ type Config struct {
 	LoginURL   string
 	ProfileDir string
 	Headless   bool
+	// DiagnosticsDir — корень диагностики этого провайдера. Задаётся вызывающим, чтобы дампы
+	// разных пайплайнов не смешивались; пустое значение включает общий каталог по умолчанию.
+	DiagnosticsDir string
 }
 
 func validateConfig(cfg Config, logger *slog.Logger) error {

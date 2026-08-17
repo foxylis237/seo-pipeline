@@ -5,14 +5,24 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/mxschmitt/playwright-go"
 )
 
-// diagnosticsDir — куда складывать состояние страницы при неудаче. Тот же корень, что у
-// браузерных интеграций Keys.so и Arsenkin.
-const diagnosticsDir = "output/task1/debug/deepseek"
+// defaultDiagnosticsDir — куда складывать состояние страницы при неудаче, если каталог не
+// задан вызывающим. Имени задачи здесь нет намеренно: провайдер не знает, что задач больше
+// одной, — корень ему передают.
+const defaultDiagnosticsDir = "output/debug/deepseek"
+
+// diagnosticsDir возвращает каталог диагностики этого прогона.
+func (c *Client) diagnosticsDir() string {
+	if root := strings.TrimSpace(c.cfg.DiagnosticsDir); root != "" {
+		return root
+	}
+	return defaultDiagnosticsDir
+}
 
 // emailRE вычищает адреса из сохранённой разметки: на странице чата виден адрес аккаунта,
 // а дампы лежат на диске без ротации.
@@ -24,7 +34,7 @@ var emailRE = regexp.MustCompile(`[\w.+-]+@[\w-]+\.[\w.-]+`)
 // новых ответов не появилось, а что при этом было на странице — неизвестно. Ошибки записи
 // намеренно не поднимаются наверх: диагностика не должна подменять исходную ошибку.
 func (c *Client) saveDiagnostics(page playwright.Page, stage string, articleID int64) {
-	directory := filepath.Join(diagnosticsDir, fmt.Sprintf("article-%d", articleID))
+	directory := filepath.Join(c.diagnosticsDir(), fmt.Sprintf("article-%d", articleID))
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		c.logger.Warn("DeepSeek diagnostics directory was not created", "error", err)
 		return

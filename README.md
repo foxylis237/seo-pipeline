@@ -1,20 +1,26 @@
 # SEO Pipeline
 
-SEO Pipeline — CLI-приложение на Go для импорта заданий на статьи, сбора SEO-данных и генерации файлов. Сейчас реализован только сценарий `task_1`.
+SEO Pipeline — CLI-приложение на Go для импорта заданий на статьи, сбора SEO-данных и генерации файлов.
+
+Реализованы две задачи. **`task_1`** — рабочий сценарий в проде. **`pprof_1`** — новый пайплайн генерации, который разрабатывается параллельно и на `task_1` не влияет. Движок у них общий, различаются они конфигурацией и порядком стадий: см. «Задачи `task_1` и `pprof_1`».
 
 Состояние статей и пути к артефактам хранятся в PostgreSQL. Keys.so и Arsenkin используются через Playwright, генерационные этапы — через настроенные LLM-провайдеры. Для безопасной локальной проверки предусмотрен изолированный dry-run без внешних запросов.
 
 ## Структура проекта
 
 - `cmd/seo-pipeline/` — CLI, сборка зависимостей и запуск операций.
-- `config/config.yaml` — маршрутизация LLM-стадий и параметры моделей.
-- `config/config.deepseek.yaml` — наложение для режима `LLM_MODE=deepseek`.
-- `input/task_1/input.xlsx` — единственный Excel по умолчанию для импорта `task_1`.
+- `config/config.yaml` — маршрутизация LLM-стадий `task_1` и параметры моделей.
+- `config/config.deepseek.yaml` — наложение для режима `LLM_MODE=deepseek` (`task_1`).
+- `config/pprof_1.yaml` — самостоятельная схема стадий `pprof_1`, без наложения.
+- `input/task_1/input.xlsx` — Excel импорта. Общий у обеих задач: путь задаётся полем профиля, а не выводится из имени задачи, поэтому развести их позже можно одной строкой.
 - `internal/config/` — загрузка и проверка конфигурации.
 - `internal/integrations/keysso/`, `internal/integrations/arsenkin/`, `internal/integrations/google/` — интеграции через Playwright.
 - `internal/llm/` — маршрутизация стадий, таймауты и повторы; `gemini/` и `deepseekweb/` — клиенты провайдеров.
 - `internal/storage/` — подключение к PostgreSQL.
-- `internal/tasks/task1/` — предметная логика первой задачи:
+- `internal/tasks/` — тип `Profile`: всё, чем одна задача отличается от другой;
+  - `task1/profile.go`, `pprof1/profile.go` — конфигурация конкретной задачи;
+  - `pprof1/flow.go`, `pprof1/chat.go` — поток генерации `pprof_1` и минимальный контракт чата.
+- `internal/pipeline/` — общий движок обеих задач:
   - `article/` — модели статьи, этапа, результата;
   - `importer/` — чтение Excel и отчёт импорта;
   - `repository/` — доступ к PostgreSQL и проверка схемы;
@@ -26,12 +32,61 @@ SEO Pipeline — CLI-приложение на Go для импорта зада
   - `result/` — сборка `result.md`;
   - `validator/` — проверки без отдельной CLI-команды.
 - `migrations/` — SQL-миграции PostgreSQL.
-- `tasks/task_1/prompts/` — промпты стадий; `deepseek/` — версии для одного диалога, `demo/` — объединённый промпт ручного чата.
-- `tasks/task_1/templates/` — шаблон `result.md`.
-- `tasks/task_1/output/` — создаваемые артефакты статей.
-- `output/task1/import-reports/` — исторические и актуальный JSON-отчёты импорта.
-- `output/task1/debug/` — диагностика неудачных попыток Keys.so, Arsenkin, DeepSeek и Google.
+- `tasks/task_1/prompts/` — промпты стадий `task_1`; `deepseek/` — версии для одного диалога, `demo/` — объединённый промпт ручного чата.
+- `tasks/pprof_1/prompts/` — промпты `pprof_1` плоским списком, порядок виден по номерам.
+- `tasks/<задача>/templates/` — шаблон `result.md`.
+- `tasks/<задача>/output/` — создаваемые артефакты статей.
+- `output/task1/`, `output/pprof_1/` — отчёты импорта (`import-reports/`) и диагностика неудачных попыток Keys.so, Arsenkin, DeepSeek и Google (`debug/`). У каждой задачи свои: `reset` одной не трогает данные другой.
 - `docs/` — единый язык, ADR, аудит; `.claude/` — правила, хуки и скиллы Claude Code.
+
+## Задачи `task_1` и `pprof_1`
+
+Задача — это отдельный пайплайн со своими каталогами, промптами, схемой стадий и схемой PostgreSQL. Набор команд у задач общий: `make <task> <операция>`, где `<task>` — `task-1` или `pprof-1`.
+
+Общий у них движок (`internal/pipeline`): импорт, репозиторий, атомарная публикация артефактов, диагностика, сборка `result.md`, интеграции Keys.so, Arsenkin и Google. Различается конфигурация — она живёт в `internal/tasks/task1` и `internal/tasks/pprof1`.
+
+| Что | `task_1` | `pprof_1` |
+|---|---|---|
+| Провайдеры | Gemini + DeepSeek Web, схема выбирается на статью | **только DeepSeek Web** |
+| Схемы стадий | `config/config.yaml` + наложение `config.deepseek.yaml` | `config/pprof_1.yaml`, одна |
+| Стадии | `structure`, `article`, `info`, `review`, `fix`, `html` | `structure`, `expert`, `seo_editor`, `info`, `review`, `html` |
+| Промпты | `tasks/task_1/prompts/` | `tasks/pprof_1/prompts/` |
+| Артефакты | `tasks/task_1/output/` | `tasks/pprof_1/output/` |
+| Схема PostgreSQL | `public` | `pprof_1` |
+| Excel | `input/task_1/input.xlsx` | тот же файл |
+
+### Поток генерации `pprof_1`: три чата
+
+Границы между чатами значимы: первое сообщение каждого просит провайдера начать новую беседу, поэтому истории не смешиваются.
+
+```text
+Чат 1   structure                                  → generated/structure.txt
+Чат 2   1_expert → 2_seo_editor → info → 3_review
+          ↓          ↓             ↓       ↓
+        article.txt  review.txt    метаданные  fixed_article.txt
+Чат 3   4_html                                     → article.html
+                                                   → result.md
+```
+
+Внутри чата 2 каждое следующее сообщение опирается на историю: промпты так и написаны и статью повторно не передают. Отдельного шага `fix` у `pprof_1` нет — промпт `3_review` возвращает уже исправленную статью, а перелинковку делает `4_html`.
+
+Чат 2 неделим. Браузерная беседа не переживает завершения процесса, поэтому продолжить её посередине нечем: все четыре артефакта публикуются одним commit, а команды `article`, `info`, `review` и `fix` прогоняют весь чат целиком.
+
+### Промпты `pprof_1`
+
+```text
+tasks/pprof_1/prompts/
+  article.txt        базовый промпт статьи — артефакт и документ Google, в модель НЕ уходит
+  keywords.txt       резервный подбор запросов для prepare
+  structure.txt      чат 1
+  1_expert.txt       чат 2: статью пишет практикующий специалист по структуре
+  2_seo_editor.txt   чат 2: SEO-редактура ключами и LSI
+  info.txt           чат 2: метаданные по статье из этого же чата
+  3_review.txt       чат 2: ревью, возвращающее исправленную статью
+  4_html.txt         чат 3: разметка и перелинковка
+```
+
+**Базовый `article.txt` в модель не отправляется.** Он по-прежнему собирается целиком из входных данных и research, сохраняется в `prompts/article_prompt.txt` и выгружается в Google Docs — в тот же документ `Промт: <заголовок>`, что и раньше. Текст статьи пишет стадия `expert`.
 
 ## Требования и конфигурация
 
@@ -41,13 +96,14 @@ SEO Pipeline — CLI-приложение на Go для импорта зада
 
 | Переменная | Назначение |
 |---|---|
-| `DATABASE_URL` | Подключение к основной PostgreSQL. |
+| `DATABASE_URL` | Подключение к основной PostgreSQL. Общее для задач: разводит их `search_path` из профиля, а не отдельный DSN. |
 | `APP_ENV` | Окружение; dry-run разрешён только для `local` и `test`. |
 | `DRY_RUN_DATABASE_URL` | Отдельная БД dry-run; по умолчанию `seo_dry_run` на `localhost:5433`. |
-| `TEST_DATABASE_URL` | БД для тестов `internal/tasks/task1/repository`. Без неё 15 тестов молча пропускаются, а `make test` остаётся зелёным. |
-| `INPUT_FILE_PATH` | Excel импорта; по умолчанию `input/task_1/input.xlsx`. |
-| `OUTPUT_DIR` | Каталог артефактов; по умолчанию `tasks/task_1/output`. |
-| `LLM_MODE` | Режим маршрутизации: пусто или `gemini` — обычная схема, `deepseek` — все стадии через DeepSeek Web. |
+| `TEST_DATABASE_URL` | БД для тестов `internal/pipeline/repository`. Без неё 15 тестов молча пропускаются, а `make test` остаётся зелёным. |
+| `INPUT_FILE_PATH` | Excel импорта `task_1`; по умолчанию `input/task_1/input.xlsx`. |
+| `OUTPUT_DIR` | Каталог артефактов `task_1`; по умолчанию `tasks/task_1/output`. |
+| `PPROF_1_*` | Точечное переопределение `pprof_1`: `PPROF_1_OUTPUT_DIR`, `PPROF_1_INPUT_FILE_PATH`, `PPROF_1_DATABASE_URL`, `PPROF_1_DRY_RUN_DATABASE_URL`. |
+| `LLM_MODE` | Режим маршрутизации `task_1`: пусто или `gemini` — обычная схема, `deepseek` — все стадии через DeepSeek Web. На `pprof_1` не влияет: у него одна схема. |
 | `GEMINI_API_KEY`, `GEMINI_MODEL` | Доступ и модель Gemini. |
 | `OPENROUTER_API_KEY`, `OPENROUTER_MODEL` | Доступ и модель OpenRouter. Провайдер объявлен в `config/config.yaml`, но ни одной стадии по умолчанию не назначен. |
 | `KEYS_SO_EMAIL`, `KEYS_SO_PASSWORD` | Доступ к Keys.so. |
@@ -84,13 +140,182 @@ make task-1 import
 
 Для безопасной проверки всего pipeline без внешних сервисов и платных API используйте `make task-1 dry-run`.
 
+**Перед первым запуском `pprof_1`** нужно один раз создать его схему PostgreSQL и применить в неё миграции — автоматического migration runner в проекте нет:
+
+```bash
+docker exec -i seo-postgres psql -U seo -d seo -c 'CREATE SCHEMA IF NOT EXISTS pprof_1'
+for f in migrations/*.up.sql; do
+  docker exec -i seo-postgres psql -U seo -d seo -c 'SET search_path TO pprof_1' -f - < "$f"
+done
+```
+
+То же самое понадобится в базе dry-run на `localhost:5433`, если планируется `make pprof-1 dry-run`. Пока схемы нет, любая команда `pprof-1` останавливается на проверке схемы — это ожидаемо и безопасно.
+
 ## Makefile
 
-Makefile — короткая оболочка над существующим CLI, командами Go и Docker Compose. Все операции первой задачи запускаются через единый namespace: `make task-1 <operation> [аргумент]`.
+Makefile — короткая оболочка над существующим CLI, командами Go и Docker Compose. Операции запускаются через namespace задачи: `make <task> <operation> [аргумент]`, где `<task>` — `task-1` или `pprof-1`. Рецепт у задач один, поэтому набор команд, разбор аргументов и тексты ошибок у них совпадают.
 
-`review` и `fix` выполняются в одном LLM-чате: `fix` вторым сообщением опирается на историю — статью и ответ ревью — и повторно их не получает. Это уменьшает размер запроса и снижает вероятность обрыва генерации. При отдельном запуске `fix` история восстанавливается из сохранённых `article.txt` и `review.txt` без дополнительного обращения к модели.
+Вход в сервисы вынесен из задач и стал общим: `make login deepseek` и `make login google`. Прежние формы `make <task> deepseek-login` и `make <task> google-login` сохранены как совместимые алиасы. У Keys.so и Arsenkin ручного входа нет — они логинятся автоматически по `KEYS_SO_*` и `ARSENKIN_*` из `.env`, и `make login keysso` отвечает именно этим.
+
+В `task_1` `review` и `fix` выполняются в одном LLM-чате: `fix` вторым сообщением опирается на историю — статью и ответ ревью — и повторно их не получает. Это уменьшает размер запроса и снижает вероятность обрыва генерации. При отдельном запуске `fix` история восстанавливается из сохранённых `article.txt` и `review.txt` без дополнительного обращения к модели.
 
 Для `prepare`, `generate`, `article`, `info`, `review`, `fix`, `html` и `result` действует общее правило: без ID команда последовательно обрабатывает по внутреннему `articles.id` все статьи, которым по состоянию PostgreSQL нужен этот этап; с ID — только указанную статью. Нулевой, отрицательный и некорректный ID отклоняется до запуска. Ошибка одной статьи в batch фиксируется в её статусе и логах, остальные статьи продолжают обрабатываться, а итоговый код остаётся ненулевым.
+
+### Шпаргалка: все команды целиком
+
+Без плейсхолдеров, копируются как есть. `37` и `45` — примеры `external_id` из Excel.
+
+Пометки: **$** — тратит деньги на LLM, **→** — ходит во внешний сервис (Keys.so, Arsenkin, Google), **!** — необратимо.
+
+#### `task_1`
+
+```bash
+# Импорт и сверка
+make task-1 import                  # весь Excel
+make task-1 import 10               # только первые 10 новых строк
+make task-1 import-check            # сверить импорт с Excel
+make task-1 import-check 37         # сверить одну статью
+
+# Сбор research                     →
+make task-1 prepare                 # все статьи без research
+make task-1 prepare 37              # одна статья
+
+# Генерация                         $
+make task-1 generate                # все статьи, которым нужна генерация
+make task-1 generate 37             # одна статья
+make task-1 article                 # article + info одной операцией
+make task-1 article 37
+make task-1 info                    # то же самое, второе имя
+make task-1 info 37
+make task-1 review                  # ревью готовой статьи
+make task-1 review 37
+make task-1 fix                     # правки по ревью, продолжает тот же чат
+make task-1 fix 37
+make task-1 html                    # HTML из исправленной статьи
+make task-1 html 37
+
+# Полный прогон                     $ →
+make task-1 run                     # все незавершённые статьи, с возобновлением
+make task-1 run 37                  # одна статья
+make task-1 run plan                # где возобновится, ничего не запуская
+make task-1 run plan 37
+make task-1 retry                   # снять ошибку и прогнать
+make task-1 retry 37
+make task-1 regenerate 37           # пересоздать статью целиком, research сохраняется
+
+# Сборка результата
+make task-1 result                  # собрать result.md всем, кому нужно
+make task-1 result 37               # одной статье
+
+# DEMO для ручного прогона          $
+make task-1 demo-generate           # пересобрать DEMO всем статьям
+make task-1 demo-generate 37        # одной статье
+
+# Диагностика
+make task-1 errors                  # статьи с текущей сохранённой ошибкой
+make task-1 errors 37               # по одной статье
+make task-1 dry-run                 # офлайн-прогон без внешних сервисов и денег
+
+# Google Docs                       →
+make task-1 google-publish          # промпты всех статей, у которых он сохранён
+make task-1 google-publish 45       # одной статьи
+
+# Очистка                           !
+make task-1 clear 37                # вернуть одну статью к состоянию после импорта
+make task-1 reset                   # стереть всё состояние task_1
+```
+
+#### `pprof_1`
+
+Перед первым запуском — один раз создать схему PostgreSQL (см. «Первый локальный запуск»).
+
+```bash
+# Импорт и сверка
+make pprof-1 import                 # весь Excel (файл общий с task_1)
+make pprof-1 import 10              # только первые 10 новых строк
+make pprof-1 import-check           # сверить импорт с Excel
+make pprof-1 import-check 37        # сверить одну статью
+
+# Сбор research                     →
+make pprof-1 prepare                # все статьи без research
+make pprof-1 prepare 37             # одна статья
+
+# Генерация                         $
+make pprof-1 generate               # полный прогон: у pprof_1 это то же, что run
+make pprof-1 generate 37
+make pprof-1 article                # чат 2 целиком: expert → seo_editor → info → review
+make pprof-1 article 37
+make pprof-1 info                   # то же самое, чат 2 целиком
+make pprof-1 info 37
+make pprof-1 review                 # то же самое, чат 2 целиком
+make pprof-1 review 37
+make pprof-1 fix                    # то же самое, чат 2 целиком
+make pprof-1 fix 37
+make pprof-1 html                   # чат 3: разметка и перелинковка
+make pprof-1 html 37
+
+# Полный прогон                     $ →
+make pprof-1 run                    # все незавершённые статьи, с возобновлением
+make pprof-1 run 37                 # одна статья
+make pprof-1 run plan               # где возобновится, ничего не запуская
+make pprof-1 run plan 37
+make pprof-1 retry                  # снять ошибку и прогнать
+make pprof-1 retry 37
+make pprof-1 regenerate 37          # пересоздать статью целиком, research сохраняется
+
+# Сборка результата
+make pprof-1 result                 # собрать result.md всем, кому нужно
+make pprof-1 result 37              # одной статье
+
+# Диагностика
+make pprof-1 errors                 # статьи с текущей сохранённой ошибкой
+make pprof-1 errors 37              # по одной статье
+make pprof-1 dry-run                # офлайн-прогон; требует схемы pprof_1 на 5433
+
+# Google Docs                       →
+make pprof-1 google-publish         # промпты всех статей, у которых он сохранён
+make pprof-1 google-publish 45      # одной статьи
+
+# Очистка                           !
+make pprof-1 clear 37               # вернуть одну статью к состоянию после импорта
+make pprof-1 reset                  # стереть состояние только pprof_1
+
+# Не поддерживается
+make pprof-1 demo-generate          # ошибка: DEMO собран вокруг ручного чата task_1
+```
+
+`article`, `info`, `review` и `fix` у `pprof_1` — четыре имени одного действия: каждая прогоняет чат 2 целиком, то есть четыре обращения к модели. Гранулярности меньше чата нет.
+
+#### Общие команды
+
+```bash
+# Вход в сервисы                    →
+make login deepseek                 # ручной вход в DeepSeek, откроет браузер
+make login google                   # ручной вход в Google, откроет браузер
+make task-1 deepseek-login          # алиас make login deepseek
+make task-1 google-login            # алиас make login google
+make pprof-1 deepseek-login         # тот же алиас
+make pprof-1 google-login           # тот же алиас
+
+# PostgreSQL
+make docker-up                      # поднять оба сервиса и дождаться
+make docker-start                   # то же самое
+make docker-stop                    # остановить контейнеры
+make docker-restart                 # перезапустить
+make docker-ps                      # состояние сервисов
+make docker-logs                    # следить за логами
+make docker-down                    # удалить контейнеры и сеть, volumes сохраняются
+
+# Проверки и сборка
+make test                           # go test ./...
+make test-race                      # go test -race ./...
+make fmt                            # go fmt ./...
+make vet                            # go vet ./...
+make lint                           # golangci-lint
+make lint-fix                       # golangci-lint с автоправками
+make build                          # bin/seo-pipeline
+make help                           # короткий список команд
+```
 
 ### Команды приложения
 
@@ -115,9 +340,9 @@ Makefile — короткая оболочка над существующим C
 | `task-1 fix` | Исправляет статьи с готовым review без fixed article, продолжая чат ревью. | Необязательный ID. | `make task-1 fix` или `make task-1 fix 37` | `go run ./cmd/seo-pipeline task-1 fix [external_id]` |
 | `task-1 html` | Создаёт отсутствующий HTML из готовой fixed article. | Необязательный ID. | `make task-1 html` или `make task-1 html 37` | `go run ./cmd/seo-pipeline task-1 html [external_id]` |
 | `task-1 result` | Собирает отсутствующий `result.md` и завершает статью. | Необязательный ID. | `make task-1 result` или `make task-1 result 37` | `go run ./cmd/seo-pipeline task-1 result [external_id]` |
-| `task-1 google-login` | Удаляет сохранённый профиль, открывает видимый Chromium для ручного входа в Google и сохраняет новый persistent profile. | Нет. | `make task-1 google-login` | `go run ./cmd/seo-pipeline task-1 google-login` |
-| `task-1 google-publish` | Публикует уже сохранённый промпт статьи в Google Docs и запоминает адрес документа для `result.md`. LLM, Keys.so и Arsenkin не вызываются. | **Обязательный** `external_id`. | `make task-1 google-publish 45` | `go run ./cmd/seo-pipeline task-1 google-publish <external_id>` |
-| `task-1 deepseek-login` | Удаляет сохранённый профиль, открывает Chromium для ручного входа в DeepSeek и сохраняет новый persistent profile. | Нет. | `make task-1 deepseek-login` | `go run ./cmd/seo-pipeline task-1 deepseek-login` |
+| `login google` | Удаляет сохранённый профиль, открывает видимый Chromium для ручного входа в Google и сохраняет новый persistent profile. Задаче не принадлежит. | Нет. | `make login google` | `go run ./cmd/seo-pipeline login google` |
+| `task-1 google-publish` | Публикует уже сохранённый промпт статьи в Google Docs и запоминает адрес документа для `result.md`. LLM, Keys.so и Arsenkin не вызываются. Без ID обрабатывает все статьи, у которых промпт сохранён. | Необязательный `external_id`. | `make task-1 google-publish 45` или `make task-1 google-publish` | `go run ./cmd/seo-pipeline task-1 google-publish [external_id]` |
+| `login deepseek` | Удаляет сохранённый профиль, открывает Chromium для ручного входа в DeepSeek и сохраняет новый persistent profile. Задаче не принадлежит. | Нет. | `make login deepseek` | `go run ./cmd/seo-pipeline login deepseek` |
 
 Отдельной CLI-операции `structure` нет: структура создаётся внутри `generate`.
 
@@ -153,7 +378,14 @@ Makefile — короткая оболочка над существующим C
 
 ## CLI без Makefile
 
-CLI принимает группу `task-1`; совместимая форма `task_1` также поддерживается. `<external_id>` — положительное значение колонки `id` из Excel.
+CLI принимает имя задачи первым аргументом: `task-1` или `pprof-1`; подчёркнутые формы `task_1` и `pprof_1` тоже поддерживаются. `<external_id>` — положительное значение колонки `id` из Excel.
+
+Вход в сервисы живёт вне задач:
+
+```bash
+go run ./cmd/seo-pipeline login deepseek
+go run ./cmd/seo-pipeline login google
+```
 
 ```bash
 go run ./cmd/seo-pipeline task-1 import
@@ -274,7 +506,7 @@ make task-1 deepseek-login
 
 Если проверку не прошли за отведённое время или окно закрыли, операция останавливается с ошибкой `DeepSeek requires manual captcha verification`. Автоматических повторов против капчи не делается.
 
-### Два режима LLM
+### Два режима LLM (`task_1`)
 
 Провайдеры внутри одной статьи не смешиваются. Режим выбирается переменной `LLM_MODE` при запуске:
 
@@ -357,6 +589,8 @@ https://docs.google.com/document/d/AbC123/edit
 
 Раздел выводится всегда. Если публикация не проходила или не удалась, он остаётся на месте с пустым значением — состав разделов `result.md` не зависит от того, дошла ли публикация. Перед сборкой `result.md` пайплайн дожидается очереди публикаций: генерация к этому моменту закончена, задерживать нечего. Если ссылка появилась позже, вернуть её в файл можно повторной сборкой — `make task-1 result <external_id>`.
 
+**В `pprof_1` публикуется тот же базовый промпт статьи.** Он собирается из входных данных и research, сохраняется в `prompts/article_prompt.txt` и уходит в тот же документ `Промт: <заголовок>`, но в модель не отправляется: текст статьи пишет стадия `expert`. Очередь публикации у задач общая — за profile-каталогом Chromium держится `flock`, и вторая очередь конфликтовала бы с первой.
+
 **Публикация не задерживает генерацию.** Она уходит в отдельную goroutine сразу после сохранения промпта, а стадия `info` продолжается параллельно. Задания выполняются по одному — за профилем держится `flock`. Перед выходом команда дожидается очереди, поэтому фоновых Chromium после завершения не остаётся; отмена по `Ctrl+C` доходит и до публикации. Ошибка публикации не роняет генерацию: за неё уже заплачено, и в статус статьи она не попадает.
 
 ### Run, retry и regenerate
@@ -401,7 +635,7 @@ make task-1 regenerate 57 # пересоздать одну с нуля
 - статус возвращается в `pending`, `current_step` и `error_message` — в `NULL`;
 - каталог статьи целиком, вместе с `prepare/`, `logs/`, `prompts/`, `generated/`, `DEMO/`, `article.html` и `result.md`.
 
-Логи прошлых прогонов удаляются вместе с остальным намеренно. У ни разу не запускавшейся статьи каталога нет вовсе, а уцелевший `logs/demo-generate.log` со строкой `status=completed` описывал бы состояние, которого после очистки уже нет. Если история прогонов нужнее — это одна строка в `clearKeepsSubdirectories` (`internal/tasks/task1/output/clear.go`), логика не меняется.
+Логи прошлых прогонов удаляются вместе с остальным намеренно. У ни разу не запускавшейся статьи каталога нет вовсе, а уцелевший `logs/demo-generate.log` со строкой `status=completed` описывал бы состояние, которого после очистки уже нет. Если история прогонов нужнее — это одна строка в `clearKeepsSubdirectories` (`internal/pipeline/output/clear.go`), логика не меняется.
 
 Сохраняется место статьи в базе: строка `articles` с прежними `id` и `external_id` и её `article_inputs`. Повторный импорт после очистки не нужен — статью сразу берёт `make task-1 run <external_id>`.
 
@@ -424,6 +658,8 @@ make task-1 regenerate 57 # пересоздать одну с нуля
 ```bash
 make task-1 dry-run
 ```
+
+Для второй задачи — `make pprof-1 dry-run`. Он идёт в схему `pprof_1` базы на `localhost:5433`, поэтому её нужно там создать заранее так же, как в основной базе.
 
 Точный эквивалент без Makefile:
 
@@ -477,7 +713,7 @@ Dry-run делает две вещи.
 - `html_generation`;
 - `final_file_assembly`.
 
-Оба списка закреплены `CHECK`-ограничениями в `migrations/000001_init_schema.up.sql`. Новый этап требует новой миграции и правки `expectedSchema` в `internal/tasks/task1/repository/schema.go`.
+Оба списка закреплены `CHECK`-ограничениями в `migrations/000001_init_schema.up.sql`. Новый этап требует новой миграции и правки `expectedSchema` в `internal/pipeline/repository/schema.go`.
 
 При `completed` этап равен `NULL` — это тоже ограничение уровня БД. При ошибке сохраняются текущий этап и `error_message`.
 
@@ -620,11 +856,21 @@ make docker-up
 go run ./cmd/seo-pipeline task-1 import
 ```
 
-Если нужно очистить данные, не трогая контейнеры и схему, используйте `make task-1 reset`, а для одной статьи — `make task-1 clear <external_id>`.
+Если нужно очистить данные, не трогая контейнеры и схему, используйте `make <task> reset`, а для одной статьи — `make <task> clear <external_id>`. Обе команды работают только в схеме своей задачи и данные другой не трогают.
+
+### Схема на задачу
+
+Изоляция задач в PostgreSQL держится на `search_path`: `task_1` работает в `public`, `pprof_1` — в схеме `pprof_1`. Профиль задачи дописывает `search_path` в `DATABASE_URL`, поэтому отдельный DSN не нужен, а `public` возвращается нетронутым — подключение `task_1` не изменилось. Имя схемы проверяется до подстановки в строку подключения и берётся только из профиля.
+
+Таблицы, миграции и `expectedSchema` у задач одни и те же — различается только схема, в которой они лежат. Поэтому новая задача не требует ни миграции, ни правки кода схемы: достаточно создать схему и применить в неё существующие `migrations/*.up.sql` (см. «Первый локальный запуск»).
 
 ## Текущие ограничения
 
-- Реализован только `task_1`.
+- `pprof_1` работает только через DeepSeek Web: Gemini и другие провайдеры ему не настроены.
+- В `pprof_1` `article`, `info`, `review` и `fix` — четыре имени одного действия: чат 2 неделим и прогоняется целиком, поэтому отдельно переделать только ревью нельзя.
+- `demo-generate` в `pprof_1` не поддерживается.
+- Слотов артефактов пять, а текстов у `pprof_1` шесть: `review.txt` занят статьёй после SEO-редактуры, а не списком замечаний. Схема БД ради этого не менялась.
+- Схема PostgreSQL новой задачи создаётся руками, как и миграции.
 - Импорт возобновляемый: существующие ID пропускаются без обновления, а необязательный лимит считается только по новым валидным статьям.
 - `article` и `info` являются двумя именами одной объединённой операции.
 - Отдельной CLI-команды только для `structure` нет.

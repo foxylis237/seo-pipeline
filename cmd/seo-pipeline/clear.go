@@ -9,9 +9,9 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/article"
-	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/output"
-	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/repository"
+	"github.com/foxylis237/seo-pipeline/internal/pipeline/article"
+	"github.com/foxylis237/seo-pipeline/internal/pipeline/output"
+	"github.com/foxylis237/seo-pipeline/internal/pipeline/repository"
 )
 
 // clearConfirmationWord — слово подтверждения очистки одной статьи. Своё, а не общее с reset:
@@ -34,6 +34,9 @@ type clearArtifactWriter interface {
 
 // clearOptions собирает окружение команды: куда печатать и откуда читать подтверждение.
 type clearOptions struct {
+	// TaskCommand подставляется в подсказку следующего шага: у pprof-1 она обязана называть
+	// pprof-1, а не task-1.
+	TaskCommand string
 	// AssumeYes — флаг --yes: подтверждение без вопроса, для автоматизации.
 	AssumeYes bool
 	// Interactive сообщает, что In — терминал. Вычисляется вызывающим, чтобы команда
@@ -108,7 +111,7 @@ func runClear(
 
 	fmt.Fprintln(options.Out)
 	fmt.Fprintf(options.Out, "Статья external_id=%s очищена: состояние pending, импорт сохранён.\n", externalID)
-	fmt.Fprintf(options.Out, "Дальше: make task-1 run %s\n", externalID)
+	fmt.Fprintf(options.Out, "Дальше: make %s run %s\n", options.TaskCommand, externalID)
 	return nil
 }
 

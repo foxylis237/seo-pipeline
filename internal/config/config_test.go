@@ -7,6 +7,12 @@ import (
 	"testing"
 )
 
+// testTaskDefaults повторяет профиль task_1: тесты проверяют исторические дефолты, и они
+// обязаны остаться прежними.
+func testTaskDefaults() TaskDefaults {
+	return TaskDefaults{InputPath: "input/task_1/input.xlsx", OutputDir: "tasks/task_1/output"}
+}
+
 func TestEnvFilePathUsesConfiguredPath(t *testing.T) {
 	t.Setenv("ENV_FILE", filepath.Join("config", "pipeline.env"))
 
@@ -31,7 +37,7 @@ func TestLoadUsesExistingEnvFile(t *testing.T) {
 	unsetEnv(t, "DATABASE_URL")
 	t.Setenv("ENV_FILE", envPath)
 
-	cfg, err := Load()
+	cfg, err := Load(testTaskDefaults())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +85,7 @@ func TestLoadReportsSearchedPathWhenEnvIsMissing(t *testing.T) {
 	missingPath := filepath.Join(t.TempDir(), "missing.env")
 	t.Setenv("ENV_FILE", missingPath)
 
-	_, err := Load()
+	_, err := Load(testTaskDefaults())
 	if err == nil {
 		t.Fatal("Load() error = nil, want missing .env error")
 	}
@@ -97,7 +103,7 @@ func TestLoadDryRunUsesLocalDefaultsWhenEnvIsMissing(t *testing.T) {
 	unsetEnv(t, "DRY_RUN_DATABASE_URL")
 	unsetEnv(t, "INPUT_FILE_PATH")
 
-	cfg, err := LoadDryRun()
+	cfg, err := LoadDryRun(testTaskDefaults())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +151,7 @@ func TestLoadPreservesSystemEnvironment(t *testing.T) {
 	t.Setenv("ENV_FILE", envPath)
 	t.Setenv("DATABASE_URL", "postgres://from-system")
 
-	cfg, err := Load()
+	cfg, err := Load(testTaskDefaults())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +168,7 @@ func TestLoadErrorDoesNotExposeSecrets(t *testing.T) {
 	}
 	t.Setenv("ENV_FILE", envPath)
 
-	_, err := Load()
+	_, err := Load(testTaskDefaults())
 	if err == nil {
 		t.Fatal("Load() error = nil, want malformed .env error")
 	}
@@ -179,7 +185,7 @@ func TestLoadParsesArsenkinHeadless(t *testing.T) {
 	t.Setenv("ENV_FILE", envPath)
 	t.Setenv("ARSENKIN_HEADLESS", "false")
 
-	cfg, err := Load()
+	cfg, err := Load(testTaskDefaults())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -219,4 +225,80 @@ func unsetEnv(t *testing.T, name string) {
 			_ = os.Unsetenv(name)
 		}
 	})
+}
+
+// Переменная без префикса принадлежит задаче без префикса. Иначе один OUTPUT_DIR в .env увёл
+// бы артефакты обеих задач в общий каталог, и изоляция задач держалась бы на честном слове.
+func TestTaskWithPrefixIgnoresUnprefixedPaths(t *testing.T) {
+	envPath := filepath.Join(t.TempDir(), "pipeline.env")
+	if err := os.WriteFile(envPath, []byte("DATABASE_URL=postgres://from-file\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ENV_FILE", envPath)
+	t.Setenv("OUTPUT_DIR", "tasks/task_1/output")
+	t.Setenv("INPUT_FILE_PATH", "input/task_1/input.xlsx")
+	unsetEnv(t, "PPROF_1_OUTPUT_DIR")
+	unsetEnv(t, "PPROF_1_INPUT_FILE_PATH")
+
+	defaults := TaskDefaults{
+		InputPath: "input/shared/input.xlsx",
+		OutputDir: "tasks/pprof_1/output",
+		EnvPrefix: "PPROF_1_",
+	}
+	cfg, err := Load(defaults)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.OutputDir != defaults.OutputDir {
+		t.Fatalf("OutputDir = %q, want %q: переменная без префикса протекла в другую задачу", cfg.OutputDir, defaults.OutputDir)
+	}
+	if cfg.InputFilePath != defaults.InputPath {
+		t.Fatalf("InputFilePath = %q, want %q", cfg.InputFilePath, defaults.InputPath)
+	}
+}
+
+// Префиксованная переменная перекрывает профиль — это и есть точечное переопределение задачи.
+func TestPrefixedEnvOverridesTaskDefaults(t *testing.T) {
+	envPath := filepath.Join(t.TempDir(), "pipeline.env")
+	if err := os.WriteFile(envPath, []byte("DATABASE_URL=postgres://from-file\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ENV_FILE", envPath)
+	t.Setenv("PPROF_1_OUTPUT_DIR", "tasks/pprof_1/custom")
+	t.Setenv("PPROF_1_DATABASE_URL", "postgres://pprof-host/seo")
+	t.Setenv("DATABASE_URL", "postgres://shared-host/seo")
+
+	cfg, err := Load(TaskDefaults{
+		InputPath: "input/shared/input.xlsx",
+		OutputDir: "tasks/pprof_1/output",
+		EnvPrefix: "PPROF_1_",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.OutputDir != "tasks/pprof_1/custom" {
+		t.Fatalf("OutputDir = %q, want tasks/pprof_1/custom", cfg.OutputDir)
+	}
+	if cfg.DatabaseURL != "postgres://pprof-host/seo" {
+		t.Fatalf("DatabaseURL = %q, want postgres://pprof-host/seo", cfg.DatabaseURL)
+	}
+}
+
+// Общий DATABASE_URL — намеренное исключение: сервер у задач один, разводит их search_path.
+func TestTaskWithoutOwnDatabaseURLUsesSharedOne(t *testing.T) {
+	envPath := filepath.Join(t.TempDir(), "pipeline.env")
+	if err := os.WriteFile(envPath, []byte("APP_ENV=local\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ENV_FILE", envPath)
+	t.Setenv("DATABASE_URL", "postgres://shared-host/seo")
+	unsetEnv(t, "PPROF_1_DATABASE_URL")
+
+	cfg, err := Load(TaskDefaults{OutputDir: "tasks/pprof_1/output", EnvPrefix: "PPROF_1_"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.DatabaseURL != "postgres://shared-host/seo" {
+		t.Fatalf("DatabaseURL = %q, want postgres://shared-host/seo", cfg.DatabaseURL)
+	}
 }

@@ -11,13 +11,12 @@ import (
 
 	"github.com/foxylis237/seo-pipeline/internal/config"
 	"github.com/foxylis237/seo-pipeline/internal/llm"
-	"github.com/foxylis237/seo-pipeline/internal/tasks/task1/generation"
+	"github.com/foxylis237/seo-pipeline/internal/pipeline/generation"
+	"github.com/foxylis237/seo-pipeline/internal/tasks"
 )
 
-const (
-	baseLLMConfigPath     = "config/config.yaml"
-	deepseekLLMConfigPath = "config/config.deepseek.yaml"
-)
+// Пути к схемам стадий приходят из профиля задачи: у task_1 это config/config.yaml плюс
+// config/config.deepseek.yaml, у pprof_1 — его собственная пара.
 
 // stageConfigs — обе схемы стадий сразу.
 //
@@ -77,7 +76,7 @@ func (c stageConfigs) stageSets() []config.LLMConfig {
 // requireCredentials выключается проверкой перед дорогим прогоном: ей нужна схема Gemini даже
 // там, где ключа нет, — чтобы сказать «Gemini недоступен, потому что ...», а не упасть.
 // Доступность при этом решает не загрузка схемы, а llmResolver.
-func loadStageConfigs(logger *slog.Logger, requireCredentials bool) (stageConfigs, error) {
+func loadStageConfigs(profile tasks.Profile, logger *slog.Logger, requireCredentials bool) (stageConfigs, error) {
 	mode := strings.ToLower(strings.TrimSpace(os.Getenv("LLM_MODE")))
 	switch mode {
 	case "", "gemini", "deepseek":
@@ -85,18 +84,24 @@ func loadStageConfigs(logger *slog.Logger, requireCredentials bool) (stageConfig
 		return stageConfigs{}, fmt.Errorf("неподдерживаемый LLM_MODE %q; допустимо: gemini, deepseek", mode)
 	}
 
-	deepseek, err := config.LoadLLMConfigWithOverlay(baseLLMConfigPath, deepseekLLMConfigPath, requireCredentials)
+	deepseek, err := loadTaskScheme(profile, requireCredentials)
 	if err != nil {
 		return stageConfigs{}, err
 	}
 	configs := stageConfigs{deepseek: deepseek}
+	// Пустой overlay означает задачу с единственной схемой стадий: выбирать не из чего, и
+	// схему Gemini для неё не грузим.
+	if profile.LLMOverlayPath == "" {
+		configs.geminiAbsenceReason = "у задачи " + profile.Name + " одна схема стадий"
+		return configs, nil
+	}
 	if mode == "deepseek" {
 		configs.geminiAbsenceReason = "LLM_MODE=deepseek"
-		logger.Info("LLM mode is pinned to DeepSeek-only", "config", deepseekLLMConfigPath, "reason", configs.geminiAbsenceReason)
+		logger.Info("LLM mode is pinned to DeepSeek-only", "config", profile.LLMOverlayPath, "reason", configs.geminiAbsenceReason)
 		return configs, nil
 	}
 
-	gemini, err := loadLLMScheme(baseLLMConfigPath, requireCredentials)
+	gemini, err := loadLLMScheme(profile, requireCredentials)
 	if err != nil {
 		// Отсутствие ключа или сломанная схема Gemini не должны останавливать работу:
 		// DeepSeek-only остаётся рабочим режимом.
@@ -108,11 +113,19 @@ func loadStageConfigs(logger *slog.Logger, requireCredentials bool) (stageConfig
 	return configs, nil
 }
 
-func loadLLMScheme(path string, requireCredentials bool) (config.LLMConfig, error) {
-	if requireCredentials {
-		return config.LoadLLMConfig(path)
+// loadTaskScheme грузит схему задачи: с наложением, если оно у неё есть, и без него, если
+// схема одна. Набор обязательных стадий берётся из профиля — он у задач разный.
+func loadTaskScheme(profile tasks.Profile, requireCredentials bool) (config.LLMConfig, error) {
+	if profile.LLMOverlayPath == "" {
+		return config.LoadLLMConfigForStages(profile.LLMConfigPath, profile.LLMStages, requireCredentials)
 	}
-	return config.LoadLLMConfigForDryRun(path)
+	return config.LoadLLMConfigWithOverlayForStages(
+		profile.LLMConfigPath, profile.LLMOverlayPath, profile.LLMStages, requireCredentials)
+}
+
+// loadLLMScheme грузит базовую схему задачи без наложения.
+func loadLLMScheme(profile tasks.Profile, requireCredentials bool) (config.LLMConfig, error) {
+	return config.LoadLLMConfigForStages(profile.LLMConfigPath, profile.LLMStages, requireCredentials)
 }
 
 // articleMode выбирает схему на статью и следит за доступностью Gemini.
