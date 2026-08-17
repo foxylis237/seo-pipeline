@@ -1,13 +1,10 @@
 package main
 
 import (
-	"bufio"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
-	"strings"
 
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/article"
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/output"
@@ -150,26 +147,7 @@ func printClearReport(
 	fmt.Fprintln(out)
 }
 
-// confirmClear получает подтверждение. Без терминала и без --yes команда отказывается
-// работать: иначе она молча читала бы пустой поток и выглядела бы зависшей.
+// confirmClear получает подтверждение очистки одной статьи.
 func confirmClear(options clearOptions) (bool, error) {
-	if options.AssumeYes {
-		fmt.Fprintln(options.Out, "Подтверждено флагом --yes.")
-		return true, nil
-	}
-	if !options.Interactive {
-		return false, fmt.Errorf("stdin не терминал: запустите clear с флагом --yes")
-	}
-	fmt.Fprintf(options.Out, "Введите %s для подтверждения: ", clearConfirmationWord)
-	answer, err := bufio.NewReader(options.In).ReadString('\n')
-	if err != nil && !errors.Is(err, io.EOF) {
-		return false, fmt.Errorf("прочитать подтверждение: %w", err)
-	}
-	answer = strings.TrimSpace(answer)
-	// Пустой ответ на сразу закрытом потоке — это не отказ пользователя, а отсутствие того,
-	// кто мог бы ответить.
-	if answer == "" && errors.Is(err, io.EOF) {
-		return false, fmt.Errorf("подтверждение не прочитано: запустите clear с флагом --yes")
-	}
-	return answer == clearConfirmationWord, nil
+	return confirmDestructive(clearConfirmationWord, options.AssumeYes, options.Interactive, options.In, options.Out)
 }

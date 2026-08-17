@@ -558,6 +558,12 @@ func (r *ArticleRepository) Create(
 
 // Import atomically inserts a new article and never updates an existing external_id.
 // The boolean reports whether a new article row was added.
+//
+// Входные данные пишутся не только новой статье, но и уже существующей, у которой их нет:
+// после `reset <external_id>` строка articles остаётся, а article_inputs стирается, и без
+// этого повторный импорт молча прошёл бы мимо — статья осталась бы навсегда без входных
+// данных. Существующие article_inputs при этом не трогаются (DO NOTHING): импорт по-прежнему
+// не переписывает уже импортированную статью.
 func (r *ArticleRepository) Import(ctx context.Context, input article.Input) (article.Article, bool, error) {
 	var selected article.Article
 	err := r.pool.QueryRow(ctx, `
@@ -566,12 +572,18 @@ func (r *ArticleRepository) Import(ctx context.Context, input article.Input) (ar
 			VALUES ($1, $2)
 			ON CONFLICT (external_id) DO NOTHING
 			RETURNING id, external_id, title, status, current_step, error_message, created_at, updated_at
+		), target AS (
+			SELECT id FROM created
+			UNION ALL
+			SELECT id FROM articles
+			WHERE external_id = $1 AND NOT EXISTS (SELECT 1 FROM created)
 		), saved_input AS (
 			INSERT INTO article_inputs (
 				article_id, category, header, image_slug, meta_description,
 				key_word, reference_url, author, links, professions, tags
 			)
-			SELECT id, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12 FROM created
+			SELECT id, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12 FROM target
+			ON CONFLICT (article_id) DO NOTHING
 			RETURNING article_id
 		)
 		SELECT id, external_id, title, status, current_step, error_message, created_at, updated_at

@@ -19,6 +19,21 @@ var clearArticleTables = []string{
 	"article_research",
 }
 
+// resetArticleTables перечисляет таблицы, которые очищает ResetArticleState. Тот же порядок и
+// те же таблицы, что у clear, плюс article_inputs: reset ведёт статью не к состоянию после
+// импорта, а к состоянию «импорта ещё не было», поэтому результат импорта тоже стирается.
+//
+// articles сюда не входит: строка статьи и её id переживают reset — в этом и смысл команды.
+// Список отдельный от clearArticleTables, а не производный от него: две команды с разными
+// обещаниями не должны менять состав друг друга.
+var resetArticleTables = []string{
+	"article_errors",
+	"article_outputs",
+	"article_metadata",
+	"article_research",
+	"article_inputs",
+}
+
 // ClearCount — сколько строк одной таблицы принадлежит статье.
 type ClearCount struct {
 	Table string
@@ -29,13 +44,27 @@ type ClearCount struct {
 // удалит ClearArticleState. Один список обслуживает и подсчёт, и удаление, поэтому отчёт не
 // может разойтись с тем, что команда действительно сотрёт.
 func (r *ArticleRepository) ClearArticleCounts(ctx context.Context, articleID int64) ([]ClearCount, error) {
-	selects := make([]string, 0, len(clearArticleTables))
-	for _, table := range clearArticleTables {
+	return r.articleTableCounts(ctx, clearArticleTables, articleID)
+}
+
+// ResetArticleCounts считает строки статьи по таблицам, которые удалит ResetArticleState.
+func (r *ArticleRepository) ResetArticleCounts(ctx context.Context, articleID int64) ([]ClearCount, error) {
+	return r.articleTableCounts(ctx, resetArticleTables, articleID)
+}
+
+// articleTableCounts считает строки статьи по переданному списку таблиц, сохраняя его порядок.
+func (r *ArticleRepository) articleTableCounts(
+	ctx context.Context,
+	tables []string,
+	articleID int64,
+) ([]ClearCount, error) {
+	selects := make([]string, 0, len(tables))
+	for _, table := range tables {
 		selects = append(selects, fmt.Sprintf("(SELECT COUNT(*) FROM %s WHERE article_id = $1)", table))
 	}
 	query := "SELECT " + strings.Join(selects, ", ")
 
-	rows := make([]int64, len(clearArticleTables))
+	rows := make([]int64, len(tables))
 	targets := make([]any, len(rows))
 	for index := range rows {
 		targets[index] = &rows[index]
@@ -44,8 +73,8 @@ func (r *ArticleRepository) ClearArticleCounts(ctx context.Context, articleID in
 		return nil, fmt.Errorf("посчитать строки статьи %d: %w", articleID, err)
 	}
 
-	counts := make([]ClearCount, len(clearArticleTables))
-	for index, table := range clearArticleTables {
+	counts := make([]ClearCount, len(tables))
+	for index, table := range tables {
 		counts[index] = ClearCount{Table: table, Rows: rows[index]}
 	}
 	return counts, nil
@@ -60,13 +89,28 @@ func (r *ArticleRepository) ClearArticleCounts(ctx context.Context, articleID in
 // Всё делается одной транзакцией: наполовину очищенная статья хуже неочищенной, потому что
 // пайплайн увидит research без outputs и посчитает часть этапов готовыми.
 func (r *ArticleRepository) ClearArticleState(ctx context.Context, articleID int64) error {
+	return r.deleteArticleState(ctx, clearArticleTables, articleID)
+}
+
+// ResetArticleState возвращает одну статью к состоянию «импорта ещё не было»: удаляет research,
+// metadata, outputs, историю ошибок и входные данные импорта, сбрасывает статус в pending и
+// снимает этап с ошибкой.
+//
+// От ClearArticleState отличается ровно одним: стирается ещё и article_inputs. Строка articles
+// остаётся, id и external_id сохраняются — статью ждёт повторный импорт, а не новая строка.
+func (r *ArticleRepository) ResetArticleState(ctx context.Context, articleID int64) error {
+	return r.deleteArticleState(ctx, resetArticleTables, articleID)
+}
+
+// deleteArticleState чистит переданные таблицы статьи и сбрасывает её состояние в articles.
+func (r *ArticleRepository) deleteArticleState(ctx context.Context, tables []string, articleID int64) error {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("начать очистку статьи %d: %w", articleID, err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	for _, table := range clearArticleTables {
+	for _, table := range tables {
 		if _, err := tx.Exec(ctx, "DELETE FROM "+table+" WHERE article_id = $1", articleID); err != nil {
 			return fmt.Errorf("очистить %s статьи %d: %w", table, articleID, err)
 		}

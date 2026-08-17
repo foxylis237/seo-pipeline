@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/foxylis237/seo-pipeline/internal/pipeline/article"
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/repository"
 )
 
@@ -48,6 +49,128 @@ type resetOptions struct {
 	Interactive bool
 	In          io.Reader
 	Out         io.Writer
+}
+
+// resetArticleRepository — то, что reset одной статьи требует от хранилища. Узко и намеренно
+// без методов пайплайна: команда не двигает статью по этапам, а возвращает её к импорту.
+type resetArticleRepository interface {
+	GetArticleByExternalID(ctx context.Context, externalID string) (article.Article, error)
+	ResetArticleCounts(ctx context.Context, articleID int64) ([]repository.ClearCount, error)
+	ResetArticleState(ctx context.Context, articleID int64) error
+}
+
+// resetArticleOptions собирает окружение команды: куда печатать и откуда читать подтверждение.
+type resetArticleOptions struct {
+	// TaskCommand подставляется в подсказку следующего шага: у pprof-1 она обязана называть
+	// pprof-1, а не task-1.
+	TaskCommand string
+	// AssumeYes — флаг --yes: подтверждение без вопроса, для автоматизации.
+	AssumeYes bool
+	// Interactive сообщает, что In — терминал. Вычисляется вызывающим, чтобы команда
+	// оставалась проверяемой на обычном io.Reader.
+	Interactive bool
+	In          io.Reader
+	Out         io.Writer
+}
+
+// runResetArticle возвращает одну статью к состоянию «импорта ещё не было», сохраняя её место
+// в базе: строка articles остаётся, articles.id и external_id не меняются.
+//
+// external_id — это ID из Excel, а не articles.id: команда сама находит статью и печатает оба
+// номера, чтобы сброс не ушёл в соседнюю строку из-за путаницы между ними.
+//
+// От clear отличается ровно тем, что стирает ещё и article_inputs: после clear статью можно
+// сразу запускать, после reset ей нужен повторный `import`.
+//
+// Порядок намеренный, тот же, что у сброса задачи: сначала коммит в БД, потом файлы. Сбой на
+// файлах оставляет чистую запись и лишние файлы — это чинится повторным запуском, потому что
+// команда идемпотентна. Обратный порядок оставил бы запись о research, чьи артефакты удалены.
+func runResetArticle(
+	ctx context.Context,
+	articleRepository resetArticleRepository,
+	artifacts clearArtifactWriter,
+	options resetArticleOptions,
+	logger *slog.Logger,
+	externalID string,
+) error {
+	selected, err := articleRepository.GetArticleByExternalID(ctx, externalID)
+	if err != nil {
+		return err
+	}
+
+	counts, err := articleRepository.ResetArticleCounts(ctx, selected.ID)
+	if err != nil {
+		return err
+	}
+	directory, files, err := artifacts.CountArticleArtifacts(externalID)
+	if err != nil {
+		return err
+	}
+
+	printResetArticleReport(options.Out, selected, counts, directory, files)
+
+	confirmed, err := confirmDestructive(
+		confirmationWord, options.AssumeYes, options.Interactive, options.In, options.Out)
+	if err != nil {
+		return err
+	}
+	if !confirmed {
+		fmt.Fprintln(options.Out, "Подтверждение не получено. Ничего не удалено.")
+		logger.Info("сброс статьи отменён", "stage", "confirm",
+			"article_id", selected.ID, "external_id", selected.ExternalID)
+		return nil
+	}
+
+	logger.Info("сброс статьи начат", "stage", "database",
+		"article_id", selected.ID, "external_id", selected.ExternalID,
+		"old_status", selected.Status, "old_current_step", optionalText(selected.CurrentStep))
+	if err := articleRepository.ResetArticleState(ctx, selected.ID); err != nil {
+		return err
+	}
+	logger.Info("состояние статьи сброшено", "stage", "database", "article_id", selected.ID)
+
+	removed, err := artifacts.ClearArticleArtifacts(externalID)
+	logger.Info("файлы статьи удалены", "stage", "files",
+		"article_id", selected.ID, "removed_count", len(removed), "removed", removed)
+	if err != nil {
+		return fmt.Errorf(
+			"состояние статьи external_id=%s сброшено, файлы удалены не полностью — повторите reset: %w",
+			externalID, err)
+	}
+
+	fmt.Fprintln(options.Out)
+	fmt.Fprintf(options.Out, "Статья external_id=%s сброшена: состояние pending, входные данные удалены.\n", externalID)
+	fmt.Fprintf(options.Out, "Дальше: make %s import\n", options.TaskCommand)
+	return nil
+}
+
+// printResetArticleReport показывает фактический масштаб удаления до подтверждения. Оба номера
+// печатаются рядом: аргумент команды — external_id из Excel, а не внутренний articles.id.
+func printResetArticleReport(
+	out io.Writer,
+	selected article.Article,
+	counts []repository.ClearCount,
+	directory string,
+	files int,
+) {
+	fmt.Fprintln(out)
+	fmt.Fprintf(out, "Статья external_id=%s (articles.id=%d) %q\n", selected.ExternalID, selected.ID, selected.Title)
+	fmt.Fprintf(out, "  статус %s, этап %s\n", selected.Status, optionalText(selected.CurrentStep))
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "Будет удалено безвозвратно:")
+	for _, count := range counts {
+		fmt.Fprintf(out, "    %-28s %6d\n", count.Table, count.Rows)
+	}
+	if directory == "" {
+		fmt.Fprintf(out, "    %-28s %6s\n", "каталог статьи", "нет")
+	} else {
+		fmt.Fprintf(out, "    %-28s %6d элементов\n", directory+"/", files)
+	}
+	fmt.Fprintln(out)
+	fmt.Fprintf(out, "Сохраняется: строка articles с id=%d и external_id=%s.\n",
+		selected.ID, selected.ExternalID)
+	fmt.Fprintln(out, "На диске от статьи не останется ничего, включая логи прошлых прогонов.")
+	fmt.Fprintln(out)
 }
 
 // resetTarget — каталог, содержимое которого очищает reset.
@@ -225,18 +348,26 @@ func describeDatabase(databaseURL string) string {
 	return fmt.Sprintf("база данных %s (%s)", name, parsed.Host)
 }
 
-// confirmReset получает подтверждение. Без терминала и без --yes команда отказывается
-// работать: иначе она молча читала бы пустой поток и выглядела бы зависшей.
+// confirmReset получает подтверждение сброса задачи.
 func confirmReset(options resetOptions) (bool, error) {
-	if options.AssumeYes {
-		fmt.Fprintln(options.Out, "Подтверждено флагом --yes.")
+	return confirmDestructive(confirmationWord, options.AssumeYes, options.Interactive, options.In, options.Out)
+}
+
+// confirmDestructive получает подтверждение необратимой команды. Слово подтверждения совпадает
+// с именем команды, поэтому оно же называет команду в подсказках.
+//
+// Без терминала и без --yes команда отказывается работать: иначе она молча читала бы пустой
+// поток и выглядела бы зависшей.
+func confirmDestructive(word string, assumeYes, interactive bool, in io.Reader, out io.Writer) (bool, error) {
+	if assumeYes {
+		fmt.Fprintln(out, "Подтверждено флагом --yes.")
 		return true, nil
 	}
-	if !options.Interactive {
-		return false, fmt.Errorf("stdin не терминал: запустите reset с флагом --yes")
+	if !interactive {
+		return false, fmt.Errorf("stdin не терминал: запустите %s с флагом --yes", word)
 	}
-	fmt.Fprintf(options.Out, "Введите %s для подтверждения: ", confirmationWord)
-	answer, err := bufio.NewReader(options.In).ReadString('\n')
+	fmt.Fprintf(out, "Введите %s для подтверждения: ", word)
+	answer, err := bufio.NewReader(in).ReadString('\n')
 	if err != nil && !errors.Is(err, io.EOF) {
 		return false, fmt.Errorf("прочитать подтверждение: %w", err)
 	}
@@ -245,7 +376,7 @@ func confirmReset(options resetOptions) (bool, error) {
 	// кто мог бы ответить: `< /dev/null` проходит проверку на символьное устройство, но
 	// терминалом не является. Подсказываем флаг вместо молчаливого выхода.
 	if answer == "" && errors.Is(err, io.EOF) {
-		return false, fmt.Errorf("подтверждение не прочитано: запустите reset с флагом --yes")
+		return false, fmt.Errorf("подтверждение не прочитано: запустите %s с флагом --yes", word)
 	}
-	return answer == confirmationWord, nil
+	return answer == word, nil
 }

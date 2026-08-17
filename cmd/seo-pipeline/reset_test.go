@@ -280,14 +280,24 @@ func TestRunResetRejectsUnsafeOutputDir(t *testing.T) {
 
 func TestParseCommandReset(t *testing.T) {
 	cases := []struct {
-		name      string
-		args      []string
-		assumeYes bool
-		wantError bool
+		name           string
+		args           []string
+		assumeYes      bool
+		wantExternalID string
+		wantError      bool
 	}{
 		{name: "без флага", args: []string{"seo-pipeline", "task-1", "reset"}},
 		{name: "с флагом", args: []string{"seo-pipeline", "task-1", "reset", "--yes"}, assumeYes: true},
-		{name: "позиционный аргумент", args: []string{"seo-pipeline", "task-1", "reset", "37"}, wantError: true},
+		{
+			name: "позиционный аргумент", args: []string{"seo-pipeline", "task-1", "reset", "37"},
+			wantExternalID: "37",
+		},
+		{
+			name: "аргумент с флагом", args: []string{"seo-pipeline", "task-1", "reset", "37", "--yes"},
+			assumeYes: true, wantExternalID: "37",
+		},
+		{name: "нечисловой аргумент", args: []string{"seo-pipeline", "task-1", "reset", "abc"}, wantError: true},
+		{name: "два аргумента", args: []string{"seo-pipeline", "task-1", "reset", "37", "38"}, wantError: true},
 		{name: "флаг дважды", args: []string{"seo-pipeline", "task-1", "reset", "--yes", "--yes"}, wantError: true},
 		{name: "флаг у чужой операции", args: []string{"seo-pipeline", "task-1", "run", "--yes"}, wantError: true},
 	}
@@ -308,6 +318,9 @@ func TestParseCommandReset(t *testing.T) {
 			}
 			if command.AssumeYes != testCase.assumeYes {
 				t.Fatalf("AssumeYes=%v, ожидалось %v", command.AssumeYes, testCase.assumeYes)
+			}
+			if command.ExternalID != testCase.wantExternalID {
+				t.Fatalf("ExternalID=%q, ожидалось %q", command.ExternalID, testCase.wantExternalID)
 			}
 		})
 	}
