@@ -323,7 +323,7 @@ func (r *fakePromptReader) DemoArticlePromptText(externalID string) (string, str
 	if r.demoByExternalID == nil {
 		return "", "", errors.New("промпт DEMO не сохранён")
 	}
-	return r.demoByExternalID[externalID], externalID + "/DEMO/article_prompt.txt", nil
+	return r.demoByExternalID[externalID], externalID + "/DEMO/prompts/article_prompt.txt", nil
 }
 
 func newPublishFixtures() (*fakePublishRepository, *fakePromptReader) {
@@ -589,7 +589,7 @@ func (r *fakeDemoPromptReader) DemoArticlePromptText(externalID string) (string,
 	if r.err != nil {
 		return "", "", r.err
 	}
-	return r.byExternalID[externalID], externalID + "/DEMO/article_prompt.txt", nil
+	return r.byExternalID[externalID], externalID + "/DEMO/prompts/article_prompt.txt", nil
 }
 
 // recordingPromptPublisher запоминает поставленные в очередь задания.

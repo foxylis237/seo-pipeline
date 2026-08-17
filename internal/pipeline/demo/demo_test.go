@@ -157,7 +157,10 @@ func newFixture(t *testing.T) *fixture {
 	generator := newFakeGenerator()
 	renderer := &fakeResult{rendered: "## Название\n\n```text\nКак стать логопедом\n```\n"}
 	preparer := &fakePreparer{repository: repository, collected: repository.research}
-	mergedPrompt := filepath.Join("..", "..", "..", "tasks", "task_1", "prompts", FixLinksHTMLPromptFile)
+	// Промпт берётся настоящий и общий: он один на все задачи (tasks.CommonPromptsDir), и
+	// проверять сборку на копии значило бы не заметить, что файл переехал. Путь записан
+	// строкой, а не взят из internal/tasks: движку про задачи знать нечего даже в тесте.
+	mergedPrompt := filepath.Join("..", "..", "..", "tasks", "common", "prompts", FixLinksHTMLPromptFile)
 	builder := NewBuilder(root, mergedPrompt, repository, articleoutput.NewWriter(root), renderer, generator, preparer,
 		slog.New(slog.NewTextHandler(io.Discard, nil)))
 	return &fixture{
@@ -288,9 +291,10 @@ func TestBuildReusesCompletedArticleWithoutCallingLLM(t *testing.T) {
 		t.Fatalf("LLM вызывался для готовой статьи: %v", fixture.generator.calls)
 	}
 	want := []string{
-		"article_prompt.txt", "fix_links_html_prompt.txt",
+		"fix_links_html_prompt.txt",
 		"generated/article.txt", "generated/article_info.txt", "generated/structure.txt",
-		"prepare/keysso.json", "prompts/article_info_prompt.txt", "prompts/structure_prompt.txt",
+		"prepare/keysso.json", "prompts/article_info_prompt.txt", "prompts/article_prompt.txt",
+		"prompts/structure_prompt.txt",
 		"result.md",
 	}
 	if got := fixture.demoFiles(t); !reflect.DeepEqual(got, want) {
@@ -299,7 +303,7 @@ func TestBuildReusesCompletedArticleWithoutCallingLLM(t *testing.T) {
 	for name, wantContent := range map[string]string{
 		"generated/article.txt":      "БОЕВАЯ СТАТЬЯ",
 		"generated/article_info.txt": "БОЕВАЯ ИНФОРМАЦИЯ",
-		"article_prompt.txt":         "БОЕВОЙ ПРОМПТ СТАТЬИ",
+		"prompts/article_prompt.txt": "БОЕВОЙ ПРОМПТ СТАТЬИ",
 		"generated/structure.txt":    "БОЕВАЯ СТРУКТУРА",
 	} {
 		if got := fixture.demoFile(t, name); got != wantContent {
@@ -378,7 +382,7 @@ func TestBuildGeneratesArticleAndInfoFromReusedStructure(t *testing.T) {
 	if got := fixture.demoFile(t, "generated/structure.txt"); got != "БОЕВАЯ СТРУКТУРА" {
 		t.Fatalf("структура перегенерирована: %q", got)
 	}
-	if got := fixture.demoFile(t, "article_prompt.txt"); !strings.Contains(got, "БОЕВАЯ СТРУКТУРА") ||
+	if got := fixture.demoFile(t, "prompts/article_prompt.txt"); !strings.Contains(got, "БОЕВАЯ СТРУКТУРА") ||
 		!strings.Contains(got, "логопед обучение\t1200") || !strings.Contains(got, "дефектология") {
 		t.Fatalf("промпт статьи собран без исходных данных: %q", got)
 	}
@@ -423,7 +427,7 @@ func TestBuildWritesResultAndPromptsWhenDataIsIncomplete(t *testing.T) {
 		t.Fatal("Build() = nil, want ошибку недоступной стадии")
 	}
 
-	want := []string{"article_prompt.txt", "fix_links_html_prompt.txt", "result.md"}
+	want := []string{"fix_links_html_prompt.txt", "prompts/article_prompt.txt", "result.md"}
 	if got := fixture.demoFiles(t); !reflect.DeepEqual(got, want) {
 		t.Fatalf("состав DEMO = %v, want %v", got, want)
 	}
@@ -473,7 +477,7 @@ func TestBuildRunsPrepareOnceWhenResearchIsMissing(t *testing.T) {
 	if got := fixture.demoFile(t, "prompts/structure_prompt.txt"); !strings.Contains(got, "H2 Кто такой логопед") {
 		t.Fatalf("промпт структуры собран без структуры конкурентов: %q", got)
 	}
-	if got := fixture.demoFile(t, "article_prompt.txt"); !strings.Contains(got, "логопед обучение\t1200") ||
+	if got := fixture.demoFile(t, "prompts/article_prompt.txt"); !strings.Contains(got, "логопед обучение\t1200") ||
 		!strings.Contains(got, "дефектология") || !strings.Contains(got, "СГЕНЕРИРОВАННАЯ СТРУКТУРА") {
 		t.Fatalf("промпт статьи собран без собранных prepare данных: %q", got)
 	}
@@ -634,8 +638,9 @@ func TestBuildDoesNotWriteMetadataToDatabase(t *testing.T) {
 	}
 }
 
-// В корне DEMO остаётся ровно то, что открывают руками: результат и два промпта ручного
-// чата. Всё промежуточное лежит по подпапкам боевой раскладки.
+// В корне DEMO остаётся то, что открывают первым: результат и объединённый промпт второго
+// сообщения ручного чата. Всё остальное лежит по подпапкам боевой раскладки — включая промпт
+// статьи, у которого своего места быть не должно: его забирает публикация в Google Docs.
 func TestBuildKeepsOnlyResultAndManualPromptsInDemoRoot(t *testing.T) {
 	fixture := newFixture(t)
 	fixture.writeCompleteProduction(t)
@@ -644,18 +649,43 @@ func TestBuildKeepsOnlyResultAndManualPromptsInDemoRoot(t *testing.T) {
 		t.Fatalf("Build() = %v", err)
 	}
 
-	wantRoot := []string{"article_prompt.txt", "fix_links_html_prompt.txt", "result.md"}
+	wantRoot := []string{"fix_links_html_prompt.txt", "result.md"}
 	if got := fixture.demoRootFiles(t); !reflect.DeepEqual(got, wantRoot) {
 		t.Fatalf("корень DEMO = %v, want %v", got, wantRoot)
 	}
 	wantAll := []string{
-		"article_prompt.txt", "fix_links_html_prompt.txt",
+		"fix_links_html_prompt.txt",
 		"generated/article.txt", "generated/article_info.txt", "generated/structure.txt",
-		"prepare/keysso.json", "prompts/article_info_prompt.txt", "prompts/structure_prompt.txt",
+		"prepare/keysso.json", "prompts/article_info_prompt.txt", "prompts/article_prompt.txt",
+		"prompts/structure_prompt.txt",
 		"result.md",
 	}
 	if got := fixture.demoFiles(t); !reflect.DeepEqual(got, wantAll) {
 		t.Fatalf("состав DEMO = %v, want %v", got, wantAll)
+	}
+}
+
+// Промпт статьи из DEMO читается тем же writer'ом, у которого его забирает публикация в
+// Google Docs. Проверка сквозная намеренно: раскладку DEMO складывает этот пакет, а путь для
+// чтения знает output, и разъехаться они могут только молча — публикация просто перестала бы
+// находить файл и пропускала статью как «ещё не генерировалась».
+func TestDemoArticlePromptIsReadableByPublication(t *testing.T) {
+	fixture := newFixture(t)
+	fixture.writeCompleteProduction(t)
+
+	if err := fixture.builder.Build(context.Background(), testExternalID); err != nil {
+		t.Fatalf("Build() = %v", err)
+	}
+
+	prompt, path, err := articleoutput.NewWriter(fixture.root).DemoArticlePromptText(testExternalID)
+	if err != nil {
+		t.Fatalf("DemoArticlePromptText() = %v", err)
+	}
+	if prompt != "БОЕВОЙ ПРОМПТ СТАТЬИ" {
+		t.Fatalf("прочитан промпт %q", prompt)
+	}
+	if want := testDirectory + "/" + FolderName + "/" + articlePromptFile; path != want {
+		t.Fatalf("путь промпта DEMO = %q, want %q", path, want)
 	}
 }
 

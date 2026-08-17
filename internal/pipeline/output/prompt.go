@@ -6,13 +6,18 @@ import (
 	"path/filepath"
 )
 
-// articlePromptFile — имя артефакта с промптом статьи. То же значение, что складывает
-// articlePaths: там оно собирается для записи, здесь — для чтения.
-const articlePromptFile = "article_prompt.txt"
-
-// demoFolder — каталог демо-сборки внутри каталога статьи. Значение повторяет demo.FolderName
-// намеренно: пакет demo зависит от output, и импорт в обратную сторону замкнул бы цикл.
-const demoFolder = "DEMO"
+// Раскладка артефактов статьи. Значения экспортированы потому, что складывают эти пути два
+// разных пакета — боевой writer и сборщик DEMO, — а читает их отсюда публикация промпта.
+// Пока список был у каждого свой, боевой промпт и промпт DEMO лежали по разным правилам, и
+// совпадение держалось на отдельной ветке чтения, а не на общем контракте.
+const (
+	// DemoFolder — каталог демо-сборки внутри каталога статьи.
+	DemoFolder = "DEMO"
+	// PromptsFolder — подкаталог промптов внутри каталога статьи и внутри DEMO.
+	PromptsFolder = "prompts"
+	// ArticlePromptFile — имя артефакта с промптом статьи.
+	ArticlePromptFile = "article_prompt.txt"
+)
 
 // ArticlePromptText читает сохранённый промпт статьи и возвращает его вместе с путём
 // относительно корня вывода.
@@ -21,7 +26,7 @@ const demoFolder = "DEMO"
 // в этот файл articleResult.Prompt и ничего к нему не добавляет. Повторная публикация читает
 // его, а не собирает промпт заново, — иначе выгруженное разошлось бы с тем, что видела модель.
 func (w *Writer) ArticlePromptText(externalID string) (string, string, error) {
-	return w.promptText(externalID, "prompts", articlePromptFile)
+	return w.promptText(externalID, PromptsFolder, ArticlePromptFile)
 }
 
 // DemoArticlePromptText читает промпт статьи из каталога DEMO.
@@ -29,8 +34,11 @@ func (w *Writer) ArticlePromptText(externalID string) (string, string, error) {
 // DEMO существует для ручного прогона: этот файл открывают и отправляют в чат руками. Он
 // пишется даже тогда, когда стадия article не удалась, — промпт рендерится до обращения к
 // модели, и именно поэтому его есть смысл выгружать после неудачной генерации.
+//
+// Внутри DEMO промпт лежит там же, где боевой, — в prompts/: путь отличается ровно одним
+// каталогом DEMO, и второго правила именования у промпта статьи нет.
 func (w *Writer) DemoArticlePromptText(externalID string) (string, string, error) {
-	return w.promptText(externalID, demoFolder, articlePromptFile)
+	return w.promptText(externalID, DemoFolder, PromptsFolder, ArticlePromptFile)
 }
 
 // promptText читает промпт по пути внутри каталога статьи.

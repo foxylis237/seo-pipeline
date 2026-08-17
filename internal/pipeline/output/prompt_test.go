@@ -14,7 +14,7 @@ func newPromptArticle(t *testing.T, content string) *Writer {
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatalf("создать каталог промптов: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(directory, articlePromptFile), []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(directory, ArticlePromptFile), []byte(content), 0o644); err != nil {
 		t.Fatalf("создать промпт: %v", err)
 	}
 	return NewWriter(root)

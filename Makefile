@@ -80,6 +80,7 @@ help: ## этот список
 		'make pprof-1 retry [ID]'          'снять ошибку и прогнать' \
 		'make pprof-1 regenerate ID'       'пересоздать статью целиком' \
 		'make pprof-1 result [ID]'         'собрать result.md' \
+		'make pprof-1 demo-generate [ID]'  'пересобрать каталог DEMO' \
 		'make pprof-1 google-publish [ID]' 'промпты в Google Docs' \
 		'make pprof-1 dry-run'             'офлайн-прогон без сервисов' \
 		'make pprof-1 clear ID'            'статью к состоянию импорта' \
@@ -97,7 +98,7 @@ help: ## этот список
 	@printf '\nТратят деньги и ходят наружу: prepare, generate, article, info, review, fix,\n'
 	@printf 'html, run, retry, regenerate, demo-generate, google-publish. Необратимы:\n'
 	@printf 'clear и reset. У pprof_1 article, info, review и fix — одно действие: чат 2\n'
-	@printf 'целиком; demo-generate не поддерживается.\n'
+	@printf 'целиком.\n'
 	@printf 'Перед первым запуском pprof-1 создать схему PostgreSQL — см. README.md\n'
 
 # ----------------------------------------------------

@@ -271,7 +271,10 @@ func main() {
 			preparer := demo.PrepareFunc(func(ctx context.Context, externalID string) error {
 				return runDemoPrepare(ctx, articleRepository, cfg, taskLogger, writer, logRouter, newKeywordsFallback, debugDirs, externalID)
 			})
-			builder := demo.NewBuilder(cfg.OutputDir, filepath.Join(profile.PromptsDir, demo.FixLinksHTMLPromptFile),
+			// Сборщик общий у всех задач и о них не знает. Задача даёт ему свой роутер:
+			// промпты стадий у каждой свои. Объединённый промпт ручного чата, наоборот,
+			// берётся из общего каталога — DEMO у задач один и тот же.
+			builder := demo.NewBuilder(cfg.OutputDir, filepath.Join(tasks.CommonPromptsDir, demo.FixLinksHTMLPromptFile),
 				articleRepository, writer, resultService,
 				mode.routerFor(externalID), preparer, taskLogger)
 			buildDemoErr := builder.Build(ctx, externalID)
@@ -391,12 +394,9 @@ func main() {
 				err = runOne(ctx, command.ExternalID)
 			}
 		case "demo-generate":
-			if pprofFlow != nil {
-				// DEMO собран вокруг ручного чата task_1 (article_prompt + fix_links_html).
-				// У pprof_1 поток другой, и переносить DEMO на него отдельная задача.
-				err = fmt.Errorf("операция demo-generate не поддерживается задачей %s", profile.Command)
-				break
-			}
+			// Ветки по задаче здесь нет намеренно: DEMO — подготовка файлов для ручного
+			// чата, а не продолжение боевого потока, и ручной чат у задач один и тот же.
+			// Своими у задачи остаются только промпты стадий, и подставляет их её роутер.
 			if command.ExternalID == "" {
 				// Все статьи, а не подмножество по состоянию: DEMO пересобирается и для
 				// completed, и для failed. Ошибка одной статьи не прекращает обход, но

@@ -196,7 +196,7 @@ func (w *Writer) StageArticleInfo(externalID, slug, prompt, info string) (*Pendi
 	if err != nil {
 		return nil, err
 	}
-	if err := os.MkdirAll(filepath.Join(articleDirectory, "prompts"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(articleDirectory, PromptsFolder), 0o755); err != nil {
 		return nil, fmt.Errorf("create article prompt directory: %w", err)
 	}
 	if err := os.MkdirAll(filepath.Join(articleDirectory, "generated"), 0o755); err != nil {
@@ -226,7 +226,7 @@ func (w *Writer) StageFixedArticle(externalID, slug, prompt, article string) (*P
 	if err != nil {
 		return nil, err
 	}
-	if err := os.MkdirAll(filepath.Join(articleDirectory, "prompts"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(articleDirectory, PromptsFolder), 0o755); err != nil {
 		return nil, fmt.Errorf("create article prompt directory: %w", err)
 	}
 	if err := os.MkdirAll(filepath.Join(articleDirectory, "generated"), 0o755); err != nil {
@@ -256,7 +256,7 @@ func (w *Writer) StageReview(externalID, slug, prompt, review string) (*PendingA
 	if err != nil {
 		return nil, err
 	}
-	if err := os.MkdirAll(filepath.Join(articleDirectory, "prompts"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(articleDirectory, PromptsFolder), 0o755); err != nil {
 		return nil, fmt.Errorf("create article prompt directory: %w", err)
 	}
 	if err := os.MkdirAll(filepath.Join(articleDirectory, "generated"), 0o755); err != nil {
@@ -286,7 +286,7 @@ func (w *Writer) StageHTML(externalID, slug, prompt, html string) (*PendingArtif
 	if err != nil {
 		return nil, err
 	}
-	if err := os.MkdirAll(filepath.Join(articleDirectory, "prompts"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(articleDirectory, PromptsFolder), 0o755); err != nil {
 		return nil, fmt.Errorf("create article prompt directory: %w", err)
 	}
 	pending, err := w.stage(paths, []fileContent{{paths.HTMLPromptPath, []byte(prompt)}, {paths.HTMLPath, []byte(html)}})
@@ -338,7 +338,7 @@ func (w *Writer) StageStructure(externalID, slug, prompt, structure string) (*Pe
 	if err != nil {
 		return nil, err
 	}
-	if err := os.MkdirAll(filepath.Join(articleDirectory, "prompts"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(articleDirectory, PromptsFolder), 0o755); err != nil {
 		return nil, fmt.Errorf("create article prompt directory: %w", err)
 	}
 	if err := os.MkdirAll(filepath.Join(articleDirectory, "generated"), 0o755); err != nil {
@@ -368,7 +368,7 @@ func (w *Writer) StageArticle(externalID, slug, prompt, text, model string) (*Pe
 	if err != nil {
 		return nil, err
 	}
-	if err := os.MkdirAll(filepath.Join(articleDirectory, "prompts"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(articleDirectory, PromptsFolder), 0o755); err != nil {
 		return nil, fmt.Errorf("create article prompt directory: %w", err)
 	}
 	if err := os.MkdirAll(filepath.Join(articleDirectory, "generated"), 0o755); err != nil {
@@ -416,18 +416,18 @@ func Paths(externalID, slug string) (ArticlePaths, error) {
 	}
 	directoryName := DirectoryName(externalID, slug)
 	return ArticlePaths{
-		StructurePromptPath:   filepath.ToSlash(filepath.Join(directoryName, "prompts", "structure_prompt.txt")),
+		StructurePromptPath:   filepath.ToSlash(filepath.Join(directoryName, PromptsFolder, "structure_prompt.txt")),
 		StructurePath:         filepath.ToSlash(filepath.Join(directoryName, "generated", "structure.txt")),
-		ArticlePromptPath:     filepath.ToSlash(filepath.Join(directoryName, "prompts", "article_prompt.txt")),
+		ArticlePromptPath:     filepath.ToSlash(filepath.Join(directoryName, PromptsFolder, ArticlePromptFile)),
 		ArticlePath:           filepath.ToSlash(filepath.Join(directoryName, "generated", "article.txt")),
 		GenerationInfoPath:    filepath.ToSlash(filepath.Join(directoryName, "generated", "generation_context.json")),
-		ArticleInfoPromptPath: filepath.ToSlash(filepath.Join(directoryName, "prompts", "article_info_prompt.txt")),
+		ArticleInfoPromptPath: filepath.ToSlash(filepath.Join(directoryName, PromptsFolder, "article_info_prompt.txt")),
 		ArticleInfoPath:       filepath.ToSlash(filepath.Join(directoryName, "generated", "article_info.txt")),
-		ReviewPromptPath:      filepath.ToSlash(filepath.Join(directoryName, "prompts", "article_review_prompt.txt")),
+		ReviewPromptPath:      filepath.ToSlash(filepath.Join(directoryName, PromptsFolder, "article_review_prompt.txt")),
 		ReviewPath:            filepath.ToSlash(filepath.Join(directoryName, "generated", "review.txt")),
-		FixPromptPath:         filepath.ToSlash(filepath.Join(directoryName, "prompts", "fix_article_prompt.txt")),
+		FixPromptPath:         filepath.ToSlash(filepath.Join(directoryName, PromptsFolder, "fix_article_prompt.txt")),
 		FixedArticlePath:      filepath.ToSlash(filepath.Join(directoryName, "generated", "fixed_article.txt")),
-		HTMLPromptPath:        filepath.ToSlash(filepath.Join(directoryName, "prompts", "article_html_prompt.txt")),
+		HTMLPromptPath:        filepath.ToSlash(filepath.Join(directoryName, PromptsFolder, "article_html_prompt.txt")),
 		HTMLPath:              filepath.ToSlash(filepath.Join(directoryName, "article.html")),
 		ResultPath:            filepath.ToSlash(filepath.Join(directoryName, "result.md")),
 	}, nil

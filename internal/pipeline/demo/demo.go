@@ -16,32 +16,39 @@ import (
 
 	"github.com/foxylis237/seo-pipeline/internal/llm"
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/article"
+	articleoutput "github.com/foxylis237/seo-pipeline/internal/pipeline/output"
 )
 
 const (
-	// FolderName — каталог демо-сборки внутри каталога статьи.
-	FolderName = "DEMO"
+	// FolderName — каталог демо-сборки внутри каталога статьи. Имя берётся из output, а не
+	// повторяется здесь: оттуда же его читает публикация промпта.
+	FolderName = articleoutput.DemoFolder
 	// FixLinksHTMLPromptFile — объединённый промпт второго сообщения ручного чата. Он
 	// существует только для DEMO и боевые промпты не подменяет. Путь к нему собирается от
-	// каталога промптов задачи и приходит в NewBuilder: имени задачи пакет не знает.
+	// каталога общих промптов и приходит в NewBuilder: имени задачи пакет не знает.
 	FixLinksHTMLPromptFile = "demo/fix_links_html.txt"
 )
 
 // Подпапки DEMO повторяют раскладку боевого каталога статьи: то же имя папки — тот же вид
 // содержимого, отдельную схему запоминать не нужно.
 const (
-	promptsFolder   = "prompts"
+	promptsFolder   = articleoutput.PromptsFolder
 	generatedFolder = "generated"
 	prepareFolder   = "prepare"
 )
 
-// Имена файлов внутри DEMO. В корне лежит ровно то, что открывают руками при ручном прогоне:
-// готовый результат и два промпта ручного чата. Всё остальное — по подпапкам.
+// Имена файлов внутри DEMO. В корне лежит то, что при ручном прогоне открывают первым:
+// готовый результат и объединённый промпт второго сообщения чата. Всё остальное — по
+// подпапкам боевой раскладки.
+//
+// Промпт статьи лежит в prompts/ ровно потому, что там же он лежит в боевом каталоге:
+// публикация в Google Docs забирает его по одному правилу и для DEMO, и для боевого прогона,
+// а второе имя того же артефакта означало бы, что найдено будет не всегда.
 const (
 	resultFile             = "result.md"
-	articlePromptFile      = "article_prompt.txt"
 	fixLinksHTMLPromptFile = "fix_links_html_prompt.txt"
 
+	articlePromptFile     = promptsFolder + "/" + articleoutput.ArticlePromptFile
 	structurePromptFile   = promptsFolder + "/structure_prompt.txt"
 	articleInfoPromptFile = promptsFolder + "/article_info_prompt.txt"
 
