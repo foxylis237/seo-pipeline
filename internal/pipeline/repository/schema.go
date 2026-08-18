@@ -25,6 +25,16 @@ var expectedSchema = []schemaColumn{
 	{"articles", "error_message", "text", true},
 	{"articles", "created_at", "timestamp with time zone", false},
 	{"articles", "updated_at", "timestamp with time zone", false},
+	// Отметка о публикации в WordPress, миграция 000004. Стоит на articles, а не на
+	// article_outputs, потому что строку article_outputs удаляет не только clear/reset/
+	// regenerate, но и штатный prepare через SaveResearch — а отметка, которую стирает
+	// обычный повторный prepare, от дублей не защищает.
+	//
+	// wordpress_status NOT NULL с умолчанием 'not_published': NULL как состояние не
+	// используется. post_id и url остаются NULL у статьи, отмеченной вручную.
+	{"articles", "wordpress_status", "text", false},
+	{"articles", "wordpress_post_id", "bigint", true},
+	{"articles", "wordpress_url", "text", true},
 	{"article_inputs", "article_id", "bigint", false},
 	{"article_inputs", "image_slug", "text", false},
 	{"article_inputs", "reference_url", "text", false},
