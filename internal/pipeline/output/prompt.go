@@ -17,6 +17,12 @@ const (
 	PromptsFolder = "prompts"
 	// ArticlePromptFile — имя артефакта с промптом статьи.
 	ArticlePromptFile = "article_prompt.txt"
+	// ResultFileName — имя собранного result.md в каталоге статьи.
+	//
+	// Экспортирована по той же причине, что и соседи: путь складывает не только writer.
+	// Публикация в WordPress читает отсюда готовое время чтения, и расхождение в имени она
+	// не заметит — просто перестанет находить файл.
+	ResultFileName = "result.md"
 )
 
 // ArticlePromptText читает сохранённый промпт статьи и возвращает его вместе с путём

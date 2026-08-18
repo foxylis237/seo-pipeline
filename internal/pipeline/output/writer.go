@@ -429,7 +429,7 @@ func Paths(externalID, slug string) (ArticlePaths, error) {
 		FixedArticlePath:      filepath.ToSlash(filepath.Join(directoryName, "generated", "fixed_article.txt")),
 		HTMLPromptPath:        filepath.ToSlash(filepath.Join(directoryName, PromptsFolder, "article_html_prompt.txt")),
 		HTMLPath:              filepath.ToSlash(filepath.Join(directoryName, "article.html")),
-		ResultPath:            filepath.ToSlash(filepath.Join(directoryName, "result.md")),
+		ResultPath:            filepath.ToSlash(filepath.Join(directoryName, ResultFileName)),
 	}, nil
 }
 
