@@ -12,49 +12,50 @@ llm:
     deepseek_web:
       single_chat_per_article: true
 
-  # Режим ответа DeepSeek задаётся подписью кнопки в интерфейсе: «Эксперт» — рассуждение,
-  # «Быстрый» — без него. Стадии генерации идут в «Эксперте», html — в «Быстром»: разметка
-  # готового текста рассуждений не требует. Пустое значение оставило бы режим таким, каким
-  # его в прошлый раз оставил человек в профиле браузера. Gemini поле игнорирует.
+  # Режим ответа DeepSeek: значение сверяется с data-model-type переключателя над полем
+  # ввода — expert («Expert») рассуждает, default («Instant») отвечает сразу. Подписи
+  # локализованы (в профиле сейчас английские), атрибут — нет, поэтому в конфигурации стоит
+  # он. Переключатель живёт на экране нового чата: продолжение беседы режим не меняет.
+  # Gemini поле игнорирует.
   stages:
     structure:
       targets:
         - { provider: deepseek_web, model: deepseek-web }
       prompt: tasks/task_1/prompts/deepseek/structure.txt
-      mode: Эксперт
+      mode: expert
       timeout: 180s
 
     article:
       targets:
         - { provider: deepseek_web, model: deepseek-web }
       prompt: tasks/task_1/prompts/deepseek/article.txt
-      mode: Эксперт
+      mode: expert
       timeout: 300s
 
     info:
       targets:
         - { provider: deepseek_web, model: deepseek-web }
       prompt: tasks/task_1/prompts/deepseek/article_info.txt
-      mode: Эксперт
+      mode: expert
       timeout: 300s
 
     review:
       targets:
         - { provider: deepseek_web, model: deepseek-web }
       prompt: tasks/task_1/prompts/deepseek/review.txt
-      mode: Эксперт
+      mode: expert
       timeout: 300s
 
     fix:
       targets:
         - { provider: deepseek_web, model: deepseek-web }
       prompt: tasks/task_1/prompts/deepseek/fix_article.txt
-      mode: Эксперт
+      mode: expert
       timeout: 420s
 
     html:
       targets:
         - { provider: deepseek_web, model: deepseek-web }
       prompt: tasks/task_1/prompts/deepseek/html.txt
-      mode: Быстрый
+      mode: default
       timeout: 420s

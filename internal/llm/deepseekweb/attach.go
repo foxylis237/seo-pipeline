@@ -29,26 +29,30 @@ func (c *Client) SupportsAttachments() bool { return true }
 
 // applyMode переключает интерфейс в режим, заданный стадией.
 //
+// Переключатель живёт на экране нового чата, поэтому продолжение беседы его не ищет:
+// режим — свойство чата, выбранное при его создании, и «не найден» в середине диалога был
+// бы не сигналом, а шумом.
+//
 // Отсутствие переключателя стадию не роняет: промпт уйдёт в текущем режиме, ответ будет
-// получен, и терять оплаченный прогон из-за переименованной кнопки нельзя. Но событие это
-// не рядовое — в лог уходит предупреждение, а на диск состояние страницы.
-func (c *Client) applyMode(page playwright.Page, request llm.Request) {
-	label := strings.TrimSpace(request.Mode)
-	if label == "" {
+// получен, и терять оплаченный прогон из-за переехавшей кнопки нельзя. Но событие это не
+// рядовое — в лог уходит предупреждение, а на диск состояние страницы.
+func (c *Client) applyMode(page playwright.Page, request llm.Request, newChat bool) {
+	mode := strings.TrimSpace(request.Mode)
+	if mode == "" || !newChat {
 		return
 	}
-	value, err := page.Evaluate(selectModeJS, map[string]any{"label": label})
+	value, err := page.Evaluate(selectModeJS, map[string]any{"mode": mode, "modeSelector": modeSelector})
 	if err != nil {
-		c.logger.Warn("DeepSeek mode was not switched", "mode", label, "error", err)
+		c.logger.Warn("DeepSeek mode was not switched", "mode", mode, "error", err)
 		return
 	}
 	result, _ := value.(string)
 	switch result {
 	case "clicked", "already":
-		c.stage("select_mode", "mode", label, "result", result)
+		c.stage("select_mode", "mode", mode, "result", result)
 	default:
 		c.saveDiagnostics(page, "select_mode", request.ArticleID)
-		c.logger.Warn("DeepSeek mode switch was not found on the page", "mode", label, "result", result)
+		c.logger.Warn("DeepSeek mode switch was not found on the page", "mode", mode, "result", result)
 	}
 }
 

@@ -233,11 +233,16 @@ func isLoginURL(value string) bool {
 	return strings.Contains(value, "/sign_in") || strings.Contains(value, "/login")
 }
 
-// selectModeJS переключает интерфейс в режим с заданной подписью.
+// modeSelector — переключатель режима ответа над полем ввода нового чата: группа
+// role="radio" с data-model-type у каждого пункта (default — «Instant», expert, vision).
+const modeSelector = `[data-model-type]`
+
+// selectModeJS переключает интерфейс в заданный режим.
 //
-// Переключатель опознаётся текстом, а не классом: у режимов DeepSeek нет ни aria-label, ни
-// data-атрибута, а классы генерируются сборкой и меняются от релиза к релизу. Уже включённый
-// режим повторно не нажимается — второе нажатие выключило бы его.
+// Режим опознаётся сначала по data-model-type, и только потом по подписи: подпись
+// локализована (в профиле стоит английский, и «Быстрый» на странице не встречается вовсе),
+// а классы генерируются сборкой. Уже выбранный режим повторно не нажимается — у пунктов
+// aria-checked, и второе нажатие ничего не улучшит.
 const selectModeJS = `(options) => {
   const visible = (element) => {
     const style = window.getComputedStyle(element);
@@ -245,20 +250,18 @@ const selectModeJS = `(options) => {
     return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
   };
   const normalize = (value) => (value || "").replace(/\s+/g, " ").trim().toLowerCase();
-  const label = normalize(options.label);
-  const active = (element) => {
-    for (const attribute of ["aria-pressed", "aria-checked", "aria-selected"]) {
-      if (element.getAttribute(attribute) === "true") return true;
-    }
-    const classes = typeof element.className === "string" ? element.className : "";
-    return /(^|[-_ ])(active|selected|checked)([-_ ]|$)/.test(classes);
-  };
-  const controls = Array.from(document.querySelectorAll(
+  const mode = normalize(options.mode);
+  const byType = Array.from(document.querySelectorAll(options.modeSelector))
+    .filter(visible)
+    .find((control) => normalize(control.getAttribute("data-model-type")) === mode);
+  const byLabel = () => Array.from(document.querySelectorAll(
     'button, [role="button"], [role="menuitem"], [role="option"], [role="radio"], [role="tab"], [role="switch"]'
-  )).filter(visible);
-  const match = controls.find((control) => normalize(control.innerText) === label);
+  )).filter(visible).find((control) => normalize(control.innerText) === mode);
+  const match = byType || byLabel();
   if (!match) return "not_found";
-  if (active(match)) return "already";
+  for (const attribute of ["aria-checked", "aria-pressed", "aria-selected"]) {
+    if (match.getAttribute(attribute) === "true") return "already";
+  }
   match.click();
   return "clicked";
 }`

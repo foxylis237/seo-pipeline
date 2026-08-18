@@ -77,7 +77,8 @@ func (c *Client) generate(ctx context.Context, request llm.Request) (llm.Respons
 	// Переход на chat_url всегда открывает новую беседу. В режиме одного диалога на статью
 	// он выполняется только для первой стадии: дальше промпт уходит в уже открытый чат,
 	// и модель видит все предыдущие стадии как историю.
-	if c.shouldOpenNewChat(request) {
+	newChat := c.shouldOpenNewChat(request)
+	if newChat {
 		if _, err := page.Goto(c.cfg.ChatURL, playwright.PageGotoOptions{
 			WaitUntil: playwright.WaitUntilStateDomcontentloaded,
 			Timeout:   playwright.Float(timeout),
@@ -114,7 +115,7 @@ func (c *Client) generate(ctx context.Context, request llm.Request) (llm.Respons
 
 	// Режим и документы задаются до снимка треда: и то, и другое меняет страницу, но
 	// сообщением не является, а сообщение должно уйти уже в готовый чат.
-	c.applyMode(page, request)
+	c.applyMode(page, request, newChat)
 	if err := c.attachDocuments(ctx, page, request); err != nil {
 		return llm.Response{}, err
 	}

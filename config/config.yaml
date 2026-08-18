@@ -16,10 +16,11 @@ llm:
       profile_dir: data/browser/deepseek
       headless: true
 
-  # Режим ответа DeepSeek задаётся подписью кнопки в интерфейсе: «Эксперт» — рассуждение,
-  # «Быстрый» — без него. Стадии генерации идут в «Эксперте», html — в «Быстром»: разметка
-  # готового текста рассуждений не требует. Пустое значение оставило бы режим таким, каким
-  # его в прошлый раз оставил человек в профиле браузера. Gemini поле игнорирует.
+  # Режим ответа DeepSeek: значение сверяется с data-model-type переключателя над полем
+  # ввода — expert («Expert») рассуждает, default («Instant») отвечает сразу. Подписи
+  # локализованы (в профиле сейчас английские), атрибут — нет, поэтому в конфигурации стоит
+  # он. Переключатель живёт на экране нового чата: продолжение беседы режим не меняет.
+  # Gemini поле игнорирует.
   stages:
     # keywords — не стадия генерации статьи, а резервный источник исходных запросов для
     # prepare. Вызывается только тогда, когда Keys.so не отдал ни одного запроса
@@ -30,7 +31,7 @@ llm:
       targets:
         - { provider: deepseek_web, model: deepseek-web }
       prompt: tasks/task_1/prompts/keywords.txt
-      mode: Эксперт
+      mode: expert
       temperature: 0.2
       max_tokens: 3000
       timeout: 180s
@@ -43,7 +44,7 @@ llm:
       targets:
         - { provider: deepseek_web, model: deepseek-web }
       prompt: tasks/task_1/prompts/structure.txt
-      mode: Эксперт
+      mode: expert
       temperature: 0.3
       max_tokens: 3000
       timeout: 120s
@@ -60,7 +61,7 @@ llm:
       targets:
         - { provider: deepseek_web, model: deepseek-web }
       prompt: tasks/task_1/prompts/article_info.txt
-      mode: Эксперт
+      mode: expert
       temperature: 0.2
       max_tokens: 4000
       timeout: 180s
@@ -88,7 +89,7 @@ llm:
       targets:
         - { provider: deepseek_web, model: deepseek-web }
       prompt: tasks/task_1/prompts/html.txt
-      mode: Быстрый
+      mode: default
       temperature: 0.1
       max_tokens: 12000
       timeout: 180s
