@@ -40,6 +40,11 @@ dist/
 coverage.out
 coverage.html
 
-# Claude Code personal scope (project scope is committed on purpose)
-.claude/settings.local.json
+# Личные инструменты и рабочие заметки. Не код проекта — в репозитории им не место.
+# Файлы остаются на диске, просто не отслеживаются.
+.claude/
+CLAUDE.md
 CLAUDE.local.md
+.mcp.json
+need_msp.md
+docs/
