@@ -255,22 +255,27 @@ func TestPrepareKeepsTechnicalKeysSOFailureAsFailure(t *testing.T) {
 	assertOldPrepareResultsPreserved(t, repository, want)
 }
 
-// TestPrepareSkipsBothKeysSOAndFallbackForManualKeywords: ручное заполнение — явное указание
-// не ходить наружу за этой статьёй. Резервный источник тоже наружный.
-func TestPrepareSkipsBothKeysSOAndFallbackForManualKeywords(t *testing.T) {
+// TestPrepareSkipsFallbackForManualKeywords: резервный подбор нужен там, где исходных
+// запросов нет вовсе. Вставленные руками — это и есть исходные запросы, и модель к ним не
+// зовётся. Чистка от дублей при этом отрабатывает: заменён только первый этап Keys.so.
+func TestPrepareSkipsFallbackForManualKeywords(t *testing.T) {
 	repository := oldPrepareRepositoryState()
 	repository.manualKeywords = []string{"ручной запрос", "второй ручной запрос"}
-	keyssoCalls := 0
+	collectCalls := 0
 	fallback := &fakeKeywordsFallback{queries: []string{"подобранный моделью запрос"}}
-	var submitted []string
+	var sentToCleaning, submitted []string
 
 	err := prepareArticleWithCollectors(
 		context.Background(), repository, config.Config{}, testPrepareLogger(), newFakePrepareArtifacts(), testPreparedArticle(),
-		fakeKeysSOCollector{calls: &keyssoCalls, err: errors.New("Keys.so не должен вызываться")},
+		fakeKeysSOCollector{
+			calls:       &collectCalls,
+			err:         errors.New("сбор запросов у конкурента не должен вызываться"),
+			cleaned:     &sentToCleaning,
+			cleanResult: keysso.CollectResult{CollectedCount: 2, CleanedKeywords: []string{"ручной запрос"}},
+		},
 		fakeArsenkinCollector{submitted: &submitted, result: arsenkin.Result{
 			WordstatKeywords: []arsenkin.KeywordFrequency{
 				{Query: "ручной запрос", Frequency: 100},
-				{Query: "второй ручной запрос", Frequency: 50},
 			},
 			LSIWords: []string{"новый lsi"}, CompetitorStructure: "новая структура",
 		}},
@@ -279,14 +284,17 @@ func TestPrepareSkipsBothKeysSOAndFallbackForManualKeywords(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if keyssoCalls != 0 {
-		t.Fatalf("Keys.so вызван %d раз при ручных запросах", keyssoCalls)
+	if collectCalls != 0 {
+		t.Fatalf("сбор запросов у конкурента вызван %d раз при ручных запросах", collectCalls)
 	}
 	if fallback.calls != 0 {
 		t.Fatalf("резервный источник вызван %d раз при ручных запросах", fallback.calls)
 	}
-	if !reflect.DeepEqual(submitted, repository.manualKeywords) {
-		t.Fatalf("в Arsenkin ушло %v, want %v", submitted, repository.manualKeywords)
+	if !reflect.DeepEqual(sentToCleaning, repository.manualKeywords) {
+		t.Fatalf("в очистку Keys.so ушло %v, want %v", sentToCleaning, repository.manualKeywords)
+	}
+	if !reflect.DeepEqual(submitted, []string{"ручной запрос"}) {
+		t.Fatalf("в Arsenkin ушло %v, want результат очистки", submitted)
 	}
 }
 

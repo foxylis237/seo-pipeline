@@ -24,7 +24,7 @@ func newClearedArticle(t *testing.T, repository *ArticleRepository) article.Arti
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := repository.SaveCleanedKeywords(ctx, created.ID, []string{"как выбрать фрезу"}); err != nil {
+	if err := repository.SaveManualKeywords(ctx, created.ID, []string{"как выбрать фрезу"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := repository.SaveStructurePath(ctx, created.ID, "23-kak-vybrat-frezu/generated/structure.txt"); err != nil {
@@ -120,7 +120,7 @@ func TestClearArticleStateDoesNotTouchOtherArticles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := repository.SaveCleanedKeywords(ctx, neighbor.ID, []string{"соседний запрос"}); err != nil {
+	if err := repository.SaveManualKeywords(ctx, neighbor.ID, []string{"соседний запрос"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := repository.SaveError(ctx, neighbor.ID, errors.New("stage=structure: сбой")); err != nil {

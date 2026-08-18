@@ -1122,46 +1122,77 @@ func (r *ArticleRepository) GetManualKeywords(ctx context.Context, articleID int
 	return keywords, nil
 }
 
-// SaveCleanedKeywords сохраняет очищенные запросы исследования статьи.
-func (r *ArticleRepository) SaveCleanedKeywords(
+// SaveManualKeywords сохраняет вставленную руками колонку запросов вместо первого этапа Keys.so.
+//
+// Запись обязана оставить статью ровно в том состоянии, которое GetManualKeywords считает
+// ручным заполнением: непустые cleaned_keywords при пустом competitor_structure. Поэтому
+// структура конкурентов, частотности Wordstat и LSI обнуляются той же транзакцией. Без этого
+// у уже подготовленной статьи признак не появился бы вовсе, и prepare молча ушёл бы в Keys.so
+// за новыми запросами, оставив вставленные лежать мёртвым грузом.
+//
+// Перезапись безусловная: старые запросы и старое состояние статьи всегда уступают вставке.
+// Статус возвращается к «жду сбора research» (pending + arsenkin_collection), а ошибка
+// снимается — вставка запросов руками это ответ на отказ Keys.so, и оставлять после неё
+// старое сообщение об ошибке значит показывать пользователю снятую беду. Без сброса шага
+// статья, ушедшая дальше по пайплайну, не попала бы в batch-выборку prepare, и вставленные
+// запросы остались бы лежать мёртвым грузом.
+//
+// Сохранённые артефакты генерации команда не трогает: возобновление идёт по ним, а не по
+// статусу, поэтому текст уже написанной статьи заново не собирается — для этого regenerate.
+func (r *ArticleRepository) SaveManualKeywords(
 	ctx context.Context,
 	articleID int64,
 	keywords []string,
 ) error {
 	encoded, err := json.Marshal(keywords)
 	if err != nil {
-		return fmt.Errorf("закодировать очищенные запросы: %w", err)
+		return fmt.Errorf("закодировать ручные запросы: %w", err)
 	}
 
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("начать транзакцию сохранения исследования: %w", err)
+		return fmt.Errorf("начать транзакцию сохранения ручных запросов: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	const researchQuery = `
-		INSERT INTO article_research (article_id, cleaned_keywords, updated_at)
-		VALUES ($1, $2, NOW())
+		INSERT INTO article_research (
+			article_id, cleaned_keywords, wordstat_keywords, lsi_words,
+			competitor_structure, updated_at
+		)
+		VALUES ($1, $2, '[]'::jsonb, '[]'::jsonb, NULL, NOW())
 		ON CONFLICT (article_id) DO UPDATE
 		SET
 			cleaned_keywords = EXCLUDED.cleaned_keywords,
+			wordstat_keywords = '[]'::jsonb,
+			lsi_words = '[]'::jsonb,
+			competitor_structure = NULL,
 			updated_at = NOW()
 	`
-	if _, err := tx.Exec(ctx, researchQuery, articleID, string(encoded)); err != nil {
-		return fmt.Errorf("сохранить очищенные запросы: %w", err)
+	result, err := tx.Exec(ctx, researchQuery, articleID, string(encoded))
+	if err != nil {
+		return fmt.Errorf("сохранить ручные запросы: %w", err)
+	}
+	if result.RowsAffected() != 1 {
+		return fmt.Errorf("ручные запросы статьи %d не сохранены", articleID)
 	}
 
-	const clearErrorQuery = `
+	const articleQuery = `
 		UPDATE articles
-		SET error_message = NULL, updated_at = NOW()
+		SET status = 'pending', current_step = 'arsenkin_collection',
+			error_message = NULL, updated_at = NOW()
 		WHERE id = $1
 	`
-	if _, err := tx.Exec(ctx, clearErrorQuery, articleID); err != nil {
-		return fmt.Errorf("очистить ошибку статьи: %w", err)
+	articleResult, err := tx.Exec(ctx, articleQuery, articleID)
+	if err != nil {
+		return fmt.Errorf("вернуть статью к сбору research: %w", err)
+	}
+	if articleResult.RowsAffected() != 1 {
+		return fmt.Errorf("статья %d не найдена при сохранении ручных запросов", articleID)
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("завершить сохранение исследования: %w", err)
+		return fmt.Errorf("завершить сохранение ручных запросов: %w", err)
 	}
 	return nil
 }

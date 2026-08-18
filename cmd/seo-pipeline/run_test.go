@@ -523,14 +523,15 @@ func TestPrepareClearsStaleDiagnosticsBeforeRun(t *testing.T) {
 	}
 }
 
-// TestPrepareArticleUsesManualKeywordsInsteadOfKeysSO проверяет главный смысл ручного
-// заполнения: запросы, лежащие в article_research без структуры конкурентов, уходят в
-// Arsenkin как есть, а браузерная автоматизация Keys.so не запускается вовсе.
-func TestPrepareArticleUsesManualKeywordsInsteadOfKeysSO(t *testing.T) {
+// TestPrepareArticleReplacesOnlyFirstKeysSOStageWithManualKeywords проверяет главный смысл
+// ручного заполнения: вставленные запросы заменяют ТОЛЬКО сбор запросов у конкурента.
+// Браузерная автоматизация первого этапа не запускается, а чистка от дублей остаётся за
+// Keys.so, и в Arsenkin уходит её результат, а не вставленный список.
+func TestPrepareArticleReplacesOnlyFirstKeysSOStageWithManualKeywords(t *testing.T) {
 	repository := oldPrepareRepositoryState()
-	repository.manualKeywords = []string{"ручной запрос", "второй ручной запрос"}
-	keyssoCalls := 0
-	var submitted []string
+	repository.manualKeywords = []string{"ручной запрос", "ручной запрос повтор", "второй ручной запрос"}
+	collectCalls := 0
+	var sentToCleaning, submitted []string
 	arsenkinService := fakeArsenkinCollector{submitted: &submitted, result: arsenkin.Result{
 		WordstatKeywords: []arsenkin.KeywordFrequency{
 			{Query: "ручной запрос", Frequency: 100},
@@ -542,20 +543,25 @@ func TestPrepareArticleUsesManualKeywordsInsteadOfKeysSO(t *testing.T) {
 
 	err := prepareArticleWithCollectors(
 		context.Background(), repository, config.Config{}, testPrepareLogger(), artifacts, testPreparedArticle(),
-		fakeKeysSOCollector{calls: &keyssoCalls, err: errors.New("Keys.so не должен вызываться")},
+		fakeKeysSOCollector{
+			calls:       &collectCalls,
+			err:         errors.New("сбор запросов у конкурента не должен вызываться"),
+			cleaned:     &sentToCleaning,
+			cleanResult: keysso.CollectResult{CollectedCount: 3, CleanedKeywords: []string{"ручной запрос", "второй ручной запрос"}},
+		},
 		arsenkinService, nil,
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if keyssoCalls != 0 {
-		t.Fatalf("Keys.so вызван %d раз при заполненных вручную запросах", keyssoCalls)
+	if collectCalls != 0 {
+		t.Fatalf("сбор запросов у конкурента вызван %d раз при заполненных вручную запросах", collectCalls)
 	}
-	// В форму Wordstat уходят ровно ручные запросы: между article_research и Arsenkin
-	// нет ни подмены источника, ни потери запросов.
-	if !reflect.DeepEqual(submitted, repository.manualKeywords) {
-		t.Fatalf("в Arsenkin ушло %v, want %v", submitted, repository.manualKeywords)
+	// Вставленный список уходит в чистку от дублей целиком и без правок.
+	if !reflect.DeepEqual(sentToCleaning, repository.manualKeywords) {
+		t.Fatalf("в очистку Keys.so ушло %v, want %v", sentToCleaning, repository.manualKeywords)
 	}
+	// В форму Wordstat уходит результат очистки, а не исходная вставка.
 	want := fakeResearch{
 		cleaned: []string{"ручной запрос", "второй ручной запрос"},
 		wordstat: []article.KeywordFrequency{
@@ -563,6 +569,9 @@ func TestPrepareArticleUsesManualKeywordsInsteadOfKeysSO(t *testing.T) {
 			{Query: "второй ручной запрос", Frequency: 50},
 		},
 		lsi: []string{"новый lsi"}, structure: "новая структура",
+	}
+	if !reflect.DeepEqual(submitted, want.cleaned) {
+		t.Fatalf("в Arsenkin ушло %v, want %v", submitted, want.cleaned)
 	}
 	if repository.savePreparedCalls != 1 || !reflect.DeepEqual(repository.research, want) {
 		t.Fatalf("saved research = %+v, calls = %d", repository.research, repository.savePreparedCalls)
@@ -577,11 +586,15 @@ func TestPrepareArticleUsesManualKeywordsInsteadOfKeysSO(t *testing.T) {
 	if !reflect.DeepEqual(snapshot.CleanedKeywords, want.cleaned) {
 		t.Fatalf("cleaned_keywords в keysso.json = %v", snapshot.CleanedKeywords)
 	}
+	check := prepareCheck(t, artifacts.report(t), "manual_keywords")
+	if check.Status != diagnostics.StatusPassed || check.Details["raw_count"] != len(repository.manualKeywords) {
+		t.Fatalf("проверка manual_keywords = %+v", check)
+	}
 }
 
 // TestPrepareArticleUsesManualKeywordsWithoutReferenceURL фиксирует, что непустой
-// reference_url — предусловие Keys.so, а не всего prepare: с ручными запросами статья
-// проходит подготовку и без него.
+// reference_url — предусловие сбора запросов у конкурента, а не всего prepare: с ручными
+// запросами статья проходит подготовку и без него.
 func TestPrepareArticleUsesManualKeywordsWithoutReferenceURL(t *testing.T) {
 	repository := oldPrepareRepositoryState()
 	repository.manualKeywords = []string{"ручной запрос"}
@@ -591,7 +604,10 @@ func TestPrepareArticleUsesManualKeywordsWithoutReferenceURL(t *testing.T) {
 
 	err := prepareArticleWithCollectors(
 		context.Background(), repository, config.Config{}, testPrepareLogger(), newFakePrepareArtifacts(), selected,
-		fakeKeysSOCollector{err: errors.New("Keys.so не должен вызываться")},
+		fakeKeysSOCollector{
+			err:         errors.New("сбор запросов у конкурента не должен вызываться"),
+			cleanResult: keysso.CollectResult{CollectedCount: 1, CleanedKeywords: []string{"ручной запрос"}},
+		},
 		fakeArsenkinCollector{result: arsenkin.Result{
 			WordstatKeywords:    []arsenkin.KeywordFrequency{{Query: "ручной запрос", Frequency: 100}},
 			LSIWords:            []string{"новый lsi"},

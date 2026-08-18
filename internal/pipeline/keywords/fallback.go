@@ -126,7 +126,7 @@ func Parse(answer string) []string {
 	queries := make([]string, 0, MaxKeywords)
 	for _, line := range lines {
 		query := strings.TrimSpace(line)
-		if query == "" || !isPlainQuery(query) {
+		if query == "" || !IsPlainQuery(query) {
 			continue
 		}
 		queries = append(queries, query)
@@ -137,13 +137,14 @@ func Parse(answer string) []string {
 	return queries
 }
 
-// isPlainQuery проверяет требование промпта: в запросе только буквы, цифры и пробелы.
+// IsPlainQuery проверяет требование промпта: в запросе только буквы, цифры и пробелы.
 //
 // Проверка не косметическая. Она же отсекает нумерацию, маркеры списков, Markdown-обёртку и
 // пояснения — всё, что промпт запрещает. И она же закрывает известную ловушку: операторные
 // символы во фразе («/», «-») роняют задачу Wordstat молча, форма принимает список, а задача
-// не создаётся вовсе.
-func isPlainQuery(query string) bool {
+// не создаётся вовсе. Поэтому её спрашивает и ручная вставка запросов: там ответ модели ни
+// при чём, а ловушка Wordstat та же.
+func IsPlainQuery(query string) bool {
 	for _, symbol := range query {
 		if unicode.IsLetter(symbol) || unicode.IsDigit(symbol) || symbol == ' ' {
 			continue

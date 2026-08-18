@@ -22,8 +22,8 @@ LOGIN_SERVICE := $(word 2,$(MAKECMDGOALS))
 TASK_OPERATION := $(word 2,$(MAKECMDGOALS))
 TASK_ARG := $(word 3,$(MAKECMDGOALS))
 TASK_EXTRA_ARGS := $(wordlist 4,$(words $(MAKECMDGOALS)),$(MAKECMDGOALS))
-TASK_OPERATIONS := import import-check errors retry run regenerate dry-run prepare generate demo-generate article info review fix html result clear reset google-login google-publish deepseek-login
-OPTIONAL_ARGUMENT_OPERATIONS := import-check errors retry run regenerate clear reset google-publish prepare generate demo-generate article info review fix html result
+TASK_OPERATIONS := import import-check errors keywords retry run regenerate dry-run prepare generate demo-generate article info review fix html result clear reset google-login google-publish deepseek-login
+OPTIONAL_ARGUMENT_OPERATIONS := import-check errors keywords retry run regenerate clear reset google-publish prepare generate demo-generate article info review fix html result
 
 .PHONY: help task-1 pprof-1 login docker-up docker-start docker-stop docker-down docker-restart docker-logs docker-ps
 .PHONY: test test-race fmt vet lint lint-fix build
@@ -50,6 +50,7 @@ help: ## этот список
 		'make pprof-1 import [limit]'      'импорт статей из Excel' \
 		'make pprof-1 import-check [ID]'   'сверка импорта с Excel' \
 		'make pprof-1 errors [ID]'         'статьи с текущей ошибкой' \
+		'make pprof-1 keywords ID'         'вставить запросы вместо сбора Keys.so' \
 		'make pprof-1 prepare [ID]'        'research Keys.so и Arsenkin' \
 		'make pprof-1 generate [ID]'       'полный прогон, он же run' \
 		'make pprof-1 article [ID]'        'чат 2 целиком' \

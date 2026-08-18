@@ -201,6 +201,16 @@ func main() {
 			Out:         os.Stdout,
 		}, taskLogger, command.ExternalID)
 
+	case "keywords":
+		// Ни LLM, ни Keys.so, ни Arsenkin: команда только кладёт вставленную колонку в
+		// article_research вместо первого этапа Keys.so.
+		err = runKeywords(ctx, articleRepository, keywordsOptions{
+			TaskCommand: profile.Command,
+			Interactive: isCharDevice(os.Stdin),
+			In:          os.Stdin,
+			Out:         os.Stdout,
+		}, taskLogger, command.ExternalID)
+
 	case "prepare":
 		// Резервный источник запросов строится заранее, но браузер провайдера не
 		// открывается: клиент DeepSeek создаёт сессию только на первом запросе, а его
@@ -663,7 +673,7 @@ func parseCommand(args []string) (taskCommand, error) {
 // availableOperations перечисляет операции задачи. Набор у задач один и тот же: pprof_1
 // отличается путями и схемой стадий, а не составом команд.
 func availableOperations(task string) string {
-	return "available " + task + " operations: import, import-check, errors, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, clear, reset, google-login, google-publish, deepseek-login"
+	return "available " + task + " operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, clear, reset, google-login, google-publish, deepseek-login"
 }
 
 func parseTaskCommand(args []string) (taskCommand, error) {
@@ -725,15 +735,11 @@ func parseTaskCommand(args []string) (taskCommand, error) {
 			return taskCommand{}, fmt.Errorf("usage: seo-pipeline %s run [external_id]", profile.Command)
 		}
 		return parseExternalIDCommand(profile, task, args[3])
-	case "regenerate":
+	// ID обязателен у всех трёх: для regenerate и clear «все статьи» означало бы reset,
+	// а колонка запросов вставляется одной статье — общей колонки не бывает.
+	case "regenerate", "clear", "keywords":
 		if len(args) != 4 {
-			return taskCommand{}, fmt.Errorf("usage: seo-pipeline %s regenerate <external_id>", profile.Command)
-		}
-		return parseExternalIDCommand(profile, task, args[3])
-	case "clear":
-		// ID обязателен: очистка без него означала бы «стереть все статьи», а это reset.
-		if len(args) != 4 {
-			return taskCommand{}, fmt.Errorf("usage: seo-pipeline %s clear <external_id>", profile.Command)
+			return taskCommand{}, fmt.Errorf("usage: seo-pipeline %s %s <external_id>", profile.Command, task)
 		}
 		return parseExternalIDCommand(profile, task, args[3])
 	case "errors", "retry", "prepare", "generate", "demo-generate", "review", "fix", "info", "html", "result", "article", "import-check",
@@ -770,7 +776,7 @@ func validateConfig(command string, cfg config.Config) error {
 		return cfg.ValidateGenerate()
 	case "result":
 		return cfg.ValidateReset()
-	case "errors", "reset", "clear", "google-publish":
+	case "errors", "reset", "clear", "keywords", "google-publish":
 		return cfg.ValidateReset()
 	default:
 		return fmt.Errorf("unknown task %q", command)

@@ -35,7 +35,7 @@ func TestArticleRepositoryIdempotency(t *testing.T) {
 	}
 	assertCount(t, pool, "articles", "external_id = '11'", 1)
 
-	if err := repository.SaveCleanedKeywords(ctx, first.ID, []string{"старый запрос"}); err != nil {
+	if err := repository.SaveManualKeywords(ctx, first.ID, []string{"старый запрос"}); err != nil {
 		t.Fatal(err)
 	}
 	assertCount(t, pool, "article_research", fmt.Sprintf("article_id = %d", first.ID), 1)
@@ -56,7 +56,7 @@ func TestArticleRepositoryIdempotency(t *testing.T) {
 	assertCount(t, pool, "articles", "external_id = '11'", 1)
 	assertImportedFields(t, pool, second.ID, updated)
 	assertCleanedKeywords(t, pool, second.ID, []string{"старый запрос"})
-	if err := repository.SaveCleanedKeywords(ctx, first.ID, []string{"новый запрос"}); err != nil {
+	if err := repository.SaveManualKeywords(ctx, first.ID, []string{"новый запрос"}); err != nil {
 		t.Fatal(err)
 	}
 	assertCount(t, pool, "article_research", fmt.Sprintf("article_id = %d", first.ID), 1)
@@ -979,6 +979,67 @@ func TestResetCountsAndReset(t *testing.T) {
 		t.Fatalf("после сброса articles.id = %d, ожидалась 1", recreated.ID)
 	}
 	assertCount(t, pool, "articles", "external_id = '62'", 1)
+}
+
+// TestSaveManualKeywordsOverwritesResearchAndState: вставка запросов руками безусловна.
+// Она обязана перебить и уже собранный research, и продвинутое состояние статьи — иначе
+// признак ручного заполнения не появится (competitor_structure остался бы непустым), а
+// статья не попадёт в batch-выборку prepare.
+func TestSaveManualKeywordsOverwritesResearchAndState(t *testing.T) {
+	repository, pool := newTestRepository(t)
+	ctx := context.Background()
+
+	created, err := repository.Create(ctx, article.Input{
+		ExcelID: 21, Title: "Обучение на маляра", ImageSlug: "obuchenie-na-malyara",
+		Keyword: "маляр", ReferenceURL: "https://example.com/malyar",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Статья прошла research целиком, ушла дальше по пайплайну и упала.
+	if err := repository.SavePreparedResearch(ctx, created.ID,
+		[]string{"старый запрос"},
+		[]article.KeywordFrequency{{Query: "старый запрос", Frequency: 100}},
+		[]string{"старый lsi"}, "H1 Старая структура",
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.SaveStructurePath(ctx, created.ID, "21-obuchenie-na-malyara/generated/structure.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.SaveError(ctx, created.ID, errors.New("stage=article: обрыв генерации")); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := repository.SaveManualKeywords(ctx, created.ID, []string{"курсы маляра", "обучение на маляра"}); err != nil {
+		t.Fatal(err)
+	}
+
+	assertCleanedKeywords(t, pool, created.ID, []string{"курсы маляра", "обучение на маляра"})
+	assertCount(t, pool, "article_research", fmt.Sprintf(
+		"article_id = %d AND competitor_structure IS NULL AND wordstat_keywords = '[]'::jsonb AND lsi_words = '[]'::jsonb",
+		created.ID), 1)
+	assertCount(t, pool, "articles", fmt.Sprintf(
+		"id = %d AND status = 'pending' AND current_step = 'arsenkin_collection' AND error_message IS NULL",
+		created.ID), 1)
+	// Признак ручного заполнения виден прогону: research больше не считается собранным.
+	manual, err := repository.GetManualKeywords(ctx, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(manual, []string{"курсы маляра", "обучение на маляра"}) {
+		t.Fatalf("GetManualKeywords = %v", manual)
+	}
+	prepared, err := repository.HasPreparedResearch(ctx, created.ExternalID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prepared {
+		t.Fatal("статья с ручными запросами считается подготовленной: prepare её пропустит")
+	}
+	// Артефакты генерации команда не трогает: возобновление идёт по ним.
+	assertCount(t, pool, "article_outputs", fmt.Sprintf(
+		"article_id = %d AND structure_path IS NOT NULL", created.ID), 1)
 }
 
 func newTestRepository(t *testing.T) (*ArticleRepository, *pgxpool.Pool) {

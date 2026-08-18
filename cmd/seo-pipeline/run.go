@@ -422,22 +422,16 @@ func collectCleanedKeywords(
 			savePipelineError(ctx, articleRepository, selected.ID, err)
 	}
 	if len(manualKeywords) > 0 {
-		collected := keysso.CollectResult{
-			CollectedCount:  len(manualKeywords),
-			CleanedKeywords: manualKeywords,
-		}
-		stageLogger.Info("этап Keys.so пропущен: запросы заполнены вручную",
-			append(keyssoLogFields("skip", stageStarted, "", collected.CollectedCount, len(manualKeywords)),
+		stageLogger.Info("сбор запросов у конкурента пропущен: запросы вставлены вручную",
+			append(keyssoLogFields("skip_collect", stageStarted, "", len(manualKeywords), 0),
 				"source", diagnostics.KeywordSourceManual)...)
 		diagnostics.LogStep(logger, "keysso", "before", trace, "source", diagnostics.KeywordSourceManual)
-		saveKeysSODiagnostics(logger, artifacts, selected, trace, diagnostics.KeywordSourceManual, collected, time.Since(stageStarted))
-		report.Pass("keysso_collect", map[string]any{
-			"source":          diagnostics.KeywordSourceManual,
-			"collected_count": collected.CollectedCount,
-			"cleaned_count":   len(manualKeywords),
-			"fingerprint":     diagnostics.Fingerprint(strings.Join(manualKeywords, "\n")),
+		report.Pass("manual_keywords", map[string]any{
+			"raw_count":   len(manualKeywords),
+			"fingerprint": diagnostics.Fingerprint(strings.Join(manualKeywords, "\n")),
 		})
-		return collected, diagnostics.KeywordSourceManual, "", nil
+		return cleanRawKeywords(ctx, articleRepository, logger, artifacts, selected, trace,
+			keyssoService, report, stageStarted, diagnostics.KeywordSourceManual, manualKeywords)
 	}
 
 	if strings.TrimSpace(selected.ReferenceURL) == "" {
@@ -545,22 +539,46 @@ func collectFallbackKeywords(
 		"fingerprint":   diagnostics.Fingerprint(strings.Join(rawKeywords, "\n")),
 	})
 
+	return cleanRawKeywords(ctx, articleRepository, logger, artifacts, selected, trace,
+		keyssoService, report, stageStarted, diagnostics.KeywordSourceFallback, rawKeywords)
+}
+
+// cleanRawKeywords прогоняет исходные запросы через форму delete-double Keys.so и возвращает
+// их очищенными — тем же путём, что и запросы, собранные у конкурента.
+//
+// Общий для всех источников, кроме самого Keys.so: и ручная вставка, и резервный подбор
+// моделью заменяют только ПЕРВЫЙ этап Keys.so — откуда взялся исходный список. Чистка от
+// дублей остаётся за Keys.so при любом источнике, иначе в Wordstat уехали бы разные списки в
+// зависимости от того, кто их принёс.
+func cleanRawKeywords(
+	ctx context.Context,
+	articleRepository prepareRepository,
+	logger *slog.Logger,
+	artifacts prepareArtifactWriter,
+	selected article.Article,
+	trace article.Trace,
+	keyssoService keyssoCollector,
+	report *diagnostics.PrepareReport,
+	stageStarted time.Time,
+	source string,
+	rawKeywords []string,
+) (keysso.CollectResult, string, string, error) {
 	collected, err := keyssoService.CleanKeywords(ctx, rawKeywords)
 	if err != nil {
 		report.Fail("keysso_collect", err.Error(), map[string]any{
-			"source": diagnostics.KeywordSourceFallback, "collected_count": len(rawKeywords),
+			"source": source, "collected_count": len(rawKeywords),
 		})
-		return keysso.CollectResult{}, diagnostics.KeywordSourceFallback, "keysso_collect",
+		return keysso.CollectResult{}, source, "keysso_collect",
 			savePipelineError(ctx, articleRepository, selected.ID, newKeyssoRunError(
 				selected.ID, "clean_duplicates", stageStarted, "", len(rawKeywords), 0, err,
 			))
 	}
-	saveKeysSODiagnostics(logger, artifacts, selected, trace, diagnostics.KeywordSourceFallback, collected, time.Since(stageStarted))
+	saveKeysSODiagnostics(logger, artifacts, selected, trace, source, collected, time.Since(stageStarted))
 	if len(collected.CleanedKeywords) == 0 {
 		report.Fail("keysso_collect", "очистка Keys.so вернула пустой список запросов", map[string]any{
-			"source": diagnostics.KeywordSourceFallback, "collected_count": collected.CollectedCount, "cleaned_count": 0,
+			"source": source, "collected_count": collected.CollectedCount, "cleaned_count": 0,
 		})
-		return keysso.CollectResult{}, diagnostics.KeywordSourceFallback, "keysso_collect", savePipelineError(
+		return keysso.CollectResult{}, source, "keysso_collect", savePipelineError(
 			ctx,
 			articleRepository,
 			selected.ID,
@@ -569,12 +587,12 @@ func collectFallbackKeywords(
 		)
 	}
 	report.Pass("keysso_collect", map[string]any{
-		"source":          diagnostics.KeywordSourceFallback,
+		"source":          source,
 		"collected_count": collected.CollectedCount,
 		"cleaned_count":   len(collected.CleanedKeywords),
 		"fingerprint":     diagnostics.Fingerprint(strings.Join(collected.CleanedKeywords, "\n")),
 	})
-	return collected, diagnostics.KeywordSourceFallback, "", nil
+	return collected, source, "", nil
 }
 
 func saveKeysSODiagnostics(

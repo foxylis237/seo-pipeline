@@ -178,6 +178,9 @@ make task-1 import 10               # только первые 10 новых с
 make task-1 import-check            # сверить импорт с Excel
 make task-1 import-check 37         # сверить одну статью
 
+# Ключевые запросы вручную
+make task-1 keywords 37             # спросит запросы и заменит ими сбор Keys.so
+
 # Сбор research                     →
 make task-1 prepare                 # все статьи без research
 make task-1 prepare 37              # одна статья
@@ -238,6 +241,9 @@ make pprof-1 import                 # весь Excel (файл общий с tas
 make pprof-1 import 10              # только первые 10 новых строк
 make pprof-1 import-check           # сверить импорт с Excel
 make pprof-1 import-check 37        # сверить одну статью
+
+# Ключевые запросы вручную
+make pprof-1 keywords 37            # спросит запросы и заменит ими сбор Keys.so
 
 # Сбор research                     →
 make pprof-1 prepare                # все статьи без research
@@ -330,6 +336,7 @@ make help                           # короткий список команд
 | `task-1 import` | Импортирует все заполненные строки Excel. | Необязательный положительный лимит строк данных. | `make task-1 import` или `make task-1 import 10` | `go run ./cmd/seo-pipeline task-1 import [limit]` |
 | `task-1 import-check` | Проверяет корректность импорта Excel перед запуском генерации: полноту переноса, уникальность `external_id`, совпадение полей и связь `articles ↔ article_inputs`. Данные не изменяет, внешние сервисы не вызывает. | Необязательный `external_id` из Excel. | `make task-1 import-check` или `make task-1 import-check 37` | `go run ./cmd/seo-pipeline task-1 import-check [external_id]` |
 | `task-1 errors` | Показывает статьи с текущей сохранённой ошибкой. | Необязательный `external_id` из Excel. | `make task-1 errors` или `make task-1 errors 57` | `go run ./cmd/seo-pipeline task-1 errors [external_id]` |
+| `task-1 keywords` | Спрашивает ключевые запросы и кладёт их в статью вместо сбора запросов у конкурента: первый этап Keys.so считается выполненным. Ввод — по одному запросу в строке, конец — пустая строка или Ctrl-D; повторы отбрасываются. Перезапись безусловная: прежние запросы и research стираются, статья возвращается к статусу `pending` и этапу `arsenkin_collection`, ошибка снимается. Готовые файлы генерации остаются — текст под новые запросы пересобирает `regenerate`. Ничего не запускает и наружу не ходит; чистку от дублей, Arsenkin и остальное делает следующий `run`. | **Обязательный** `external_id`. | `make task-1 keywords 37` | `go run ./cmd/seo-pipeline task-1 keywords <external_id>` |
 | `task-1 run` | Полный pipeline `prepare → structure → article/info → review → fix → html → result` с возобновлением: готовые этапы пропускаются. Без ID берёт все статьи, кроме `completed`. | Необязательный ID; `plan` показывает точку возобновления, ничего не выполняя. | `make task-1 run`, `make task-1 run 37`, `make task-1 run plan` | `go run ./cmd/seo-pipeline task-1 run [--plan] [external_id]` |
 | `task-1 retry` | Снимает сохранённую ошибку и проводит статью тем же полным раннером, что и `run`. | Необязательный `external_id` из Excel. | `make task-1 retry` или `make task-1 retry 57` | `go run ./cmd/seo-pipeline task-1 retry [external_id]` |
 | `task-1 regenerate` | Сбрасывает результаты генерации одной статьи и проводит её заново полным pipeline. Research сохраняется. | **Обязательный** `external_id`. | `make task-1 regenerate 37` | `go run ./cmd/seo-pipeline task-1 regenerate <external_id>` |
@@ -456,9 +463,11 @@ Excel всегда просматривается сверху вниз, а ис
 
 ### Источник исходных запросов
 
-Исходные запросы для статьи берутся из первого доступного источника, в таком порядке:
+Заменяется **только первый этап Keys.so** — откуда взялся исходный список запросов. Чистка от дублей (форма `delete-double`) остаётся за Keys.so при любом источнике, иначе в Wordstat уезжали бы разные списки в зависимости от того, кто их принёс.
 
-1. **Ручное заполнение.** Если в `article_research.cleaned_keywords` статьи уже лежат запросы, этап Keys.so пропускается целиком. В логах и в `prepare/keysso.json` источник помечается как `manual`.
+Исходные запросы берутся из первого доступного источника, в таком порядке:
+
+1. **Ручная вставка.** Если в `article_research.cleaned_keywords` статьи уже лежат запросы, а `competitor_structure` пуст, сбор запросов у конкурента пропускается: вставленный список сразу идёт в чистку от дублей, а оттуда в Arsenkin. Кладёт его команда `make <задача> keywords <external_id>`. В логах и в `prepare/keysso.json` источник помечается как `manual`.
 2. **Keys.so.** Обычный сбор по `reference_url` конкурента с последующей очисткой дубликатов.
 3. **Резервный подбор моделью.** Срабатывает только тогда, когда Keys.so отработал штатно, но не дал ни одного исходного запроса. За это отвечает стадия `keywords` в `config/config.yaml` — та же маршрутизация и тот же Router, что у генерационных стадий. Результат проходит через ту же очистку Keys.so, что и обычный сбор, поэтому `cleaned_keywords` остаётся результатом Keys.so независимо от источника.
 
