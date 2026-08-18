@@ -139,7 +139,8 @@ func newFlowFixture(t *testing.T) (*Flow, *fakeChats, *fakeRepository, *recordin
 			CompetitorStructure: "структура конкурента",
 			WordstatKeywords:    []article.KeywordFrequency{{Query: "логопед", Frequency: 100}},
 			LSIWords:            []string{"дефектолог"},
-			Professions:         "Логопед — https://example.test/logoped",
+			Professions:         "логопед, дефектолог, педагог",
+			Links:               "https://example.test/logoped",
 		},
 	}
 	chats := &fakeChats{answers: map[string]string{

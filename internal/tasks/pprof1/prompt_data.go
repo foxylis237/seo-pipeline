@@ -55,11 +55,15 @@ func editorData(input article.GenerationInput) any {
 
 // htmlData — поля deepseek/4_html.txt. Здесь статья передаётся явно: чат 3 начинается с
 // чистой истории и текста ещё не видел.
+//
+// Перелинковка идёт из Links, а не из Professions: в Professions лежит список слов-меток
+// («профессии, карьера, зарплата»), адресов там нет вообще, и стадия получала задание
+// расставить ссылки без единой ссылки.
 func htmlData(input article.GenerationInput, finalText string) any {
 	return struct {
-		Article     string
-		Professions string
-	}{finalText, input.Professions}
+		Article string
+		Links   string
+	}{finalText, input.Links}
 }
 
 // NormalizeHTML снимает Markdown-обёртку и проверяет разметку теми же правилами, что и
