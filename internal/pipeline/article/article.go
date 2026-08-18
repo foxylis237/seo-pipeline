@@ -21,6 +21,66 @@ type Article struct {
 	UpdatedAt    time.Time
 }
 
+// Состояния публикации статьи в WordPress — значения колонки articles.wordpress_status.
+//
+// NULL среди них нет: колонка NOT NULL с умолчанием WordPressNotPublished, а CHECK-констрейнт
+// не пропускает ничего постороннего. Состояние «а тут NULL» означало бы лишнюю ветку в каждом
+// предикате выборки и в каждом сравнении.
+const (
+	// WordPressNotPublished — статьи в блоге нет.
+	WordPressNotPublished = "not_published"
+	// WordPressPublished — запись создал наш publisher: полный набор полей ушёл одним
+	// вызовом и был сверен обратным чтением.
+	WordPressPublished = "published"
+	// WordPressLinked — запись существовала до нас, её нашли и привязали командой
+	// mark-published. Чем она заполнена, приложение не знает и не проверяло.
+	//
+	// Отдельное состояние, а не то же published: иначе исчез бы ответ на вопрос «эта запись
+	// собрана нами или руками», а он определяет, чему верить при расхождении записи с
+	// артефактами статьи.
+	WordPressLinked = "linked"
+)
+
+// Publication — состояние публикации одной статьи.
+//
+// PostID и URL пусты, пока запись неизвестна: у привязанной вручную без указания записи они
+// так и остаются пустыми.
+type Publication struct {
+	Status string
+	PostID *int64
+	URL    string
+}
+
+// InWordPress отвечает на вопрос, ради которого состояние и хранится: есть ли статья в блоге.
+//
+// Оба непустых состояния отвечают «да». Защита от дублей их не различает — повторная
+// публикация одинаково недопустима и для созданной нами записи, и для привязанной.
+func (p Publication) InWordPress() bool {
+	return p.Status == WordPressPublished || p.Status == WordPressLinked
+}
+
+// CreatedByPipeline отличает запись, собранную нашим publisher, от привязанной вручную.
+func (p Publication) CreatedByPipeline() bool { return p.Status == WordPressPublished }
+
+// PublicationInput — всё, из чего собирается запись WordPress.
+//
+// Собирается репозиторием одним запросом. Времени чтения здесь нет намеренно: оно нигде не
+// хранится, а готовое значение лежит в result.md — читать его файлом обязан вызывающий.
+type PublicationInput struct {
+	Article         Article
+	Publication     Publication
+	Category        string
+	Tags            string
+	Keyword         string
+	MetaDescription string
+	Header          string
+	TLDR            string
+	FAQ             string
+	// HTMLPath — путь к article.html относительно OUTPUT_DIR. Пуст, если стадия html не
+	// доходила до конца: тогда публиковать нечего.
+	HTMLPath string
+}
+
 // ErrorRecord is one immutable processing failure stored for an article.
 type ErrorRecord struct {
 	ID           int64
@@ -126,4 +186,7 @@ type ResultInput struct {
 	// GoogleDocURL — адрес документа с промптом статьи. Пуст, пока промпт не опубликован:
 	// result.md печатает раздел в любом случае, но с пустым значением.
 	GoogleDocURL string
+	// WordPressURL — адрес опубликованной записи. Пуст, пока статья не опубликована, и
+	// остаётся пустым у статей, отмеченных вручную: у них записи мы не знаем.
+	WordPressURL string
 }
