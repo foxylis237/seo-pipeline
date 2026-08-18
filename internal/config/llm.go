@@ -55,6 +55,12 @@ type LLMStageConfig struct {
 	Temperature *float64          `yaml:"temperature"`
 	MaxTokens   int               `yaml:"max_tokens"`
 	TimeoutText string            `yaml:"timeout"`
+	// AttemptTimeoutText ограничивает одну попытку, тогда как TimeoutText остаётся общим
+	// бюджетом стадии на все попытки. Без него первая же зависшая попытка съедала бюджет
+	// целиком: повтор не начинался, и стадия падала с «deadline exceeded before retry», ни
+	// разу не повторившись. Пустое значение сохраняет прежнее поведение — попытке доступен
+	// весь остаток бюджета.
+	AttemptTimeoutText string `yaml:"attempt_timeout"`
 	// AttachmentsDir — каталог с документом, который уходит в модель вместе с промптом
 	// стадии. Имя файла не фиксируется: значим каталог, а не то, как назвали регламент.
 	// Пустое значение означает стадию без вложений — так живут все стадии task_1.
@@ -66,6 +72,7 @@ type LLMStageConfig struct {
 	Mode string `yaml:"mode"`
 
 	Timeout        time.Duration `yaml:"-"`
+	AttemptTimeout time.Duration `yaml:"-"`
 	PromptTemplate string        `yaml:"-"`
 }
 
@@ -196,6 +203,9 @@ func mergeLLMConfig(base *LLMConfig, overlay LLMConfig) {
 		if strings.TrimSpace(stage.TimeoutText) != "" {
 			merged.TimeoutText = stage.TimeoutText
 		}
+		if strings.TrimSpace(stage.AttemptTimeoutText) != "" {
+			merged.AttemptTimeoutText = stage.AttemptTimeoutText
+		}
 		if strings.TrimSpace(stage.AttachmentsDir) != "" {
 			merged.AttachmentsDir = stage.AttachmentsDir
 		}
@@ -227,6 +237,37 @@ func loadLLMConfig(path string, stages []string, requireCredentials bool) (LLMCo
 		return LLMConfig{}, err
 	}
 	return fileConfig.LLM, nil
+}
+
+// resolveStageTimeouts разбирает оба бюджета стадии: общий на все попытки и на одну попытку.
+//
+// Второй по умолчанию равен первому — так стадия ведёт себя ровно как до его появления.
+func resolveStageTimeouts(stageName string, stage *LLMStageConfig) error {
+	stage.Timeout = DefaultLLMTimeout
+	if text := strings.TrimSpace(stage.TimeoutText); text != "" {
+		timeout, err := time.ParseDuration(text)
+		if err != nil || timeout <= 0 {
+			return fmt.Errorf("LLM stage %q has invalid timeout %q", stageName, stage.TimeoutText)
+		}
+		stage.Timeout = timeout
+	}
+	stage.AttemptTimeout = stage.Timeout
+	text := strings.TrimSpace(stage.AttemptTimeoutText)
+	if text == "" {
+		return nil
+	}
+	attemptTimeout, err := time.ParseDuration(text)
+	if err != nil || attemptTimeout <= 0 {
+		return fmt.Errorf("LLM stage %q has invalid attempt_timeout %q", stageName, stage.AttemptTimeoutText)
+	}
+	// Попытка длиннее бюджета — не ограничение, а его молчаливая отмена: повтору снова не
+	// останется времени. Такую конфигурацию честнее не принимать.
+	if attemptTimeout > stage.Timeout {
+		return fmt.Errorf("LLM stage %q has attempt_timeout %s longer than timeout %s",
+			stageName, attemptTimeout, stage.Timeout)
+	}
+	stage.AttemptTimeout = attemptTimeout
+	return nil
 }
 
 func validateLLMConfig(cfg *LLMConfig, stages []string, requireCredentials bool) error {
@@ -267,13 +308,8 @@ func validateLLMConfig(cfg *LLMConfig, stages []string, requireCredentials bool)
 		if stage.MaxTokens < 0 {
 			return fmt.Errorf("LLM stage %q has invalid max_tokens", stageName)
 		}
-		if strings.TrimSpace(stage.TimeoutText) == "" {
-			stage.Timeout = DefaultLLMTimeout
-		} else {
-			stage.Timeout, err = time.ParseDuration(stage.TimeoutText)
-			if err != nil || stage.Timeout <= 0 {
-				return fmt.Errorf("LLM stage %q has invalid timeout %q", stageName, stage.TimeoutText)
-			}
+		if err := resolveStageTimeouts(stageName, &stage); err != nil {
+			return err
 		}
 		cfg.Stages[stageName] = stage
 	}

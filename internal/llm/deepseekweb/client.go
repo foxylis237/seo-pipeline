@@ -169,6 +169,9 @@ func (c *Client) waitForAnswer(ctx context.Context, page playwright.Page, mark a
 	for {
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
+			if c.detectServerBusy(page) {
+				return serverBusyError()
+			}
 			if expired, checkErr := isSessionExpired(page); checkErr == nil && expired {
 				return sessionExpiredError()
 			}
@@ -181,6 +184,12 @@ func (c *Client) waitForAnswer(ctx context.Context, page playwright.Page, mark a
 			playwright.PageWaitForFunctionOptions{Polling: "raf", Timeout: playwright.Float(float64(wait.Milliseconds()))})
 		if err == nil {
 			return nil
+		}
+		// Отказ сервера приходит вместо ответа и сам не исчезнет: ждать дальше нечего, а
+		// ждать было чем — до этой проверки ожидание висело до конца бюджета стадии и
+		// забирало его целиком, не оставляя времени ни на один повтор.
+		if c.detectServerBusy(page) {
+			return serverBusyError()
 		}
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return fmt.Errorf("wait for complete DeepSeek answer: %w", ctxErr)

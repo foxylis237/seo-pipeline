@@ -105,11 +105,12 @@ func TestMergeKeepsBaseFieldsWhenOverlayIsEmpty(t *testing.T) {
 		Providers: map[string]LLMProviderConfig{"deepseek_web": {Type: "deepseek_web", ProfileDir: "data/browser/deepseek"}},
 		Stages: map[string]LLMStageConfig{
 			"structure": {
-				Targets:     []LLMTargetConfig{{Provider: "gemini", Model: "base-model"}},
-				Prompt:      "base.txt",
-				Temperature: &temperature,
-				MaxTokens:   777,
-				TimeoutText: "42s",
+				Targets:            []LLMTargetConfig{{Provider: "gemini", Model: "base-model"}},
+				Prompt:             "base.txt",
+				Temperature:        &temperature,
+				MaxTokens:          777,
+				TimeoutText:        "42s",
+				AttemptTimeoutText: "20s",
 			},
 		},
 	}
@@ -125,7 +126,7 @@ func TestMergeKeepsBaseFieldsWhenOverlayIsEmpty(t *testing.T) {
 	if len(stage.Targets) != 1 || stage.Targets[0].Model != "base-model" {
 		t.Fatalf("targets перезаписаны пустым overlay: %+v", stage.Targets)
 	}
-	if stage.MaxTokens != 777 || stage.TimeoutText != "42s" || *stage.Temperature != 0.7 {
+	if stage.MaxTokens != 777 || stage.TimeoutText != "42s" || stage.AttemptTimeoutText != "20s" || *stage.Temperature != 0.7 {
 		t.Fatalf("stage потерял базовые значения: %+v", stage)
 	}
 	provider := base.Providers["deepseek_web"]

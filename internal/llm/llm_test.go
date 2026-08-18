@@ -106,6 +106,45 @@ func TestRouterUsesOneTimeoutForAllAttempts(t *testing.T) {
 	}
 }
 
+// Зависшая попытка обязана освободить бюджет стадии остальным. Без отдельного таймаута
+// попытки она забирала его целиком: стадия падала с «deadline exceeded before retry», ни
+// разу не повторившись, — так статья 20 потеряла чат 2 на отказе DeepSeek.
+func TestAttemptTimeoutLeavesBudgetForRetries(t *testing.T) {
+	client := &fakeClient{wait: true}
+	router := testRouter(client)
+	stage := router.config.Stages["structure"]
+	stage.Timeout = 500 * time.Millisecond
+	stage.AttemptTimeout = 30 * time.Millisecond
+	router.config.Stages["structure"] = stage
+
+	if _, err := router.Generate(context.Background(), Call{Stage: "structure", Data: struct{ Title string }{"Тема"}}); err == nil {
+		t.Fatal("стадия обязана завершиться ошибкой")
+	}
+	if client.calls != 3 {
+		t.Fatalf("calls = %d, want 3", client.calls)
+	}
+	if len(client.deadlines) != 3 || !client.deadlines[1].After(client.deadlines[0]) {
+		t.Fatalf("попытки получили один срок: %v", client.deadlines)
+	}
+}
+
+// Без attempt_timeout поведение прежнее: весь бюджет достаётся первой попытке.
+func TestWithoutAttemptTimeoutFirstAttemptTakesWholeBudget(t *testing.T) {
+	client := &fakeClient{wait: true}
+	router := testRouter(client)
+	stage := router.config.Stages["structure"]
+	stage.Timeout = 30 * time.Millisecond
+	stage.AttemptTimeout = 0
+	router.config.Stages["structure"] = stage
+
+	if _, err := router.Generate(context.Background(), Call{Stage: "structure", Data: struct{ Title string }{"Тема"}}); err == nil {
+		t.Fatal("стадия обязана завершиться ошибкой")
+	}
+	if client.calls != 1 {
+		t.Fatalf("calls = %d, want 1", client.calls)
+	}
+}
+
 func TestRouterDoesNotRetryAfterOverallTimeout(t *testing.T) {
 	client := &fakeClient{errors: []error{NewStatusError(429, "rate limit exceeded")}}
 	router := testRouter(client)

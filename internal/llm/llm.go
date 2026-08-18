@@ -71,6 +71,10 @@ const (
 	ErrorTypeCreditsExhausted ErrorType = "credits_exhausted"
 	ErrorTypeUnauthorized     ErrorType = "unauthorized"
 	ErrorTypeProvider         ErrorType = "provider_error"
+	// ErrorTypeOverloaded — провайдер жив и авторизация цела, но обслуживать запрос он
+	// сейчас отказывается («Server is busy» у DeepSeek). От остальных временных отказов
+	// отличается только паузой: повтор через несколько секунд упирается в ту же перегрузку.
+	ErrorTypeOverloaded ErrorType = "overloaded"
 )
 
 type StatusError struct {
@@ -374,6 +378,10 @@ func (r *Router) generateTarget(ctx context.Context, call Call, prompt string, s
 	}
 	stageCtx, cancel := context.WithTimeout(ctx, stage.Timeout)
 	defer cancel()
+	attemptTimeout := stage.AttemptTimeout
+	if attemptTimeout <= 0 {
+		attemptTimeout = stage.Timeout
+	}
 	for attempt := 1; attempt <= 3; attempt++ {
 		if err := stageCtx.Err(); err != nil {
 			return RoutedResponse{}, fmt.Errorf("deadline before attempt %d: %w", attempt, err)
@@ -387,12 +395,19 @@ func (r *Router) generateTarget(ctx context.Context, call Call, prompt string, s
 		}
 		r.logger.Info("LLM request attempt started",
 			"article_id", call.ArticleID, "stage", call.Stage, "provider", target.Provider,
-			"model", target.Model, "target_index", targetIndex, "attempt", attempt, "remaining_ms", remaining.Milliseconds(),
+			"model", target.Model, "target_index", targetIndex, "attempt", attempt,
+			"remaining_ms", remaining.Milliseconds(), "attempt_timeout_ms", attemptTimeout.Milliseconds(),
 		)
 		started := time.Now()
-		stopHeartbeat := r.startHeartbeat(stageCtx, call, target.Provider, target.Model, attempt, started)
-		response, requestErr := client.Generate(stageCtx, request)
+		// Попытка ограничена отдельно от стадии: без этого первая же зависшая попытка
+		// забирала весь бюджет, и до повтора дело не доходило. Родителем остаётся stageCtx,
+		// поэтому попытка не может пережить стадию, а без attempt_timeout срок у неё
+		// прежний — весь остаток бюджета.
+		attemptCtx, cancelAttempt := context.WithTimeout(stageCtx, attemptTimeout)
+		stopHeartbeat := r.startHeartbeat(attemptCtx, call, target.Provider, target.Model, attempt, started)
+		response, requestErr := client.Generate(attemptCtx, request)
 		stopHeartbeat()
+		cancelAttempt()
 		fields := []any{"article_id", call.ArticleID, "stage", call.Stage, "provider", target.Provider, "model", target.Model, "target_index", targetIndex, "attempt", attempt, "duration_ms", time.Since(started).Milliseconds(), "success", requestErr == nil}
 		if requestErr == nil {
 			fields = append(fields, "input_tokens", response.InputTokens, "output_tokens", response.OutputTokens)
@@ -406,7 +421,7 @@ func (r *Router) generateTarget(ctx context.Context, call Call, prompt string, s
 		if attempt == 3 || !retryable {
 			return RoutedResponse{}, routedError(call.Stage, target.Provider, target.Model, requestErr)
 		}
-		if err := r.sleep(stageCtx, r.retryDelay(target.Provider, attempt)); err != nil {
+		if err := r.sleep(stageCtx, r.retryDelay(target.Provider, attempt, requestErr)); err != nil {
 			return RoutedResponse{}, fmt.Errorf("LLM stage %q deadline exceeded before retry: %w", call.Stage, err)
 		}
 	}
@@ -420,19 +435,32 @@ const browserProviderType = "deepseek_web"
 // browserRetryDelays задаёт паузы перед повторами для браузерных провайдеров.
 var browserRetryDelays = []time.Duration{5 * time.Second, 15 * time.Second, 30 * time.Second}
 
-// retryDelay возвращает паузу перед следующей попыткой того же target.
-func (r *Router) retryDelay(provider string, attempt int) time.Duration {
+// overloadedRetryDelays задаёт паузы для перегруженного провайдера. Секунды здесь бесполезны:
+// отказ держится минутами, и быстрый повтор только тратит одну из трёх попыток впустую.
+var overloadedRetryDelays = []time.Duration{time.Minute, 3 * time.Minute, 5 * time.Minute}
+
+// retryDelay возвращает паузу перед следующей попыткой того же target. Вид отказа важнее
+// провайдера: перегрузку пережидают дольше, чем сбой браузера.
+func (r *Router) retryDelay(provider string, attempt int, err error) time.Duration {
+	if err != nil && errorTypeOf(err) == ErrorTypeOverloaded {
+		return delayFromTable(overloadedRetryDelays, attempt)
+	}
 	if r.config.Providers[provider].Type == browserProviderType {
-		index := attempt - 1
-		if index >= len(browserRetryDelays) {
-			index = len(browserRetryDelays) - 1
-		}
-		if index < 0 {
-			index = 0
-		}
-		return browserRetryDelays[index]
+		return delayFromTable(browserRetryDelays, attempt)
 	}
 	return r.baseDelay * time.Duration(1<<(attempt-1))
+}
+
+// delayFromTable выбирает паузу по номеру попытки, удерживая номер в границах таблицы.
+func delayFromTable(delays []time.Duration, attempt int) time.Duration {
+	index := attempt - 1
+	if index >= len(delays) {
+		index = len(delays) - 1
+	}
+	if index < 0 {
+		index = 0
+	}
+	return delays[index]
 }
 
 func isFallbackEligible(err error) bool {
@@ -554,6 +582,8 @@ func routedError(stage, provider, model string, err error) error {
 			return fmt.Errorf("LLM credits exhausted: provider=%s stage=%s model=%s: %w", provider, stage, model, err)
 		case ErrorTypeRateLimit:
 			return fmt.Errorf("LLM rate limit reached: provider=%s stage=%s model=%s; retry later: %w", provider, stage, model, err)
+		case ErrorTypeOverloaded:
+			return fmt.Errorf("LLM provider is overloaded: provider=%s stage=%s model=%s; retry later: %w", provider, stage, model, err)
 		}
 	}
 	return fmt.Errorf("LLM stage %q provider %q: %w", stage, provider, err)

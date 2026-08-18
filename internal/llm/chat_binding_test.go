@@ -135,23 +135,46 @@ func TestBrowserProviderUsesLongerRetryDelays(t *testing.T) {
 	router := reviewFixRouter(t, &fakeClient{}, &fakeClient{})
 	want := []time.Duration{5 * time.Second, 15 * time.Second, 30 * time.Second}
 	for attempt, expected := range want {
-		if got := router.retryDelay("reserve", attempt+1); got != expected {
+		if got := router.retryDelay("reserve", attempt+1, nil); got != expected {
 			t.Fatalf("retryDelay(deepseek_web, %d) = %v, want %v", attempt+1, got, expected)
 		}
 	}
-	if got := router.retryDelay("reserve", 9); got != 30*time.Second {
+	if got := router.retryDelay("reserve", 9, nil); got != 30*time.Second {
 		t.Fatalf("retryDelay за пределами таблицы = %v, want 30s", got)
+	}
+}
+
+// Перегрузка провайдера пережидается минутами независимо от того, браузерный он или нет:
+// «Server is busy» держится дольше, чем секундные паузы обычного повтора.
+func TestOverloadedProviderWaitsMinutesBeforeRetry(t *testing.T) {
+	router := reviewFixRouter(t, &fakeClient{}, &fakeClient{})
+	overloaded := &StatusError{Code: 503, Type: ErrorTypeOverloaded, Message: "deepseek_server_busy"}
+	want := []time.Duration{time.Minute, 3 * time.Minute, 5 * time.Minute}
+	for attempt, expected := range want {
+		if got := router.retryDelay("reserve", attempt+1, overloaded); got != expected {
+			t.Fatalf("retryDelay(overloaded, %d) = %v, want %v", attempt+1, got, expected)
+		}
+		if got := router.retryDelay("primary", attempt+1, overloaded); got != expected {
+			t.Fatalf("retryDelay(overloaded, non-browser, %d) = %v, want %v", attempt+1, got, expected)
+		}
+	}
+	if got := router.retryDelay("reserve", 9, overloaded); got != 5*time.Minute {
+		t.Fatalf("retryDelay за пределами таблицы = %v, want 5m", got)
+	}
+	// Прочие временные отказы остаются на прежних паузах: перегрузка — отдельный случай.
+	if got := router.retryDelay("reserve", 1, NewStatusError(503, "temporary")); got != 5*time.Second {
+		t.Fatalf("retryDelay обычного 503 = %v, want 5s", got)
 	}
 }
 
 func TestNonBrowserProviderKeepsShortExponentialBackoff(t *testing.T) {
 	router := reviewFixRouter(t, &fakeClient{}, &fakeClient{})
 	for attempt, expected := range []time.Duration{200 * time.Millisecond, 400 * time.Millisecond, 800 * time.Millisecond} {
-		if got := router.retryDelay("primary", attempt+1); got != expected {
+		if got := router.retryDelay("primary", attempt+1, nil); got != expected {
 			t.Fatalf("retryDelay(gemini, %d) = %v, want %v", attempt+1, got, expected)
 		}
 	}
-	if got := router.retryDelay("unknown", 1); got != 200*time.Millisecond {
+	if got := router.retryDelay("unknown", 1, nil); got != 200*time.Millisecond {
 		t.Fatalf("retryDelay для незарегистрированного провайдера = %v, want 200ms", got)
 	}
 }

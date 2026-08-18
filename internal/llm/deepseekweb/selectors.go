@@ -45,27 +45,40 @@ const chatReadyJS = `(options) => {
   return false;
 }`
 
+// noticeTextJS — общая часть: текст страницы без содержимого ответов модели.
+//
+// Содержимое ответов вырезается, чтобы слова самой модели не принимались за состояние
+// страницы: «access denied» она может написать в любой статье.
+//
+// Текст берётся целиком. Раньше просматривались первые 8000 символов, и это работало, пока
+// проверка означала подменённую страницу: отказ в ответ на отправленное сообщение приходит
+// под последним сообщением, то есть в конце длинной беседы. Окна здесь не хватит никакого —
+// длина зависит от того, сколько сообщений успел отрисовать виртуальный список, — а стоит
+// поиск по уже готовой строке считанных микросекунд.
+const noticeTextJS = `
+  const noticeText = () => {
+    let page = document.body ? document.body.innerText || "" : "";
+    for (const answer of Array.from(document.querySelectorAll(options.answerSelector))) {
+      const answerText = answer.innerText || "";
+      if (answerText.length > 0) page = page.split(answerText).join(" ");
+    }
+    return page.toLowerCase();
+  };
+`
+
 // blockedStateJS возвращает причину недоступности аккаунта или пустую строку.
 //
 // Проверка Cloudflare приходит и на рабочей странице чата: сообщение уходит, а вместо ответа
 // внизу появляется заглушка, при этом поле ввода остаётся на месте. Поэтому наличие поля
 // ввода больше не считается признаком исправной страницы — так проверка пропускалась.
-//
-// Чтобы текст модели не принимался за блокировку, содержимое ответов вырезается из текста
-// страницы перед поиском маркеров: сама модель может написать любые слова.
-const blockedStateJS = `(options) => {
+const blockedStateJS = `(options) => {` + noticeTextJS + `
   const visible = (element) => {
     const style = window.getComputedStyle(element);
     const rect = element.getBoundingClientRect();
     return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
   };
   if (Array.from(document.querySelectorAll(options.blockedSelector)).some(visible)) return "challenge_or_captcha";
-  let page = document.body ? document.body.innerText || "" : "";
-  for (const answer of Array.from(document.querySelectorAll(options.answerSelector))) {
-    const answerText = answer.innerText || "";
-    if (answerText.length > 0) page = page.split(answerText).join(" ");
-  }
-  const text = page.slice(0, 8000).toLowerCase();
+  const text = noticeText();
   const markers = [
     ["account_blocked", ["account has been blocked", "account is blocked", "account has been suspended", "account is suspended", "аккаунт заблокирован", "учетная запись заблокирована"]],
     ["terms_violation", ["violation of our terms", "violates our terms", "нарушение правил", "нарушение условий"]],
@@ -76,6 +89,16 @@ const blockedStateJS = `(options) => {
     if (phrases.some((phrase) => text.includes(phrase))) return reason;
   }
   return "";
+}`
+
+// serverBusyJS сообщает, отказался ли DeepSeek обслуживать уже отправленное сообщение.
+//
+// Отказ приходит вместо ответа отдельной строкой под сообщением: «Server is busy. Try again
+// later, or use Instant Mode». Узла ответа при этом не появляется, кнопки остановки нет,
+// и ожидание ответа висит до конца бюджета стадии — распознать состояние больше нечем.
+const serverBusyJS = `(options) => {` + noticeTextJS + `
+  const text = noticeText();
+  return ["server is busy", "сервер занят", "сервер перегружен"].some((phrase) => text.includes(phrase));
 }`
 
 // copyLastAnswerJS нажимает кнопку копирования последнего ответа.

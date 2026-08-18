@@ -63,6 +63,63 @@ func TestLoadLLMConfig(t *testing.T) {
 	}
 }
 
+// Отдельный таймаут попытки: по умолчанию его нет, и попытке достаётся весь бюджет стадии —
+// поведение, которое было до его появления. Заданный явно, он обязан быть короче бюджета:
+// иначе первая же зависшая попытка снова заберёт его целиком и повтора не будет.
+func TestStageAttemptTimeout(t *testing.T) {
+	t.Setenv("TEST_GEMINI_KEY", "test-value")
+
+	cfg, err := LoadLLMConfig(writeLLMTestConfig(t, "gemini", "TEST_GEMINI_KEY", ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stage := cfg.Stages["structure"]; stage.AttemptTimeout != stage.Timeout {
+		t.Fatalf("attempt_timeout по умолчанию = %v, want %v", stage.AttemptTimeout, stage.Timeout)
+	}
+
+	cfg, err = LoadLLMConfigWithStageLines(t, map[string]string{"structure": "      attempt_timeout: 40s\n"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Stages["structure"].AttemptTimeout; got != 40*time.Second {
+		t.Fatalf("attempt_timeout = %v, want 40s", got)
+	}
+	if got := cfg.Stages["article"].AttemptTimeout; got != 2*time.Minute {
+		t.Fatalf("соседняя стадия получила чужой attempt_timeout: %v", got)
+	}
+
+	_, err = LoadLLMConfigWithStageLines(t, map[string]string{"structure": "      attempt_timeout: 5m\n"})
+	if err == nil || !strings.Contains(err.Error(), "longer than timeout") {
+		t.Fatalf("error = %v, want отказ по превышению бюджета стадии", err)
+	}
+
+	_, err = LoadLLMConfigWithStageLines(t, map[string]string{"structure": "      attempt_timeout: nonsense\n"})
+	if err == nil || !strings.Contains(err.Error(), "invalid attempt_timeout") {
+		t.Fatalf("error = %v, want отказ по неразбираемому значению", err)
+	}
+}
+
+// LoadLLMConfigWithStageLines собирает ту же тестовую конфигурацию, что и writeLLMTestConfig,
+// но добавляет стадиям произвольные строки: так проверяются ключи вне базовой раскладки.
+func LoadLLMConfigWithStageLines(t *testing.T, extra map[string]string) (LLMConfig, error) {
+	t.Helper()
+	directory := t.TempDir()
+	promptPath := filepath.Join(directory, "prompt.txt")
+	if err := os.WriteFile(promptPath, []byte("Title: {{.Title}}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	content := "llm:\n  providers:\n    gemini:\n      type: gemini\n      api_key_env: TEST_GEMINI_KEY\n  stages:\n"
+	for _, stage := range requiredLLMStages {
+		content += "    " + stage + ":\n      provider: gemini\n      model: test-model\n      prompt: " +
+			promptPath + "\n      timeout: 2m\n" + extra[stage]
+	}
+	configPath := filepath.Join(directory, "config.yaml")
+	if err := os.WriteFile(configPath, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return LoadLLMConfig(configPath)
+}
+
 func TestLoadLLMConfigRejectsUnknownProvider(t *testing.T) {
 	path := writeLLMTestConfig(t, "missing", "TEST_GEMINI_KEY", "")
 	t.Setenv("TEST_GEMINI_KEY", "test-value")
