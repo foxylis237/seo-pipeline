@@ -305,3 +305,70 @@ func TestTaskWithoutOwnDatabaseURLUsesSharedOne(t *testing.T) {
 		t.Fatalf("DatabaseURL = %q, want postgres://shared-host/seo", cfg.DatabaseURL)
 	}
 }
+
+// Площадка привязана к задаче: сайтов у проекта несколько, и адрес одной задачи не имеет
+// права протечь в другую. Иначе pprof_1 однажды опубликует статью на сайт task_1.
+func TestWordPressCredentialsAreTaskScoped(t *testing.T) {
+	envPath := filepath.Join(t.TempDir(), "pipeline.env")
+	if err := os.WriteFile(envPath, []byte("DATABASE_URL=postgres://from-file\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ENV_FILE", envPath)
+	t.Setenv("WORDPRESS_URL", "https://task-1-site.ru")
+	t.Setenv("WORDPRESS_USERNAME", "task-1-user")
+	t.Setenv("WORDPRESS_APP_PASSWORD", "task-1-password")
+	t.Setenv("PPROF_1_WORDPRESS_URL", "https://pprof-site.ru")
+	t.Setenv("PPROF_1_WORDPRESS_USERNAME", "pprof-user")
+	t.Setenv("PPROF_1_WORDPRESS_APP_PASSWORD", "pprof-password")
+
+	prefixed, err := Load(TaskDefaults{OutputDir: "tasks/pprof_1/output", EnvPrefix: "PPROF_1_"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := WordPressConfig{
+		BaseURL: "https://pprof-site.ru", Username: "pprof-user", AppPassword: "pprof-password",
+	}
+	if prefixed.WordPress != want {
+		t.Fatalf("WordPress = %+v, want %+v: задача взяла чужую площадку", prefixed.WordPress, want)
+	}
+
+	// Задача без префикса читает исторические имена — это её собственная площадка, а не запасная.
+	historical, err := Load(testTaskDefaults())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if historical.WordPress.BaseURL != "https://task-1-site.ru" {
+		t.Fatalf("BaseURL = %q, want https://task-1-site.ru", historical.WordPress.BaseURL)
+	}
+}
+
+// Сообщение обязано называть ту переменную, которую человек правит: у pprof_1 она с префиксом.
+func TestValidateWordPressNamesTaskScopedVariables(t *testing.T) {
+	envPath := filepath.Join(t.TempDir(), "pipeline.env")
+	if err := os.WriteFile(envPath, []byte("DATABASE_URL=postgres://from-file\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ENV_FILE", envPath)
+	unsetEnv(t, "PPROF_1_WORDPRESS_URL")
+	unsetEnv(t, "PPROF_1_WORDPRESS_USERNAME")
+	unsetEnv(t, "PPROF_1_WORDPRESS_APP_PASSWORD")
+
+	cfg, err := Load(TaskDefaults{OutputDir: "tasks/pprof_1/output", EnvPrefix: "PPROF_1_"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	validateErr := cfg.ValidateWordPress()
+	if validateErr == nil || !strings.Contains(validateErr.Error(), "PPROF_1_WORDPRESS_URL") {
+		t.Fatalf("ValidateWordPress() = %v, want упоминание PPROF_1_WORDPRESS_URL", validateErr)
+	}
+}
+
+// Проверка подключения не трогает базу: она нужна ровно тогда, когда докер потушен.
+func TestValidateWordPressDoesNotRequireDatabase(t *testing.T) {
+	cfg := Config{WordPress: WordPressConfig{
+		BaseURL: "https://dpoprof.ru", Username: "admin", AppPassword: "password",
+	}}
+	if err := cfg.ValidateWordPress(); err != nil {
+		t.Fatalf("ValidateWordPress() = %v, want nil без DATABASE_URL", err)
+	}
+}

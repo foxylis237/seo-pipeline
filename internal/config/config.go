@@ -33,6 +33,47 @@ type Config struct {
 	ArsenkinEmail    string
 	ArsenkinPassword string
 	ArsenkinHeadless bool
+
+	// WordPress — площадка публикации этой задачи.
+	WordPress WordPressConfig
+
+	// envPrefix — префикс переменных задачи, из которой собран этот Config.
+	//
+	// Хранится только ради сообщений об ошибках. Площадок у проекта несколько, у каждой задачи
+	// свои переменные, и назвать человеку WORDPRESS_URL там, где он правит
+	// PPROF_1_WORDPRESS_URL, — значит отправить его искать опечатку не в той строке.
+	envPrefix string
+}
+
+// WordPressConfig — доступ к площадке одной задачи.
+//
+// Отдельный тип, а не три поля в Config: задачи публикуются на разные сайты, и набор из трёх
+// значений всегда берётся и передаётся целиком. Раздельные поля рано или поздно разъехались бы
+// — логин от одной площадки с адресом другой.
+type WordPressConfig struct {
+	// BaseURL — корень сайта из <префикс>WORDPRESS_URL.
+	BaseURL string
+	// Username — логин из <префикс>WORDPRESS_USERNAME.
+	Username string
+	// AppPassword — Application Password из <префикс>WORDPRESS_APP_PASSWORD. Не обычный
+	// пароль администратора: этот отзывается отдельно и не даёт входа в админку.
+	AppPassword string
+	// PublishAfterRun — публиковать ли статью сразу после полного прогона
+	// (<префикс>WORDPRESS_PUBLISH_AFTER_RUN).
+	//
+	// Умолчание — false, и это не осторожность ради осторожности: публикация необратима,
+	// записи в блоге приложение удалять не умеет, а `run` человек запускает ради текста.
+	// Выкладывать десяток статей в живой блог как побочный эффект генерации оно права не
+	// имеет — согласие на это выражается явно, одной строкой в .env.
+	PublishAfterRun bool
+}
+
+// EnvName возвращает имя переменной окружения с префиксом задачи.
+//
+// Нужно сообщениям, которые называют переменную человеку: у задачи без префикса это
+// историческое имя, у pprof_1 — PPROF_1_<имя>.
+func (c Config) EnvName(name string) string {
+	return c.envPrefix + name
 }
 
 // TaskDefaults — то, чем задача подменяет общие настройки.
@@ -95,6 +136,18 @@ func load(requireEnvFile bool, defaults TaskDefaults) (Config, error) {
 		}
 	}
 
+	// Публикация после прогона выключена, пока её не включили явно. Пустое значение и
+	// «false» здесь одно и то же, а мусор — ошибка конфигурации: молча принять «yes» за
+	// выключено значило бы однажды выложить десяток статей в блог без спроса.
+	publishAfterRun := false
+	if value := defaults.taskEnv("WORDPRESS_PUBLISH_AFTER_RUN"); value != "" {
+		publishAfterRun, err = strconv.ParseBool(value)
+		if err != nil {
+			return Config{}, fmt.Errorf("%sWORDPRESS_PUBLISH_AFTER_RUN must be true or false: %w",
+				defaults.EnvPrefix, err)
+		}
+	}
+
 	// DATABASE_URL — исключение из правила о префиксах: сервер PostgreSQL у задач общий, а
 	// разводит их search_path из профиля. Префикс здесь лишь позволяет увести задачу на
 	// другой сервер, не трогая остальные.
@@ -119,6 +172,18 @@ func load(requireEnvFile bool, defaults TaskDefaults) (Config, error) {
 		ArsenkinEmail:    os.Getenv("ARSENKIN_EMAIL"),
 		ArsenkinPassword: os.Getenv("ARSENKIN_PASSWORD"),
 		ArsenkinHeadless: arsenkinHeadless,
+
+		// Площадка читается через taskEnv, а не напрямую: сайтов у проекта несколько, и
+		// адрес одной задачи не должен протекать в другую. Задача с префиксом видит только
+		// PPROF_1_WORDPRESS_*, задача без префикса — исторические имена без него.
+		WordPress: WordPressConfig{
+			BaseURL:         defaults.taskEnv("WORDPRESS_URL"),
+			Username:        defaults.taskEnv("WORDPRESS_USERNAME"),
+			AppPassword:     defaults.taskEnv("WORDPRESS_APP_PASSWORD"),
+			PublishAfterRun: publishAfterRun,
+		},
+
+		envPrefix: defaults.EnvPrefix,
 	}
 
 	if cfg.OutputDir == "" {
@@ -210,6 +275,23 @@ func (c Config) validateImportSource() error {
 func (c Config) ValidateReset() error {
 	if c.DatabaseURL == "" {
 		return fmt.Errorf("DATABASE_URL is required")
+	}
+	return nil
+}
+
+// ValidateWordPress проверяет настройки площадки задачи.
+//
+// DATABASE_URL здесь намеренно не требуется: проверка подключения к WordPress не трогает базу,
+// и потушенный докер не повод отказать в ответе на вопрос «живы ли credentials».
+func (c Config) ValidateWordPress() error {
+	if c.WordPress.BaseURL == "" {
+		return fmt.Errorf("%s is required", c.EnvName("WORDPRESS_URL"))
+	}
+	if c.WordPress.Username == "" {
+		return fmt.Errorf("%s is required", c.EnvName("WORDPRESS_USERNAME"))
+	}
+	if c.WordPress.AppPassword == "" {
+		return fmt.Errorf("%s is required", c.EnvName("WORDPRESS_APP_PASSWORD"))
 	}
 	return nil
 }
