@@ -12,6 +12,8 @@ data/llm/
 # Input
 input/**/*.xlsx
 !input/task_1/input.xlsx
+# Регламенты стадий: рабочие документы задачи, как и книги импорта.
+input/**/regulations/**/*.pdf
 tasks/*/input/**/*.xlsx
 
 # macOS

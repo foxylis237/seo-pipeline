@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -54,6 +55,15 @@ type LLMStageConfig struct {
 	Temperature *float64          `yaml:"temperature"`
 	MaxTokens   int               `yaml:"max_tokens"`
 	TimeoutText string            `yaml:"timeout"`
+	// AttachmentsDir — каталог с документом, который уходит в модель вместе с промптом
+	// стадии. Имя файла не фиксируется: значим каталог, а не то, как назвали регламент.
+	// Пустое значение означает стадию без вложений — так живут все стадии task_1.
+	AttachmentsDir string `yaml:"attachments_dir"`
+	// Mode — подпись переключателя режима в интерфейсе провайдера («Быстрый»). Подпись, а
+	// не собственное имя режима: переключатель у браузерного провайдера опознаётся по
+	// тексту, и держать здесь второе имя значило бы заводить таблицу соответствий,
+	// которая устареет вместе с интерфейсом.
+	Mode string `yaml:"mode"`
 
 	Timeout        time.Duration `yaml:"-"`
 	PromptTemplate string        `yaml:"-"`
@@ -186,6 +196,12 @@ func mergeLLMConfig(base *LLMConfig, overlay LLMConfig) {
 		if strings.TrimSpace(stage.TimeoutText) != "" {
 			merged.TimeoutText = stage.TimeoutText
 		}
+		if strings.TrimSpace(stage.AttachmentsDir) != "" {
+			merged.AttachmentsDir = stage.AttachmentsDir
+		}
+		if strings.TrimSpace(stage.Mode) != "" {
+			merged.Mode = stage.Mode
+		}
 		base.Stages[name] = merged
 	}
 }
@@ -303,6 +319,60 @@ func validateStageTargets(cfg *LLMConfig, stageName string, targets []LLMTargetC
 		usedProviders[target.Provider] = struct{}{}
 	}
 	return nil
+}
+
+// AttachmentExtension — расширение документа, прикрепляемого к стадии. Имя файла смысла
+// не несёт, значимо только оно: регламент переименовывают, а стадия обязана работать.
+const AttachmentExtension = ".pdf"
+
+// ResolveStageAttachments возвращает документы стадии из её каталога.
+//
+// Правило то же, что у книги импорта (importer.ResolveWorkbook): каталог задан — в нём
+// ровно один подходящий файл. Пустой каталог и несколько файлов — не выбор по умолчанию,
+// а вопрос к человеку, и ошибка обязана назвать, что именно поправить.
+//
+// Разбор конфигурации сюда не заходит намеренно: регламент — рабочий документ на диске, а
+// не часть репозитория, и требовать его на каждом чтении config значило бы ломать команды
+// задачи и её тесты там, где до модели дело не дойдёт. Проверить документ заранее — работа
+// dry-run, который печатает разрешённую маршрутизацию перед дорогим прогоном.
+func ResolveStageAttachments(stageName, directory string) ([]string, error) {
+	directory = strings.TrimSpace(directory)
+	if directory == "" {
+		return nil, nil
+	}
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf(
+				"LLM stage %q: каталог документов %s не найден — создайте его и положите туда %s",
+				stageName, directory, AttachmentExtension)
+		}
+		return nil, fmt.Errorf("LLM stage %q: прочитать каталог документов %s: %w", stageName, directory, err)
+	}
+	documents := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || strings.HasPrefix(name, ".") {
+			continue
+		}
+		if !strings.EqualFold(filepath.Ext(name), AttachmentExtension) {
+			continue
+		}
+		documents = append(documents, name)
+	}
+	sort.Strings(documents)
+	switch len(documents) {
+	case 1:
+		return []string{filepath.Join(directory, documents[0])}, nil
+	case 0:
+		return nil, fmt.Errorf(
+			"LLM stage %q: в каталоге %s нет ни одного файла %s — положите туда документ стадии",
+			stageName, directory, AttachmentExtension)
+	default:
+		return nil, fmt.Errorf(
+			"LLM stage %q: в каталоге %s несколько файлов %s (%s) — оставьте один",
+			stageName, directory, AttachmentExtension, strings.Join(documents, ", "))
+	}
 }
 
 func normalizeLLMProvider(name string, provider LLMProviderConfig) (LLMProviderConfig, error) {

@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -357,7 +358,8 @@ func writeRoutingReport(destination io.Writer, routing resolvedRouting) error {
 		for _, target := range stage.Targets {
 			targets = append(targets, target.Provider+" / "+target.Model)
 		}
-		fmt.Fprintf(&report, "  %-10s %-34s %s%s\n", name, strings.Join(targets, " → "), stage.Timeout, stageNote(routing, name))
+		fmt.Fprintf(&report, "  %-10s %-34s %s%s%s\n", name, strings.Join(targets, " → "), stage.Timeout,
+			stageNote(routing, name), stageExtras(name, stage))
 	}
 	// keywords печатается отдельно от стадий статьи: она выполняется в prepare и только
 	// тогда, когда Keys.so не нашёл у конкурента ни одного запроса. В отчёте она нужна
@@ -388,6 +390,35 @@ func stageNote(routing resolvedRouting, stage string) string {
 	default:
 		return ""
 	}
+}
+
+// stageExtras — режим ответа и документы стадии. В отчёте они нужны по той же причине, что и
+// провайдер: прикреплённый регламент меняет ответ не меньше, чем выбранная модель, а по
+// готовой статье потом не видно, ушёл он в чат или нет.
+//
+// Документ разрешается тем же вызовом, что и в бою, поэтому dry-run — это ещё и проверка,
+// что регламент на месте: ненайденный файл попадает в отчёт до того, как за прогон заплачено.
+func stageExtras(name string, stage config.LLMStageConfig) string {
+	var extras []string
+	if mode := strings.TrimSpace(stage.Mode); mode != "" {
+		extras = append(extras, "режим "+mode)
+	}
+	if strings.TrimSpace(stage.AttachmentsDir) != "" {
+		attachments, err := config.ResolveStageAttachments(name, stage.AttachmentsDir)
+		if err != nil {
+			extras = append(extras, "документы НЕ НАЙДЕНЫ: "+err.Error())
+		} else {
+			documents := make([]string, 0, len(attachments))
+			for _, path := range attachments {
+				documents = append(documents, filepath.Base(path))
+			}
+			extras = append(extras, "документы: "+strings.Join(documents, ", "))
+		}
+	}
+	if len(extras) == 0 {
+		return ""
+	}
+	return "  (" + strings.Join(extras, "; ") + ")"
 }
 
 func firstProvider(routing resolvedRouting, stage string) string {

@@ -8,6 +8,11 @@ const (
 	stopSelector     = `button[aria-label*="stop" i], button[title*="stop" i], [role="button"][aria-label*="stop" i], [data-testid*="stop" i]`
 	loginSelector    = `a[href*="sign_in"], a[href*="login"], form input[type="password"]`
 
+	// fileInputSelector — поле загрузки документа рядом с полем ввода. Кнопка «Прикрепить»
+	// открывает системный диалог, до которого браузеру не дотянуться, поэтому файл
+	// отдаётся полю напрямую. Поле скрыто, и ждать его видимости бессмысленно.
+	fileInputSelector = `input[type="file"]`
+
 	// Тред DeepSeek — виртуальный список: смонтировано только окно сообщений, остальные
 	// размонтируются при прокрутке. Поэтому число ответов на странице не растёт, и признаком
 	// нового ответа служит ключ элемента: его назначает сам DeepSeek, и он монотонно растёт.
@@ -227,3 +232,40 @@ func isLoginURL(value string) bool {
 	value = strings.ToLower(value)
 	return strings.Contains(value, "/sign_in") || strings.Contains(value, "/login")
 }
+
+// selectModeJS переключает интерфейс в режим с заданной подписью.
+//
+// Переключатель опознаётся текстом, а не классом: у режимов DeepSeek нет ни aria-label, ни
+// data-атрибута, а классы генерируются сборкой и меняются от релиза к релизу. Уже включённый
+// режим повторно не нажимается — второе нажатие выключило бы его.
+const selectModeJS = `(options) => {
+  const visible = (element) => {
+    const style = window.getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
+  };
+  const normalize = (value) => (value || "").replace(/\s+/g, " ").trim().toLowerCase();
+  const label = normalize(options.label);
+  const active = (element) => {
+    for (const attribute of ["aria-pressed", "aria-checked", "aria-selected"]) {
+      if (element.getAttribute(attribute) === "true") return true;
+    }
+    const classes = typeof element.className === "string" ? element.className : "";
+    return /(^|[-_ ])(active|selected|checked)([-_ ]|$)/.test(classes);
+  };
+  const controls = Array.from(document.querySelectorAll(
+    'button, [role="button"], [role="menuitem"], [role="option"], [role="radio"], [role="tab"], [role="switch"]'
+  )).filter(visible);
+  const match = controls.find((control) => normalize(control.innerText) === label);
+  if (!match) return "not_found";
+  if (active(match)) return "already";
+  match.click();
+  return "clicked";
+}`
+
+// attachmentsReadyJS сообщает, что карточки всех прикреплённых документов появились над
+// полем ввода. Имена сверяются началом: длинное имя интерфейс обрезает многоточием.
+const attachmentsReadyJS = `(options) => {
+  const text = ((document.body && document.body.innerText) || "").toLowerCase();
+  return options.markers.every((marker) => text.includes(marker));
+}`

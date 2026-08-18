@@ -12,39 +12,49 @@ llm:
     deepseek_web:
       single_chat_per_article: true
 
+  # Режим ответа DeepSeek задаётся подписью кнопки в интерфейсе: «Эксперт» — рассуждение,
+  # «Быстрый» — без него. Стадии генерации идут в «Эксперте», html — в «Быстром»: разметка
+  # готового текста рассуждений не требует. Пустое значение оставило бы режим таким, каким
+  # его в прошлый раз оставил человек в профиле браузера. Gemini поле игнорирует.
   stages:
     structure:
       targets:
         - { provider: deepseek_web, model: deepseek-web }
       prompt: tasks/task_1/prompts/deepseek/structure.txt
+      mode: Эксперт
       timeout: 180s
 
     article:
       targets:
         - { provider: deepseek_web, model: deepseek-web }
       prompt: tasks/task_1/prompts/deepseek/article.txt
+      mode: Эксперт
       timeout: 300s
 
     info:
       targets:
         - { provider: deepseek_web, model: deepseek-web }
       prompt: tasks/task_1/prompts/deepseek/article_info.txt
+      mode: Эксперт
       timeout: 300s
 
     review:
       targets:
         - { provider: deepseek_web, model: deepseek-web }
       prompt: tasks/task_1/prompts/deepseek/review.txt
+      mode: Эксперт
       timeout: 300s
 
     fix:
       targets:
         - { provider: deepseek_web, model: deepseek-web }
       prompt: tasks/task_1/prompts/deepseek/fix_article.txt
+      mode: Эксперт
       timeout: 420s
 
     html:
       targets:
         - { provider: deepseek_web, model: deepseek-web }
       prompt: tasks/task_1/prompts/deepseek/html.txt
+      mode: Быстрый
       timeout: 420s

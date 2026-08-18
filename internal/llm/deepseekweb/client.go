@@ -112,6 +112,13 @@ func (c *Client) generate(ctx context.Context, request llm.Request) (llm.Respons
 	}
 	c.stage("input_found")
 
+	// Режим и документы задаются до снимка треда: и то, и другое меняет страницу, но
+	// сообщением не является, а сообщение должно уйти уже в готовый чат.
+	c.applyMode(page, request)
+	if err := c.attachDocuments(ctx, page, request); err != nil {
+		return llm.Response{}, err
+	}
+
 	// Снимок треда до отправки: по нему отличается новый ответ от уже имеющихся.
 	mark, err := takeAnswerMark(page)
 	if err != nil {

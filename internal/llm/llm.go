@@ -29,6 +29,21 @@ type Request struct {
 	// NewChat требует начать новую беседу даже в режиме одного диалога. Так поток с
 	// несколькими чатами на статью отделяет их друг от друга.
 	NewChat bool
+	// Attachments — документы, которые уходят вместе с промптом. Пути приходят из
+	// конфигурации стадии и уже разрешены: провайдер их не ищет, а только прикрепляет.
+	Attachments []string
+	// Mode — подпись режима ответа в интерфейсе провайдера. Пустое значение означает
+	// «не переключать»; провайдеры без выбора режима поле игнорируют.
+	Mode string
+}
+
+// AttachmentClient — провайдер, умеющий отправить документ вместе с промптом.
+//
+// Стадия с документами не имеет права молча уйти без него: без регламента модель ответит
+// не тем, а по тексту ответа это уже не отличить. Поэтому провайдер без такой поддержки
+// получает стадию с вложениями как ошибку маршрутизации, а не как обычный запрос.
+type AttachmentClient interface {
+	SupportsAttachments() bool
 }
 
 type Response struct {
@@ -327,10 +342,26 @@ func (r *Router) generateTarget(ctx context.Context, call Call, prompt string, s
 	if !found {
 		return RoutedResponse{}, fmt.Errorf("LLM provider %q is not registered", target.Provider)
 	}
+	// Документ стадии разрешается здесь, а не при загрузке конфигурации: файл на диске
+	// живёт своей жизнью, и путь к нему обязан быть свежим на момент запроса. Отказ здесь
+	// окончательный — обычная ошибка, а не StatusError, поэтому ни повтора, ни перехода к
+	// следующему провайдеру не будет: другой провайдер тот же файл тоже не найдёт.
+	attachments, err := config.ResolveStageAttachments(call.Stage, stage.AttachmentsDir)
+	if err != nil {
+		return RoutedResponse{}, err
+	}
+	if len(attachments) > 0 {
+		support, ok := client.(AttachmentClient)
+		if !ok || !support.SupportsAttachments() {
+			return RoutedResponse{}, fmt.Errorf(
+				"LLM stage %q requires document attachments, provider %q does not support them",
+				call.Stage, target.Provider)
+		}
+	}
 	request := Request{
 		Prompt: prompt, Model: target.Model, Temperature: *stage.Temperature, MaxTokens: stage.MaxTokens,
 		ArticleID: call.ArticleID, SingleChat: r.config.Providers[target.Provider].SingleChatPerArticle,
-		NewChat: call.NewChat,
+		NewChat: call.NewChat, Attachments: attachments, Mode: stage.Mode,
 	}
 	// Самоограничение провайдера выдерживается до наложения таймаута стадии: пауза между
 	// запросами — не работа модели, и вычитать её из бюджета генерации нельзя.
