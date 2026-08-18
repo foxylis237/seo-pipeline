@@ -22,8 +22,8 @@ LOGIN_SERVICE := $(word 2,$(MAKECMDGOALS))
 TASK_OPERATION := $(word 2,$(MAKECMDGOALS))
 TASK_ARG := $(word 3,$(MAKECMDGOALS))
 TASK_EXTRA_ARGS := $(wordlist 4,$(words $(MAKECMDGOALS)),$(MAKECMDGOALS))
-TASK_OPERATIONS := import import-check errors keywords retry run regenerate dry-run prepare generate demo-generate article info review fix html result clear reset google-login google-publish deepseek-login
-OPTIONAL_ARGUMENT_OPERATIONS := import-check errors keywords retry run regenerate clear reset google-publish prepare generate demo-generate article info review fix html result
+TASK_OPERATIONS := import import-check errors keywords retry run regenerate dry-run prepare generate demo-generate article info review fix html result clear reset google-login google-publish deepseek-login wordpress-check publish mark-published
+OPTIONAL_ARGUMENT_OPERATIONS := import-check errors keywords retry run regenerate clear reset google-publish prepare generate demo-generate article info review fix html result publish mark-published
 
 .PHONY: help task-1 pprof-1 login docker-up docker-start docker-stop docker-down docker-restart docker-logs docker-ps
 .PHONY: test test-race fmt vet lint lint-fix build
@@ -65,6 +65,10 @@ help: ## этот список
 		'make pprof-1 result [ID]'         'собрать result.md' \
 		'make pprof-1 demo-generate [ID]'  'пересобрать каталог DEMO' \
 		'make pprof-1 google-publish [ID]' 'промпты в Google Docs' \
+		'make pprof-1 wordpress-check'     'проверка доступа к WordPress, без записи' \
+		'make pprof-1 publish [ID]'        'опубликовать в WordPress; без ID — все готовые' \
+		'make pprof-1 publish plan [ID]'   'что именно уйдёт в WordPress, без записи' \
+		'make pprof-1 mark-published ID [post_id]' 'привязать к существующей записи блога' \
 		'make pprof-1 dry-run'             'офлайн-прогон без сервисов' \
 		'make pprof-1 clear ID'            'статью к состоянию импорта' \
 		'make pprof-1 reset [ID]'          'статью или всю pprof_1 к нулю'
@@ -99,8 +103,15 @@ define run_task_operation
 		exit 1; \
 	fi
 	@if [ -n "$(strip $(TASK_EXTRA_ARGS))" ] && \
-		! { [ "$(TASK_OPERATION)" = 'run' ] && [ "$(TASK_ARG)" = 'plan' ] && [ $(words $(TASK_EXTRA_ARGS)) -eq 1 ]; }; then \
+		! { [ "$(TASK_OPERATION)" = 'run' ] && [ "$(TASK_ARG)" = 'plan' ] && [ $(words $(TASK_EXTRA_ARGS)) -eq 1 ]; } && \
+		! { [ "$(TASK_OPERATION)" = 'publish' ] && [ "$(TASK_ARG)" = 'plan' ] && [ $(words $(TASK_EXTRA_ARGS)) -eq 1 ]; } && \
+		! { [ "$(TASK_OPERATION)" = 'mark-published' ] && [ $(words $(TASK_EXTRA_ARGS)) -eq 1 ]; }; then \
 		printf 'Too many arguments.\n\nExample:\n\nmake $(TASK_NAME) $(TASK_OPERATION) $(TASK_ARG)\n'; \
+		exit 1; \
+	fi
+	@if [ "$(TASK_OPERATION)" = 'mark-published' ] && [ -n "$(strip $(TASK_EXTRA_ARGS))" ] && \
+		! printf '%s' "$(TASK_EXTRA_ARGS)" | grep -Eq '^[1-9][0-9]*$$'; then \
+		printf 'wordpress_post_id must be a positive integer.\n\nExample:\n\nmake $(TASK_NAME) mark-published 16 21593\n'; \
 		exit 1; \
 	fi
 	@if [ "$(TASK_OPERATION)" = 'import' ] && [ -n "$(TASK_ARG)" ] && \
@@ -133,6 +144,10 @@ define run_task_operation
 		APP_ENV=test DRY_RUN_DATABASE_URL='$(DRY_RUN_DATABASE_URL)' $(CLI) run --dry-run; \
 	elif [ "$(TASK_OPERATION)" = 'run' ] && [ "$(TASK_ARG)" = 'plan' ]; then \
 		$(CLI) run --plan $(TASK_EXTRA_ARGS); \
+	elif [ "$(TASK_OPERATION)" = 'publish' ] && [ "$(TASK_ARG)" = 'plan' ]; then \
+		$(CLI) publish --plan $(TASK_EXTRA_ARGS); \
+	elif [ "$(TASK_OPERATION)" = 'mark-published' ] && [ -n "$(strip $(TASK_EXTRA_ARGS))" ]; then \
+		$(CLI) mark-published "$(TASK_ARG)" $(TASK_EXTRA_ARGS); \
 	elif [ -n "$(TASK_ARG)" ]; then \
 		$(CLI) $(TASK_OPERATION) "$(TASK_ARG)"; \
 	else \
@@ -214,11 +229,13 @@ build: ## бинарник в bin/seo-pipeline
 	$(GO) build -o $(BINARY) ./cmd/seo-pipeline
 
 # Слова операции и аргумента — параметры задачи, а не отдельные цели. То же для сервиса у
-# глобальной команды входа.
+# глобальной команды входа и для четвёртого слова там, где оно осмысленно: `run plan <id>`,
+# `publish plan <id>` и `mark-published <id> <post_id>`.
 %:
 	@if printf ' %s ' "$(TASK_NAMES)" | grep -Fq " $(TASK_NAME) " && \
 		{ [ "$@" = "$(TASK_OPERATION)" ] || [ "$@" = "$(TASK_ARG)" ] || \
-			{ [ "$(TASK_ARG)" = 'plan' ] && [ "$@" = "$(strip $(TASK_EXTRA_ARGS))" ]; }; }; then \
+			{ [ "$(TASK_ARG)" = 'plan' ] && [ "$@" = "$(strip $(TASK_EXTRA_ARGS))" ]; } || \
+			{ [ "$(TASK_OPERATION)" = 'mark-published' ] && [ "$@" = "$(strip $(TASK_EXTRA_ARGS))" ]; }; }; then \
 		:; \
 	elif [ "$(TASK_NAME)" = 'login' ] && [ "$@" = "$(LOGIN_SERVICE)" ]; then \
 		:; \

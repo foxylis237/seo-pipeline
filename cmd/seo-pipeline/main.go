@@ -84,6 +84,22 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Проверка подключения к WordPress обрабатывается до пула PostgreSQL: она не трогает ни
+	// базу, ни артефакты статей, а площадку ей задаёт профиль задачи. Потушенный докер не
+	// должен мешать выяснить, живы ли credentials, — ровно тогда это и нужно чаще всего.
+	if command.Name == wordPressCheckOperation {
+		checkLogger := logger.With("task", profile.Name, "operation", command.Name)
+		client, clientErr := newWordPressClient(cfg.WordPress)
+		if clientErr == nil {
+			clientErr = runWordPressCheck(ctx, client, profile.EnvPrefix, checkLogger, os.Stdout)
+		}
+		if clientErr != nil {
+			checkLogger.Error("проверка подключения к WordPress не пройдена", "error", clientErr)
+			os.Exit(1)
+		}
+		return
+	}
+
 	// Изоляция задач в базе держится на схеме из профиля, а не на переменной окружения:
 	// забытый search_path увёл бы новую задачу в таблицы task_1. Схема public возвращает DSN
 	// нетронутым, поэтому у task_1 подключение остаётся прежним.
@@ -191,6 +207,23 @@ func main() {
 			google.DefaultRetryPolicy(),
 		)
 		err = runGooglePublish(ctx, articleRepository, writer, publisher.Publish, taskLogger, os.Stdout, profile.Command, command.ExternalID)
+
+	case wordPressPublishOperation, wordPressMarkPublishedOperation:
+		// Ни LLM, ни Keys.so, ни Arsenkin: команда берёт готовые данные и артефакты статьи.
+		err = runWordPressCommand(ctx, wordPressCommandDeps{
+			repository: articleRepository,
+			writer:     writer,
+			// Обложки — входные данные задачи, они лежат рядом с её книгой импорта и
+			// каталогом не делятся: своя картинка у каждой статьи каждой задачи.
+			images:      newArticleImages(profile.InputDir),
+			resultBuild: resultService,
+			settings:    cfg.WordPress,
+			logger:      taskLogger,
+			out:         os.Stdout,
+			in:          os.Stdin,
+			assumeYes:   command.AssumeYes,
+			interactive: isCharDevice(os.Stdin),
+		}, command.Name, command.ExternalID, command.WordPressPostID, command.Plan)
 
 	case "clear":
 		err = runClear(ctx, articleRepository, writer, clearOptions{
@@ -415,15 +448,31 @@ func main() {
 				err = runRegenerate(ctx, articleRepository, writer, runOne, taskLogger, command.ExternalID)
 				break
 			}
+			// Публикация — последний этап прогона и единственный, чья неудача не отменяет
+			// сделанного: статья уже сгенерирована и сохранена, а выложить её можно и
+			// отдельной командой. Поэтому publisher стоит поверх runOne, а не внутри
+			// раннера этапов: тот обязан останавливаться на первой ошибке, а этот — нет.
+			publisher := newRunPublisherFor(wordPressCommandDeps{
+				repository:  articleRepository,
+				writer:      writer,
+				images:      newArticleImages(profile.InputDir),
+				resultBuild: resultService,
+				settings:    cfg.WordPress,
+				logger:      taskLogger,
+				out:         os.Stdout,
+				in:          os.Stdin,
+			}, cfg.WordPress.PublishAfterRun)
+			runAndPublish := publisher.wrap(runOne)
 			if command.ExternalID == "" {
 				var pending []article.Article
 				if pending, err = incompleteArticles(ctx, articleRepository); err != nil {
 					break
 				}
-				err = runSelectedArticles(ctx, pending, "run", runOne, taskLogger)
+				err = runSelectedArticles(ctx, pending, "run", runAndPublish, taskLogger)
 			} else {
-				err = runOne(ctx, command.ExternalID)
+				err = runAndPublish(ctx, command.ExternalID)
 			}
+			publisher.printSummary(os.Stdout)
 		case "demo-generate":
 			// Ветки по задаче здесь нет намеренно: DEMO — подготовка файлов для ручного
 			// чата, а не продолжение боевого потока, и ручной чат у задач один и тот же.
@@ -597,6 +646,10 @@ type taskCommand struct {
 	Plan bool
 	// AssumeYes подтверждает reset без вопроса. Нужен там, где stdin не терминал.
 	AssumeYes bool
+	// WordPressPostID — необязательный второй аргумент mark-published: запись, которая уже
+	// существует в блоге. Ноль означает «запись неизвестна» — тогда сохраняется только
+	// состояние, а адрес и идентификатор остаются пустыми.
+	WordPressPostID int64
 }
 
 // isCharDevice reports stdin attached to a terminal. Reset спрашивает подтверждение только
@@ -655,14 +708,22 @@ func parseCommand(args []string) (taskCommand, error) {
 	if flags.dryRun && (command.Name != "run" || command.ExternalID != "") {
 		return taskCommand{}, fmt.Errorf("--dry-run is supported only for %s run without external_id", task)
 	}
-	if flags.plan && command.Name != "run" {
-		return taskCommand{}, fmt.Errorf("--plan is supported only for %s run", task)
+	// --plan есть у run и у publish: обе показывают, что произойдёт, ничего не выполняя.
+	// У publish это единственный способ увидеть нагрузку до того, как запись создана —
+	// отменить публикацию нельзя, удалять записи приложение не умеет.
+	if flags.plan && command.Name != "run" && command.Name != wordPressPublishOperation {
+		return taskCommand{}, fmt.Errorf("--plan is supported only for %s run and %s %s",
+			task, task, wordPressPublishOperation)
 	}
 	if flags.plan && flags.dryRun {
 		return taskCommand{}, fmt.Errorf("--plan and --dry-run cannot be combined")
 	}
-	if flags.assumeYes && command.Name != "reset" && command.Name != "clear" {
-		return taskCommand{}, fmt.Errorf("--yes is supported only for %s reset and %s clear", task, task)
+	// --yes подтверждает необратимое без вопроса. У publish без external_id оно тоже
+	// необратимо: записи в блоге не удаляются.
+	if flags.assumeYes && command.Name != "reset" && command.Name != "clear" &&
+		command.Name != wordPressPublishOperation {
+		return taskCommand{}, fmt.Errorf("--yes is supported only for %s reset, %s clear and %s %s",
+			task, task, task, wordPressPublishOperation)
 	}
 	command.DryRun = flags.dryRun
 	command.Plan = flags.plan
@@ -673,7 +734,8 @@ func parseCommand(args []string) (taskCommand, error) {
 // availableOperations перечисляет операции задачи. Набор у задач один и тот же: pprof_1
 // отличается путями и схемой стадий, а не составом команд.
 func availableOperations(task string) string {
-	return "available " + task + " operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, clear, reset, google-login, google-publish, deepseek-login"
+	return "available " + task + " operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, clear, reset, google-login, google-publish, deepseek-login, " +
+		wordPressCheckOperation + ", " + wordPressPublishOperation + ", " + wordPressMarkPublishedOperation
 }
 
 func parseTaskCommand(args []string) (taskCommand, error) {
@@ -697,8 +759,9 @@ func parseTaskCommand(args []string) (taskCommand, error) {
 	}
 	task := args[2]
 	switch task {
-	case "deepseek-login", "google-login":
-		// Позиционных аргументов ни у одной нет: вход в сервис общий для всех статей.
+	// Позиционных аргументов ни у одной нет: вход в сервис общий для всех статей, а
+	// wordpress-check проверяет площадку задачи целиком, а не доступ к одной статье.
+	case "deepseek-login", "google-login", wordPressCheckOperation:
 		if len(args) != 3 {
 			return taskCommand{}, fmt.Errorf("usage: seo-pipeline %s %s", profile.Command, task)
 		}
@@ -742,10 +805,34 @@ func parseTaskCommand(args []string) (taskCommand, error) {
 			return taskCommand{}, fmt.Errorf("usage: seo-pipeline %s %s <external_id>", profile.Command, task)
 		}
 		return parseExternalIDCommand(profile, task, args[3])
+	// mark-published привязывает статью к уже существующей записи блога. ID статьи
+	// обязателен — без него команда пометила бы и те статьи, которых в блоге нет. Второй
+	// аргумент необязателен: запись может быть неизвестна, тогда сохраняется одно состояние.
+	case wordPressMarkPublishedOperation:
+		if len(args) != 4 && len(args) != 5 {
+			return taskCommand{}, fmt.Errorf("usage: seo-pipeline %s %s <external_id> [wordpress_post_id]",
+				profile.Command, task)
+		}
+		command, err := parseExternalIDCommand(profile, task, args[3])
+		if err != nil {
+			return taskCommand{}, err
+		}
+		if len(args) == 5 {
+			postID, parseErr := strconv.ParseInt(strings.TrimSpace(args[4]), 10, 64)
+			if parseErr != nil || postID <= 0 {
+				return taskCommand{}, fmt.Errorf("wordpress_post_id must be a positive integer: %q", args[4])
+			}
+			command.WordPressPostID = postID
+		}
+		return command, nil
 	case "errors", "retry", "prepare", "generate", "demo-generate", "review", "fix", "info", "html", "result", "article", "import-check",
 		// google-publish без ID публикует все статьи с сохранённым промптом. Публикация
 		// идемпотентна: документ ищется по имени и перезаписывается.
-		"google-publish":
+		"google-publish",
+		// publish без ID публикует все completed и not_published статьи, спросив
+		// подтверждения. Идемпотентности здесь нет и быть не может, поэтому от повтора
+		// защищает отметка в articles.wordpress_status, а не поиск записи в блоге.
+		wordPressPublishOperation:
 		if len(args) == 3 {
 			return taskCommand{Profile: profile, Name: task}, nil
 		}
@@ -776,8 +863,17 @@ func validateConfig(command string, cfg config.Config) error {
 		return cfg.ValidateGenerate()
 	case "result":
 		return cfg.ValidateReset()
-	case "errors", "reset", "clear", "keywords", "google-publish":
+	case "errors", "reset", "clear", "keywords", "google-publish", wordPressMarkPublishedOperation:
 		return cfg.ValidateReset()
+	case wordPressCheckOperation:
+		return cfg.ValidateWordPress()
+	case wordPressPublishOperation:
+		// Публикации нужны и база, и площадка: статья берётся из PostgreSQL, а уходит
+		// в WordPress. Проверяются обе, иначе отказ найдётся на середине.
+		if err := cfg.ValidateReset(); err != nil {
+			return err
+		}
+		return cfg.ValidateWordPress()
 	default:
 		return fmt.Errorf("unknown task %q", command)
 	}
