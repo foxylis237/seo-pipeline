@@ -357,6 +357,43 @@ func TestPublishSendsCompletePayload(t *testing.T) {
 	}
 }
 
+// Задача без стадии info публикуется без TL;DR, FAQ и времени чтения: их у неё нет ни в
+// базе, ни в result.md. Пока требование было общим, pprof_2 не доходил до площадки вовсе —
+// публикация отказывала на разделе «## Время чтения», которого нет в его шаблоне.
+func TestPublishWithoutArticleMetadataSkipsBlogFields(t *testing.T) {
+	deps, _, client, _, _ := newWPPublishDeps()
+	deps.withoutArticleMetadata = true
+	// Ни метаданных в базе, ни раздела времени чтения в result.md — как у коммерческой страницы.
+	repository := &fakeWPRepository{input: readyWPPublicationInput()}
+	repository.input.TLDR = ""
+	repository.input.FAQ = ""
+	deps.repository = repository
+	deps.writer = &fakeWPWriter{files: map[string]string{
+		testWPHTMLPath:   testWPArticleHTML,
+		testWPResultPath: "## Название\n\n```text\nОбучение на стропальщика\n```\n",
+	}}
+
+	if err := runWordPressPublish(context.Background(), deps, "16"); err != nil {
+		t.Fatalf("публикация: %v", err)
+	}
+	if len(client.created) != 1 {
+		t.Fatalf("вызовов wp.newPost %d, ожидался один", len(client.created))
+	}
+	for _, field := range client.created[0].Fields {
+		if strings.HasPrefix(field.Key, "blog_") {
+			t.Fatalf("поле блоговой статьи ушло в запись: %s = %q", field.Key, field.Value)
+		}
+	}
+	// Поля самой страницы при этом на месте: пропускаются только разделы стадии info.
+	fields := map[string]string{}
+	for _, field := range client.created[0].Fields {
+		fields[field.Key] = field.Value
+	}
+	if fields["_yoast_wpseo_focuskw"] != "разряды газосварщиков" || fields["prof_name"] != "газосварщик" {
+		t.Fatalf("поля страницы потеряны: %v", fields)
+	}
+}
+
 func TestPublishUploadsCoverBeforeCreatingPost(t *testing.T) {
 	deps, _, client, _, _ := newWPPublishDeps()
 	images := deps.images.(*fakeWPImages)

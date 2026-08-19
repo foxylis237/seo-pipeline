@@ -96,6 +96,16 @@ type wordPressPublishDeps struct {
 	assumeYes   bool
 	interactive bool
 	in          io.Reader
+	// withoutArticleMetadata — у задачи нет стадии info: ни TL;DR, ни FAQ, ни времени
+	// чтения в result.md. Признак приходит из профиля (Profile.WithoutMetadataStage), а не
+	// выводится из данных статьи: пустой FAQ у задачи со стадией info — это сбой генерации,
+	// и молча публиковать её без него нельзя.
+	withoutArticleMetadata bool
+	// metadataFAQOnly — задача даёт только FAQ: он вынут из текста страницы, а TL;DR и
+	// времени чтения у неё нет (Profile.MetadataFAQOnly). Признак поднимает требование к
+	// FAQ обратно: пустой означает страницу без блока частых вопросов, и такую в блог не
+	// отправляют — тема всё равно ждёт вопросы отдельными полями.
+	metadataFAQOnly bool
 }
 
 // runWordPressPublish публикует одну статью.
@@ -271,16 +281,34 @@ func buildWordPressPayload(
 	if err != nil {
 		return wordpress.PostPayload{}, plan, fmt.Errorf("прочитать %s: %w", input.HTMLPath, err)
 	}
-	readingTime, err := readingTimeFromResult(deps.writer, input.HTMLPath)
-	if err != nil {
-		return wordpress.PostPayload{}, plan, fmt.Errorf("статья %s: %w", externalID, err)
+	// Разделы стадии info спрашиваются только у задачи, которая их генерирует. У задачи без
+	// неё их нет ни в базе, ни в result.md, и требование сорвало бы публикацию до первого
+	// запроса — тем самым отказом «в result.md пуст раздел ## Время чтения».
+	//
+	// Задача с одним FAQ — третий случай: вопросы у неё есть (вынуты из текста страницы), а
+	// TL;DR и времени чтения нет. Поэтому признаков два, и спрашивается ровно то, что задача
+	// действительно рождает.
+	withBlogMetadata := !deps.withoutArticleMetadata
+	withFAQ := withBlogMetadata || deps.metadataFAQOnly
+	var readingTime string
+	var faqItems []result.FAQItem
+	if withBlogMetadata {
+		if err := repository.ValidateArticleMetadata(input); err != nil {
+			return wordpress.PostPayload{}, plan, err
+		}
+		readingTime, err = readingTimeFromResult(deps.writer, input.HTMLPath)
+		if err != nil {
+			return wordpress.PostPayload{}, plan, fmt.Errorf("статья %s: %w", externalID, err)
+		}
 	}
-	faqItems, err := result.ParseFAQItems(input.FAQ)
-	if err != nil {
-		return wordpress.PostPayload{}, plan, fmt.Errorf("разобрать FAQ статьи %s: %w", externalID, err)
-	}
-	if len(faqItems) == 0 {
-		return wordpress.PostPayload{}, plan, fmt.Errorf("у статьи %s пустой FAQ", externalID)
+	if withFAQ {
+		faqItems, err = result.ParseFAQItems(input.FAQ)
+		if err != nil {
+			return wordpress.PostPayload{}, plan, fmt.Errorf("разобрать FAQ статьи %s: %w", externalID, err)
+		}
+		if len(faqItems) == 0 {
+			return wordpress.PostPayload{}, plan, fmt.Errorf("у статьи %s пустой FAQ", externalID)
+		}
 	}
 	// Обложка ищется на диске, но не читается: годность статьи выясняется до единого запроса
 	// в WordPress, а мегабайты картинки на этом шаге не нужны.
@@ -327,7 +355,7 @@ func buildWordPressPayload(
 		Status:      wordpress.PostStatusPublish,
 		CategoryID:  categoryID,
 		TagIDs:      tagIDs,
-		Fields:      wordPressCustomFields(input, faqItems, readingTime, tagNames),
+		Fields:      wordPressCustomFields(input, faqItems, readingTime, tagNames, withBlogMetadata),
 	}, plan, nil
 }
 
@@ -414,13 +442,24 @@ type wordPressPayloadContext struct {
 // не трогая ни одного пакета internal/pipeline.
 func wordPressCustomFields(
 	input article.PublicationInput, faqItems []result.FAQItem, readingTime string, tagNames []string,
+	withBlogMetadata bool,
 ) []wordpress.CustomField {
 	fields := make([]wordpress.CustomField, 0, 9+2*len(faqItems))
-	fields = append(fields,
-		wordpress.CustomField{Key: "blog_tldr", Value: strings.TrimSpace(input.TLDR)},
-		wordpress.CustomField{Key: "blog_read", Value: readingTime},
-		wordpress.CustomField{Key: "blog_faq", Value: strconv.Itoa(len(faqItems))},
-	)
+	// Поля блоговой статьи. Пустыми их не отправляют: в теме они означают «блок есть, но
+	// он пустой», и у страницы, которая этих блоков не имеет, их не должно быть вовсе.
+	// Свои поля коммерческой страницы добавляются здесь же, рядом, — отображение принадлежит
+	// площадке, и менять ради него движок не нужно.
+	if withBlogMetadata {
+		fields = append(fields,
+			wordpress.CustomField{Key: "blog_tldr", Value: strings.TrimSpace(input.TLDR)},
+			wordpress.CustomField{Key: "blog_read", Value: readingTime},
+		)
+	}
+	// Счётчик строк репитера идёт вместе с самими вопросами, а не с полями блога: у задачи,
+	// которая даёт только FAQ, блок вопросов на странице есть, а TL;DR и времени чтения нет.
+	if len(faqItems) > 0 {
+		fields = append(fields, wordpress.CustomField{Key: "blog_faq", Value: strconv.Itoa(len(faqItems))})
+	}
 	for index, item := range faqItems {
 		fields = append(fields,
 			wordpress.CustomField{Key: fmt.Sprintf("blog_faq_%d_question", index), Value: item.Question},
@@ -627,6 +666,10 @@ type wordPressCommandDeps struct {
 	in          io.Reader
 	assumeYes   bool
 	interactive bool
+	// withoutArticleMetadata — признак задачи без стадии info, из её профиля.
+	withoutArticleMetadata bool
+	// metadataFAQOnly — признак задачи, у которой из разделов info есть только FAQ.
+	metadataFAQOnly bool
 }
 
 // wordPressPublishDepsFrom собирает зависимости публикации из того, что дал composition root.
@@ -636,16 +679,18 @@ type wordPressCommandDeps struct {
 // команда, и разошлись бы они молча.
 func wordPressPublishDepsFrom(deps wordPressCommandDeps, client wordPressPublishClient) wordPressPublishDeps {
 	return wordPressPublishDeps{
-		client:      client,
-		repository:  deps.repository,
-		writer:      deps.writer,
-		images:      deps.images,
-		resultBuild: deps.resultBuild,
-		logger:      deps.logger,
-		out:         deps.out,
-		in:          deps.in,
-		assumeYes:   deps.assumeYes,
-		interactive: deps.interactive,
+		client:                 client,
+		repository:             deps.repository,
+		writer:                 deps.writer,
+		images:                 deps.images,
+		resultBuild:            deps.resultBuild,
+		logger:                 deps.logger,
+		out:                    deps.out,
+		in:                     deps.in,
+		assumeYes:              deps.assumeYes,
+		interactive:            deps.interactive,
+		withoutArticleMetadata: deps.withoutArticleMetadata,
+		metadataFAQOnly:        deps.metadataFAQOnly,
 	}
 }
 
@@ -777,8 +822,16 @@ func runWordPressPublishPlan(ctx context.Context, deps wordPressPublishDeps, ext
 		fmt.Fprintf(out, "  %-22s = %s\n", field.Key, truncateForPlan(value, fieldValuePreview))
 	}
 
-	fmt.Fprintf(out, "\nВремя чтения %s взято из result.md, FAQ разобран в %d пар.\n",
-		plan.ReadingTime, plan.FAQItems)
+	switch {
+	case plan.ReadingTime != "":
+		fmt.Fprintf(out, "\nВремя чтения %s взято из result.md, FAQ разобран в %d пар.\n",
+			plan.ReadingTime, plan.FAQItems)
+	case plan.FAQItems > 0:
+		fmt.Fprintf(out, "\nFAQ разобран в %d пар из текста страницы; времени чтения у этой задачи нет.\n",
+			plan.FAQItems)
+	default:
+		fmt.Fprintln(out, "\nВремени чтения и FAQ у этой задачи нет: стадии info в её потоке не существует.")
+	}
 	fmt.Fprintln(out, "Обложка при публикации уйдёт в медиабиблиотеку отдельным вызовом вместе с alt и title —")
 	fmt.Fprintln(out, "сейчас она не отправлена. alt взят из заголовка H1 статьи, title — из image_slug.")
 	if newTags > 0 {

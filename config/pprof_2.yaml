@@ -1,0 +1,87 @@
+# Схема стадий pprof_2.
+#
+# Задача DeepSeek-only: провайдер один, наложения нет, выбирать между схемами не из чего.
+# Файл самостоятельный, а не наложение на config/config.yaml или config/pprof_1.yaml —
+# профили обязаны расходиться свободно, и правка одного не имеет права менять другой.
+#
+# Поток генерации — три чата, границы между ними значимы:
+#
+#   чат 1: structure
+#   чат 2: article
+#   чат 3: html
+#
+# Стадий seo_editor и review здесь нет: сегодня страницу целиком пишет один промпт article.
+# Ревью вернётся после него — вместе со своей стадией здесь появятся и её настройки, а пока
+# в tasks/pprof_2/prompts/ лежат заглушки промптов, чтобы место было видно.
+#
+# Стадии info у pprof_2 нет и не будет: частые вопросы уже написаны в самой странице, и
+# FAQ вынимается из её текста разбором (pprof2.ExtractFAQ), а не отдельным запросом к модели.
+# TL;DR и время чтения задача не генерирует вовсе.
+llm:
+  providers:
+    deepseek_web:
+      type: deepseek_web
+      chat_url: https://chat.deepseek.com/
+      login_url: https://chat.deepseek.com/sign_in
+      profile_dir: data/browser/deepseek
+      headless: true
+      # Один диалог на статью: без него браузерный клиент открывал бы новую беседу на каждое
+      # сообщение, и история внутри чата 2 терялась бы. Границы между тремя чатами задаёт сам
+      # поток — первое сообщение каждого чата просит начать новую беседу.
+      single_chat_per_article: true
+
+  # Режим ответа DeepSeek: expert рассуждает, default отвечает сразу. Два бюджета времени у
+  # каждой стадии: timeout — общий на все попытки, attempt_timeout — на одну. Раздельными они
+  # стали после отказа DeepSeek «Server is busy»: пока бюджет был один, первая же попытка
+  # выбирала его целиком, и повтор не начинался никогда.
+  stages:
+    # keywords — резервный источник исходных запросов для prepare, а не стадия генерации.
+    # Вызывается, только когда Keys.so не нашёл у конкурента ни одного запроса.
+    keywords:
+      targets:
+        - { provider: deepseek_web, model: deepseek-web }
+      prompt: tasks/pprof_2/prompts/keywords.txt
+      mode: expert
+      temperature: 0.2
+      max_tokens: 3000
+      timeout: 600s
+      attempt_timeout: 180s
+
+    # Чат 1: структура коммерческой страницы по структуре конкурентов.
+    structure:
+      targets:
+        - { provider: deepseek_web, model: deepseek-web }
+      prompt: tasks/pprof_2/prompts/structure.txt
+      mode: expert
+      temperature: 0.3
+      max_tokens: 3000
+      timeout: 600s
+      attempt_timeout: 180s
+
+    # Чат 2, сообщение 1: основной промпт. В отличие от pprof_1 он уходит в модель, а не
+    # только в артефакт: страницу пишет именно он. Тот же отрендеренный текст сохраняется в
+    # prompts/article_prompt.txt и выгружается в Google Docs.
+    article:
+      targets:
+        - { provider: deepseek_web, model: deepseek-web }
+      prompt: tasks/pprof_2/prompts/article.txt
+      mode: expert
+      temperature: 0.7
+      max_tokens: 12000
+      timeout: 900s
+      attempt_timeout: 420s
+
+    # Чат 3: разметка по регламенту, без перелинковки — ссылки в HTML запрещены. Начинается
+    # с чистой истории, поэтому страницу получает явно. Вместе с промптом в чат уходит регламент вёрстки: он приходит документом, а не
+    # текстом промпта. Имя файла не фиксируется — значим каталог, и в нём должен лежать ровно
+    # один PDF. Каталог свой у задачи: регламент относится к pprof_2, а не к пайплайну вообще.
+    html:
+      targets:
+        - { provider: deepseek_web, model: deepseek-web }
+      prompt: tasks/pprof_2/prompts/html.txt
+      attachments_dir: input/pprof_2/regulations/html
+      mode: default
+      temperature: 0.1
+      max_tokens: 14000
+      timeout: 900s
+      attempt_timeout: 420s

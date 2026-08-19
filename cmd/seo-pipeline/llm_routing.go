@@ -336,7 +336,11 @@ func sortedKeys(set map[string]struct{}) []string {
 
 // writeRoutingReport печатает разрешённую маршрутизацию перед дорогим прогоном: режим,
 // доступность провайдеров и провайдера каждой стадии.
-func writeRoutingReport(destination io.Writer, routing resolvedRouting) error {
+//
+// stageOrder задаёт, какие стадии печатать и в каком порядке: набор у задач разный, и общий
+// список превращал бы отчёт в ложь — у pprof_2 он показывал бы «не настроена» на стадиях
+// info и fix, которых у задачи нет вовсе, и молчал бы про seo_editor, которая есть.
+func writeRoutingReport(destination io.Writer, routing resolvedRouting, stageOrder []string) error {
 	var report strings.Builder
 	fmt.Fprintf(&report, "Режим: %s — %s\n\nПровайдеры:\n", routing.Scheme, routing.Reason)
 	for _, provider := range routing.Providers {
@@ -348,7 +352,7 @@ func writeRoutingReport(destination io.Writer, routing resolvedRouting) error {
 	}
 
 	report.WriteString("\nСтадии:\n")
-	for _, name := range pipelineStageOrder {
+	for _, name := range stageOrder {
 		stage, found := routing.Config.Stages[name]
 		if !found || len(stage.Targets) == 0 {
 			fmt.Fprintf(&report, "  %-10s не настроена\n", name)
@@ -377,9 +381,28 @@ func writeRoutingReport(destination io.Writer, routing resolvedRouting) error {
 	return err
 }
 
-// pipelineStageOrder — порядок стадий одной статьи. Отдельный список нужен только отчёту:
-// map стадий в конфигурации неупорядочена.
+// pipelineStageOrder — порядок стадий статьи у task_1. Отдельный список нужен только отчёту:
+// map стадий в конфигурации неупорядочена, а профиль task_1 объявляет стадии тем же набором.
 var pipelineStageOrder = []string{"structure", "article", "info", "review", "fix", "html"}
+
+// articleStageOrder — стадии статьи в порядке профиля задачи.
+//
+// keywords отсюда исключена намеренно: она не стадия статьи, а резерв prepare, и отчёт
+// печатает её отдельной строкой после всех остальных. Пустой список профиля означает задачу
+// без объявленных стадий — тогда остаётся исторический порядок task_1.
+func articleStageOrder(profile tasks.Profile) []string {
+	if len(profile.LLMStages) == 0 {
+		return pipelineStageOrder
+	}
+	order := make([]string, 0, len(profile.LLMStages))
+	for _, name := range profile.LLMStages {
+		if name == keywords.StageName {
+			continue
+		}
+		order = append(order, name)
+	}
+	return order
+}
 
 func stageNote(routing resolvedRouting, stage string) string {
 	switch {

@@ -16,10 +16,18 @@ import (
 
 // googleConfig собирает настройки публикации. Значения по умолчанию берутся из пакета
 // интеграции, headless выключается только для ручного входа.
-func googleConfig(headless bool, diagnosticsDir string) google.Config {
+//
+// folderURL — папка Drive задачи. Пустая означает общую папку по умолчанию: так у task_1 и
+// pprof_1 остаётся тот же адрес, что был до появления настройки. Задача со своей папкой
+// получает свою: документ ищется по имени «Промт: <заголовок>», а заголовки статей разных
+// задач совпадают — одна папка на всех означала бы перезапись чужого промпта.
+func googleConfig(headless bool, diagnosticsDir, folderURL string) google.Config {
 	cfg := google.DefaultConfig()
 	cfg.Headless = headless
 	cfg.DiagnosticsDir = diagnosticsDir
+	if strings.TrimSpace(folderURL) != "" {
+		cfg.FolderURL = folderURL
+	}
 	return cfg
 }
 

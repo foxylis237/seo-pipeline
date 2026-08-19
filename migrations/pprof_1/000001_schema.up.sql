@@ -1,26 +1,39 @@
 -- =============================================================================
--- Baseline-схема SEO-пайплайна (task_1).
+-- Схема pprof_1 целиком, одним файлом.
 --
--- Описывает только состояние, которое реально использует код: каждая колонка
--- либо читается, либо пишется репозиторием. Историю миграций 000001..000008
--- эта схема заменяет целиком.
+-- ВАЖНО: применяется ТОЛЬКО к схеме pprof_1 и заменяет собой общий каталог migrations/.
 --
--- Порядок таблиц: articles, затем по одной таблице на фазу пайплайна.
--- Каждая дочерняя таблица связана с articles через ON DELETE CASCADE —
--- на это опирается repository.ValidateSchema.
+--   docker exec -i seo-postgres psql -U seo -d seo \
+--     -v ON_ERROR_STOP=1 -c 'SET search_path TO pprof_1' -f - \
+--     < migrations/pprof_1/000001_schema.up.sql
+--
+-- Файл описывает то же состояние, к которому схему pprof_1 привели общие миграции
+-- 000001–000004: каждая команда идемпотентна (IF NOT EXISTS), поэтому применение к живой
+-- схеме ничего не меняет и не роняет. Нужен он новой установке и чтению: набор колонок
+-- задачи виден одним файлом, а не собирается в голове из четырёх.
+--
+-- Отличия от pprof_2 — ровно те, что делают эту задачу задачей про статьи блога:
+--   article_inputs.author      — автор статьи, раздел result.md;
+--   article_inputs.links       — перелинковка на стадии html;
+--   article_inputs.professions — список похожих профессий в result.md;
+--   article_inputs.tags        — метки публикации в блоге;
+--   article_metadata.tldr      — TL;DR, его рождает стадия info.
+-- Своих колонок pprof_2 (seo_title, section, profession, teachers, service_name) здесь нет:
+-- поля одной задачи не имеют права появляться в таблицах другой, и проверка схемы строга в
+-- обе стороны.
 -- =============================================================================
-
 
 -- =============================================================================
 -- Статья и состояние её обработки.
 -- =============================================================================
-CREATE TABLE articles (
+CREATE TABLE IF NOT EXISTS articles (
     id BIGSERIAL PRIMARY KEY,
 
-    -- Идентификатор из колонки "id" входного Excel. Именно его пользователь
-    -- указывает в CLI; articles.id наружу не выходит.
+    -- Идентификатор из колонки "id" входного Excel. Именно его пользователь указывает
+    -- в CLI; articles.id наружу не выходит.
     external_id TEXT NOT NULL,
 
+    -- Название статьи из колонки article_name книги импорта.
     title TEXT NOT NULL,
 
     -- pending    - ожидает обработки
@@ -38,6 +51,14 @@ CREATE TABLE articles (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
+    -- Отметка о публикации живёт здесь, а не в article_outputs: ту строку сносят clear,
+    -- reset <id>, regenerate и штатный повторный prepare, и защита от дубля в блоге исчезла
+    -- бы вместе с ней. Состояний три: записи нет, запись собрал наш publisher, запись
+    -- существовала до нас и привязана командой mark-published.
+    wordpress_status TEXT NOT NULL DEFAULT 'not_published',
+    wordpress_post_id BIGINT,
+    wordpress_url TEXT,
+
     CONSTRAINT articles_external_id_key
         UNIQUE (external_id),
 
@@ -46,8 +67,8 @@ CREATE TABLE articles (
             status IN ('pending', 'processing', 'completed', 'failed')
         ),
 
-    -- Список этапов, которые пайплайн действительно записывает.
-    -- Добавление нового этапа требует новой миграции и правки schema.go.
+    -- Список этапов, которые пайплайн действительно записывает. Имена общие у всех задач:
+    -- их знает репозиторий, а не поток pprof_2.
     CONSTRAINT articles_current_step_check
         CHECK (
             current_step IS NULL
@@ -66,19 +87,22 @@ CREATE TABLE articles (
         CHECK (
             status <> 'completed'
             OR current_step IS NULL
-        )
+        ),
+
+    CONSTRAINT articles_wordpress_status_check
+        CHECK (wordpress_status IN ('not_published', 'published', 'linked'))
 );
 
 
 -- =============================================================================
--- Исходные данные статьи из Excel. Записываются один раз при импорте.
+-- Исходные данные статьи из Excel. Записываются при импорте.
 -- =============================================================================
-CREATE TABLE article_inputs (
+CREATE TABLE IF NOT EXISTS article_inputs (
     article_id BIGINT PRIMARY KEY
         REFERENCES articles(id)
         ON DELETE CASCADE,
 
-    -- Обязательные колонки Excel: импортёр отклоняет строку без них.
+    -- Обязательные колонки книги: импортёр отклоняет строку без них.
     image_slug TEXT NOT NULL,
     reference_url TEXT NOT NULL,
 
@@ -86,9 +110,12 @@ CREATE TABLE article_inputs (
     header TEXT,
     meta_description TEXT,
     key_word TEXT,
-    author TEXT,
-    links TEXT,
-    professions TEXT
+
+    -- Поля задач, которые пишут статьи блога.
+    author TEXT,        -- автор статьи, раздел result.md
+    links TEXT,         -- адреса для перелинковки на стадии html
+    professions TEXT,   -- список похожих профессий, раздел result.md
+    tags TEXT           -- метки записи в блоге
 );
 
 
@@ -96,13 +123,12 @@ CREATE TABLE article_inputs (
 -- Результат разведки конкурентов: Keys.so + Arsenkin.
 -- Заполняется целиком одной транзакцией на этапе prepare.
 -- =============================================================================
-CREATE TABLE article_research (
+CREATE TABLE IF NOT EXISTS article_research (
     article_id BIGINT PRIMARY KEY
         REFERENCES articles(id)
         ON DELETE CASCADE,
 
-    -- Структура конкурентов от Arsenkin. Её наличие — признак того,
-    -- что prepare для статьи завершён.
+    -- Структура конкурентов от Arsenkin. Её наличие — признак того, что prepare завершён.
     competitor_structure TEXT,
 
     -- Очищенные запросы Keys.so: вход Arsenkin, хранится как провенанс.
@@ -119,19 +145,18 @@ CREATE TABLE article_research (
 
 
 -- =============================================================================
--- Информация для публикации, разобранная из ответа LLM.
+-- Информация для публикации, разобранная из ответа стадии info.
 -- =============================================================================
-CREATE TABLE article_metadata (
+CREATE TABLE IF NOT EXISTS article_metadata (
     article_id BIGINT PRIMARY KEY
         REFERENCES articles(id)
         ON DELETE CASCADE,
 
-    -- Сырой ответ модели целиком: из него достаётся остаточный текст,
-    -- не попавший ни в одну из разобранных секций.
+    -- Сырой ответ модели целиком: из него достаётся остаточный текст, не попавший ни в одну
+    -- из разобранных секций.
     metadata_text TEXT,
 
     -- Разобранные секции ответа.
-    tags TEXT,
     tldr TEXT,
     faq TEXT,
 
@@ -143,7 +168,7 @@ CREATE TABLE article_metadata (
 -- Пути к артефактам на диске, относительно OUTPUT_DIR.
 -- Имена колонок соответствуют именам файлов, которые пишет output.Writer.
 -- =============================================================================
-CREATE TABLE article_outputs (
+CREATE TABLE IF NOT EXISTS article_outputs (
     article_id BIGINT PRIMARY KEY
         REFERENCES articles(id)
         ON DELETE CASCADE,
@@ -154,6 +179,9 @@ CREATE TABLE article_outputs (
     fixed_article_path TEXT,
     html_path TEXT,
 
+    -- Адрес документа Google с промптом страницы. NULL означает «промпт ещё не публиковался».
+    google_doc_url TEXT,
+
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -161,15 +189,15 @@ CREATE TABLE article_outputs (
 -- =============================================================================
 -- Неизменяемая история сбоев обработки.
 -- =============================================================================
-CREATE TABLE article_errors (
+CREATE TABLE IF NOT EXISTS article_errors (
     id BIGSERIAL PRIMARY KEY,
 
     article_id BIGINT NOT NULL
         REFERENCES articles(id)
         ON DELETE CASCADE,
 
-    -- Дублируется из articles намеренно: история читается по внешнему
-    -- идентификатору, который пользователь вводит в CLI.
+    -- Дублируется из articles намеренно: история читается по внешнему идентификатору,
+    -- который пользователь вводит в CLI.
     external_id TEXT NOT NULL,
 
     -- Этап, на котором произошёл сбой, и классифицированная операция.
@@ -188,22 +216,22 @@ CREATE TABLE article_errors (
 -- =============================================================================
 
 -- ClaimNextIncomplete: WHERE status = 'pending' ORDER BY id ASC.
-CREATE INDEX idx_articles_status_id
+CREATE INDEX IF NOT EXISTS idx_articles_status_id
     ON articles (status, id);
 
 -- GetPendingForOperation: WHERE current_step IN (...).
-CREATE INDEX idx_articles_current_step
+CREATE INDEX IF NOT EXISTS idx_articles_current_step
     ON articles (current_step)
     WHERE current_step IS NOT NULL;
 
 -- ListArticlesWithErrors: боковой запрос за последней ошибкой статьи.
-CREATE INDEX idx_article_errors_article_id_created_at
+CREATE INDEX IF NOT EXISTS idx_article_errors_article_id_created_at
     ON article_errors (article_id, created_at DESC, id DESC);
 
 -- ListErrors с фильтром по external_id.
-CREATE INDEX idx_article_errors_external_id_created_at
+CREATE INDEX IF NOT EXISTS idx_article_errors_external_id_created_at
     ON article_errors (external_id, created_at DESC, id DESC);
 
 -- ListErrors без фильтра: ORDER BY created_at DESC, id DESC LIMIT n.
-CREATE INDEX idx_article_errors_created_at
+CREATE INDEX IF NOT EXISTS idx_article_errors_created_at
     ON article_errors (created_at DESC, id DESC);

@@ -187,10 +187,14 @@ func (s *Service) render(input article.ResultInput, articleText string, faqItems
 	}
 	var rendered bytes.Buffer
 	if err := tmpl.Execute(&rendered, templateData{
-		ResultInput:        input,
-		Title:              input.Article.Title,
-		SEOTitle:           input.Article.Title,
-		ProfessionName:     input.Keyword,
+		ResultInput: input,
+		Title:       input.Article.Title,
+		// SEO-заголовок и название профессии приходят своими колонками у той задачи, которая
+		// их завела. У остальных этих колонок нет, значение пусто — и подставляется прежнее
+		// приближение: заголовок статьи и фокусное ключевое слово. Так result.md task_1 и
+		// pprof_1 остаётся тем же, что был.
+		SEOTitle:           fallback(input.SEOTitle, input.Article.Title),
+		ProfessionName:     fallback(input.Profession, input.Keyword),
 		ImageName:          input.Header,
 		ImageURL:           input.Article.Slug,
 		ReadingTimeMinutes: ReadingTimeMinutes(articleText),
@@ -231,13 +235,22 @@ func (s *Service) RenderForDemo(ctx context.Context, externalID, articleText str
 	return s.render(input, articleText, faqItems)
 }
 
+// fallback возвращает первое непустое значение. Пустая колонка и отсутствующая колонка здесь
+// одно и то же: у задачи, которая её не завела, поле всегда пусто.
+func fallback(value, previous string) string {
+	if strings.TrimSpace(value) != "" {
+		return value
+	}
+	return previous
+}
+
 func (s *Service) warnMissingResultFields(input article.ResultInput) {
 	fields := []struct {
 		name  string
 		value string
 	}{
-		{"SEO-заголовок", input.Article.Title},
-		{"Название профессии", input.Keyword},
+		{"SEO-заголовок", fallback(input.SEOTitle, input.Article.Title)},
+		{"Название профессии", fallback(input.Profession, input.Keyword)},
 		{"Название картинки", input.Header},
 		{"URL картинки", input.Article.Slug},
 	}

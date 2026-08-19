@@ -42,12 +42,8 @@ var expectedSchema = []schemaColumn{
 	{"article_inputs", "header", "text", true},
 	{"article_inputs", "meta_description", "text", true},
 	{"article_inputs", "key_word", "text", true},
-	{"article_inputs", "author", "text", true},
-	{"article_inputs", "links", "text", true},
-	{"article_inputs", "professions", "text", true},
-	// tags приходят колонкой Excel, а не от модели: миграция 000003 перенесла их сюда из
-	// article_metadata.
-	{"article_inputs", "tags", "text", true},
+	// author, links, professions и tags здесь нет намеренно: они есть не у каждой задачи и
+	// приходят из её профиля списком необязательных колонок — см. ValidateSchema.
 	{"article_research", "article_id", "bigint", false},
 	{"article_research", "competitor_structure", "text", true},
 	{"article_research", "cleaned_keywords", "jsonb", false},
@@ -56,7 +52,6 @@ var expectedSchema = []schemaColumn{
 	{"article_research", "updated_at", "timestamp with time zone", false},
 	{"article_metadata", "article_id", "bigint", false},
 	{"article_metadata", "metadata_text", "text", true},
-	{"article_metadata", "tldr", "text", true},
 	{"article_metadata", "faq", "text", true},
 	{"article_metadata", "updated_at", "timestamp with time zone", false},
 	{"article_outputs", "article_id", "bigint", false},
@@ -78,8 +73,38 @@ var expectedSchema = []schemaColumn{
 	{"article_errors", "created_at", "timestamp with time zone", false},
 }
 
+// SchemaProfile — чем схема задачи отличается от обязательного набора колонок.
+//
+// Обе стороны важны одинаково: у задачи, объявившей колонку, её отсутствие — ошибка, а у
+// задачи, которая не объявляла, лишняя колонка означает недоприменённую или чужую миграцию.
+// Без этого pprof_2 падал бы на «unexpected column», а pprof_1 молча принимал бы в свою
+// схему чужие колонки.
+type SchemaProfile struct {
+	// ExtraInputColumns — необязательные колонки article_inputs, которые у задачи есть.
+	ExtraInputColumns []string
+	// WithoutTLDR — в article_metadata задачи нет колонки tldr: TL;DR она не генерирует.
+	WithoutTLDR bool
+}
+
 // ValidateSchema проверяет фактические колонки, PK и каскадные внешние ключи до запуска интеграций.
-func ValidateSchema(ctx context.Context, pool *pgxpool.Pool) error {
+func ValidateSchema(ctx context.Context, pool *pgxpool.Pool, profile SchemaProfile) error {
+	if err := ValidateExtraInputColumns(profile.ExtraInputColumns); err != nil {
+		return err
+	}
+	expectedColumns := make([]schemaColumn, 0, len(expectedSchema)+len(profile.ExtraInputColumns)+1)
+	expectedColumns = append(expectedColumns, expectedSchema...)
+	for _, name := range profile.ExtraInputColumns {
+		column := extraInputColumns[name]
+		expectedColumns = append(expectedColumns,
+			schemaColumn{"article_inputs", name, column.typeName, column.nullable})
+	}
+	if !profile.WithoutTLDR {
+		expectedColumns = append(expectedColumns, schemaColumn{"article_metadata", "tldr", "text", true})
+	}
+	return validateSchema(ctx, pool, expectedColumns)
+}
+
+func validateSchema(ctx context.Context, pool *pgxpool.Pool, expectedSchema []schemaColumn) error {
 	rows, err := pool.Query(ctx, `
 		SELECT table_name, column_name, data_type, is_nullable = 'YES'
 		FROM information_schema.columns
@@ -149,7 +174,10 @@ func ValidateSchema(ctx context.Context, pool *pgxpool.Pool) error {
 
 	if len(mismatches) > 0 {
 		sort.Strings(mismatches)
-		return fmt.Errorf("database schema is inconsistent with code: %s; apply all migrations from migrations/*.up.sql", strings.Join(mismatches, "; "))
+		// Каталог миграций у задач разный: у одних общий migrations/, у других свой
+		// migrations/<схема>/ вместо него. Называть в сообщении один путь значило бы
+		// отправлять половину задач применять чужие миграции.
+		return fmt.Errorf("database schema is inconsistent with code: %s; apply the migrations of this task's schema (see migrations/README.md)", strings.Join(mismatches, "; "))
 	}
 	return nil
 }

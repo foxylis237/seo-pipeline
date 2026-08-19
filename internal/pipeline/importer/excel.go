@@ -150,11 +150,44 @@ func ReadRows(path string) ([]Row, error) {
 			Links:           optionalCellValue(row, columnIndexes, "links"),
 			Professions:     optionalCellValue(row, columnIndexes, "professions"),
 			Tags:            optionalCellValue(row, columnIndexes, "tags"),
+			SEOTitle:        optionalCellValue(row, columnIndexes, "seo_title"),
+			Section:         optionalCellValue(row, columnIndexes, "section"),
+			Profession:      optionalCellValue(row, columnIndexes, "profession"),
+			// Преподаватели приходят той же колонкой authors, что и автор: колонка в книге
+			// одна, а как её называет задача — вопрос её единого языка, а не импорта.
+			Teachers:    optionalCellValue(row, columnIndexes, "authors"),
+			ServiceName: optionalCellValue(row, columnIndexes, "service_name"),
 		}
 
 		result = append(result, parsed)
 	}
 	return result, nil
+}
+
+// columnAliases сводит заголовки книги к именам, которыми колонки называет код.
+//
+// Заголовки пишет человек в Excel, и они уже разошлись: у одной задачи «сео-заголовок»
+// кириллицей, у другой того же поля нет вовсе. Разбирать их здесь, одной таблицей, а не
+// ветками в чтении строки — тогда новая книга добавляет строку в карту, а не правку разбора.
+// Ключи — уже приведённые к нижнему регистру и обрезанные заголовки.
+var columnAliases = map[string]string{
+	// Старая опечатка в таблице task_1.
+	"referense_url": "reference_url",
+	// Книга pprof_2 называет slug и преподавателей по-своему. Значение колонок то же самое,
+	// расходятся только заголовки: слаг картинки там slug, преподаватели — teachers, а не
+	// authors. Колонка service_name у неё своя и с article_name не путается: в книге есть обе,
+	// и это два разных значения — полное название страницы и короткое название услуги.
+	"slug":          "image_slug",
+	"teachers":      "authors",
+	"услуга-нейм":   "service_name",
+	"услуга_нейм":   "service_name",
+	"сео-заголовок": "seo_title",
+	"сео_заголовок": "seo_title",
+	"seo-заголовок": "seo_title",
+	"seo-title":     "seo_title",
+	"раздел":        "section",
+	"профессия":     "profession",
+	"преподаватели": "authors",
 }
 
 // buildColumnIndexes проверяет наличие всех обязательных колонок
@@ -170,9 +203,8 @@ func buildColumnIndexes(headerRow []string) (map[string]int, error) {
 		// Убираем пробелы и приводим название к нижнему регистру.
 		columnName := strings.TrimSpace(strings.ToLower(value))
 
-		// Поддерживаем старую опечатку в таблице.
-		if columnName == "referense_url" {
-			columnName = "reference_url"
+		if canonical, found := columnAliases[columnName]; found {
+			columnName = canonical
 		}
 		if columnName == "" {
 			continue

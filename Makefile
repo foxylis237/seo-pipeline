@@ -12,7 +12,7 @@ DRY_RUN_DATABASE_URL ?= postgres://seo:seo@localhost:5433/seo_dry_run?sslmode=di
 #
 # Задачи различаются только именем: набор операций, разбор аргументов и рецепт у них общие,
 # а пути, схему стадий и схему PostgreSQL выбирает профиль внутри CLI.
-TASK_NAMES := task-1 pprof-1
+TASK_NAMES := task-1 pprof-1 pprof-2
 TASK_NAME := $(firstword $(MAKECMDGOALS))
 CLI = $(GO) run ./cmd/seo-pipeline $(TASK_NAME)
 
@@ -25,7 +25,7 @@ TASK_EXTRA_ARGS := $(wordlist 4,$(words $(MAKECMDGOALS)),$(MAKECMDGOALS))
 TASK_OPERATIONS := import import-check errors keywords retry run regenerate dry-run prepare generate demo-generate article info review fix html result clear reset google-login google-publish deepseek-login wordpress-check publish mark-published
 OPTIONAL_ARGUMENT_OPERATIONS := import-check errors keywords retry run regenerate clear reset google-publish prepare generate demo-generate article info review fix html result publish mark-published
 
-.PHONY: help task-1 pprof-1 login docker-up docker-start docker-stop docker-down docker-restart docker-logs docker-ps
+.PHONY: help task-1 pprof-1 pprof-2 login docker-up docker-start docker-stop docker-down docker-restart docker-logs docker-ps
 .PHONY: test test-race fmt vet lint lint-fix build
 
 # ----------------------------------------------------
@@ -72,6 +72,27 @@ help: ## этот список
 		'make pprof-1 dry-run'             'офлайн-прогон без сервисов' \
 		'make pprof-1 clear ID'            'статью к состоянию импорта' \
 		'make pprof-1 reset [ID]'          'статью или всю pprof_1 к нулю'
+	@printf '\npprof_2 — DeepSeek-only, три чата, свой набор полей Excel\n'
+	@printf '  %-34s%s\n' \
+		'make pprof-2 import [limit]'      'импорт страниц из Excel' \
+		'make pprof-2 import-check [ID]'   'сверка импорта с Excel' \
+		'make pprof-2 errors [ID]'         'страницы с текущей ошибкой' \
+		'make pprof-2 keywords ID'         'вставить запросы вместо сбора Keys.so' \
+		'make pprof-2 prepare [ID]'        'research Keys.so и Arsenkin' \
+		'make pprof-2 generate [ID]'       'полный прогон, он же run' \
+		'make pprof-2 article [ID]'        'чат 2 целиком' \
+		'make pprof-2 review [ID]'         'чат 2 целиком, то же' \
+		'make pprof-2 fix [ID]'            'чат 2 целиком, то же' \
+		'make pprof-2 html [ID]'           'чат 3: HTML и перелинковка' \
+		'make pprof-2 run [ID]'            'полный прогон, возобновляемый' \
+		'make pprof-2 run plan [ID]'       'где возобновится, без запуска' \
+		'make pprof-2 retry [ID]'          'снять ошибку и прогнать' \
+		'make pprof-2 regenerate ID'       'пересоздать страницу целиком' \
+		'make pprof-2 result [ID]'         'собрать result.md' \
+		'make pprof-2 google-publish [ID]' 'промпты в Google Docs' \
+		'make pprof-2 dry-run'             'офлайн-прогон без сервисов' \
+		'make pprof-2 clear ID'            'страницу к состоянию импорта' \
+		'make pprof-2 reset [ID]'          'страницу или всю pprof_2 к нулю'
 	@printf '\nВход в сервисы — общий для задач\n'
 	@printf '  %-34s%s\n' \
 		'make login deepseek'              'ручной вход в DeepSeek' \
@@ -84,7 +105,8 @@ help: ## этот список
 	@printf 'html, run, retry, regenerate, demo-generate, google-publish. Необратимы:\n'
 	@printf 'clear и reset. У pprof_1 article, info, review и fix — одно действие: чат 2\n'
 	@printf 'целиком.\n'
-	@printf 'Перед первым запуском pprof-1 создать схему PostgreSQL — см. README.md\n'
+	@printf 'Перед первым запуском pprof-1 и pprof-2 создать их схемы PostgreSQL — см. README.md\n'
+	@printf 'У pprof_2 стадии info нет: TL;DR и FAQ он не генерирует.\n'
 
 # ----------------------------------------------------
 # Задачи
@@ -159,6 +181,9 @@ task-1: ## Run a task_1 operation
 	$(run_task_operation)
 
 pprof-1: ## Run a pprof_1 operation
+	$(run_task_operation)
+
+pprof-2: ## Run a pprof_2 operation
 	$(run_task_operation)
 
 # ----------------------------------------------------

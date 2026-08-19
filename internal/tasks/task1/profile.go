@@ -37,6 +37,10 @@ func Profile() tasks.Profile {
 		DiagnosticsDir:   "output/task1/debug",
 		DBSchema:         "public",
 		EnvPrefix:        "",
-		LLMStages:        Stages,
+		// author, links, professions и tags были общими колонками, пока их не перестала
+		// использовать третья задача. Для task_1 нужны все: автор статьи, перелинковка,
+		// список похожих профессий в result.md и метки публикации.
+		ExtraInputColumns: []string{"author", "links", "professions", "tags"},
+		LLMStages:         Stages,
 	}
 }

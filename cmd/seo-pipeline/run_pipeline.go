@@ -53,6 +53,19 @@ type pipelineState struct {
 	FixedArticlePath string
 	HTMLPath         string
 	ResultReady      bool
+	// MetadataOptional снимает требование метаданных с этапа article.
+	//
+	// Признак статьи, а не глобальная настройка: у задачи со стадией info готовым этап
+	// считается только вместе с TL;DR и FAQ, у задачи без неё их не будет никогда, и раннер
+	// выбирал бы article бесконечно. Нулевое значение — прежнее поведение: метаданные нужны.
+	MetadataOptional bool
+}
+
+// metadataReady отвечает, выполнено ли то, за что отвечает стадия info.
+//
+// У задачи без такой стадии ответ всегда «да»: спрашивать не о чем.
+func metadataReady(state pipelineState) bool {
+	return state.MetadataOptional || !blank(state.MetadataText)
 }
 
 // nextStage returns the first stage the article has not finished yet.
@@ -68,7 +81,7 @@ func nextStage(state pipelineState) pipelineStage {
 		return stagePrepare
 	case blank(state.StructurePath):
 		return stageStructure
-	case blank(state.ArticlePath) || blank(state.MetadataText):
+	case blank(state.ArticlePath) || !metadataReady(state):
 		return stageArticle
 	case blank(state.ReviewPath):
 		return stageReview
@@ -93,7 +106,7 @@ func completedStages(state pipelineState) []pipelineStage {
 	if !blank(state.StructurePath) {
 		done = append(done, stageStructure)
 	}
-	if !blank(state.ArticlePath) && !blank(state.MetadataText) {
+	if !blank(state.ArticlePath) && metadataReady(state) {
 		done = append(done, stageArticle)
 	}
 	if !blank(state.ReviewPath) {
@@ -133,12 +146,12 @@ func incompleteArticles(ctx context.Context, repository incompleteArticlesReposi
 }
 
 // loadPipelineState собирает состояние статьи существующими чтениями репозитория.
-func loadPipelineState(ctx context.Context, repository runStateRepository, externalID string) (pipelineState, error) {
+func loadPipelineState(ctx context.Context, repository runStateRepository, externalID string, metadataOptional bool) (pipelineState, error) {
 	selected, err := repository.GetArticleByExternalID(ctx, externalID)
 	if err != nil {
 		return pipelineState{}, err
 	}
-	state := pipelineState{Status: selected.Status}
+	state := pipelineState{Status: selected.Status, MetadataOptional: metadataOptional}
 	if selected.CurrentStep != nil {
 		state.CurrentStep = *selected.CurrentStep
 	}
@@ -178,7 +191,7 @@ func stageArtifactReady(stage pipelineStage, state pipelineState) bool {
 	case stageStructure:
 		return !blank(state.StructurePath)
 	case stageArticle:
-		return !blank(state.ArticlePath) && !blank(state.MetadataText)
+		return !blank(state.ArticlePath) && metadataReady(state)
 	case stageReview:
 		return !blank(state.ReviewPath)
 	case stageFix:
@@ -203,8 +216,9 @@ func runFullPipeline(
 	execute stageExecutor,
 	logger *slog.Logger,
 	externalID string,
+	metadataOptional bool,
 ) error {
-	state, err := loadPipelineState(ctx, repository, externalID)
+	state, err := loadPipelineState(ctx, repository, externalID, metadataOptional)
 	if err != nil {
 		return err
 	}
@@ -233,7 +247,7 @@ func runFullPipeline(
 		if err := execute(ctx, stage, externalID); err != nil {
 			return err
 		}
-		if state, err = loadPipelineState(ctx, repository, externalID); err != nil {
+		if state, err = loadPipelineState(ctx, repository, externalID, metadataOptional); err != nil {
 			return err
 		}
 		if !stageArtifactReady(stage, state) {
@@ -254,9 +268,9 @@ type planRepository interface {
 
 // runPipelinePlan печатает план возобновления: для одной статьи или для всех незавершённых.
 // Ни один этап не выполняется и ни один LLM не вызывается.
-func runPipelinePlan(ctx context.Context, repository planRepository, writer io.Writer, externalID string) error {
+func runPipelinePlan(ctx context.Context, repository planRepository, writer io.Writer, externalID string, metadataOptional bool) error {
 	if externalID != "" {
-		return printPipelinePlan(ctx, repository, writer, externalID)
+		return printPipelinePlan(ctx, repository, writer, externalID, metadataOptional)
 	}
 	pending, err := incompleteArticles(ctx, repository)
 	if err != nil {
@@ -268,7 +282,7 @@ func runPipelinePlan(ctx context.Context, repository planRepository, writer io.W
 	}
 	fmt.Fprintf(writer, "Незавершённых статей: %d\n\n", len(pending))
 	for _, selected := range pending {
-		if err := printPipelinePlan(ctx, repository, writer, selected.ExternalID); err != nil {
+		if err := printPipelinePlan(ctx, repository, writer, selected.ExternalID, metadataOptional); err != nil {
 			return err
 		}
 		fmt.Fprintln(writer)
@@ -277,8 +291,8 @@ func runPipelinePlan(ctx context.Context, repository planRepository, writer io.W
 }
 
 // printPipelinePlan показывает, что раннер сделал бы со статьёй, ничего не выполняя.
-func printPipelinePlan(ctx context.Context, repository runStateRepository, writer io.Writer, externalID string) error {
-	state, err := loadPipelineState(ctx, repository, externalID)
+func printPipelinePlan(ctx context.Context, repository runStateRepository, writer io.Writer, externalID string, metadataOptional bool) error {
+	state, err := loadPipelineState(ctx, repository, externalID, metadataOptional)
 	if err != nil {
 		return err
 	}

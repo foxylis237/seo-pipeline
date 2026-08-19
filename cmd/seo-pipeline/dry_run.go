@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/foxylis237/seo-pipeline/internal/config"
@@ -22,19 +23,46 @@ import (
 
 const dryRunModelPrefix = "dry-run-"
 
-type dryRunClient struct{}
+// dryRunClient — локальный провайдер офлайн-прогона.
+//
+// responses задаёт ответ на каждую стадию и приходит от задачи: набор у задач разный, и
+// общего на всех быть не может — см. dryRunStageResponses. Нулевое значение поля означает
+// набор task_1: так заглушка остаётся годной там, где профиля под рукой нет.
+type dryRunClient struct{ responses map[string]string }
 
-func (dryRunClient) Generate(_ context.Context, request llm.Request) (llm.Response, error) {
-	stage := strings.TrimPrefix(request.Model, dryRunModelPrefix)
-	text, found := dryRunStageResponses()[stage]
+func (c dryRunClient) stageResponses() map[string]string {
+	if c.responses != nil {
+		return c.responses
+	}
+	return dryRunStageResponses(false)
+}
+
+func (c dryRunClient) Generate(_ context.Context, request llm.Request) (llm.Response, error) {
+	// Стадия берётся из запроса, а не из имени модели: в чате все сообщения после первого
+	// уходят к target, ответившему на первое, и модель у них одна на весь чат. По модели
+	// заглушка отвечала бы стадии info текстом статьи, и TL;DR с FAQ в офлайн-прогоне
+	// оставались бы пустыми — то есть проверка молча пропускала бы разбор метаданных.
+	stage := request.Stage
+	if stage == "" {
+		stage = strings.TrimPrefix(request.Model, dryRunModelPrefix)
+	}
+	text, found := c.stageResponses()[stage]
 	if !found {
-		return llm.Response{}, fmt.Errorf("dry-run has no response for model %q", request.Model)
+		return llm.Response{}, fmt.Errorf("dry-run has no response for stage %q (model %q)", stage, request.Model)
 	}
 	return llm.Response{Text: text, Model: request.Model, InputTokens: 120, OutputTokens: 80}, nil
 }
 
+// SupportsAttachments объявляет приём документов стадии.
+//
+// Без этого офлайн-прогон не доходил до стадии html ни у одной задачи: роутер отказывает
+// стадии с вложениями, если провайдер их не принимает, и dry-run падал на регламенте вёрстки
+// вместо того, чтобы проверить поток. Содержимое документа заглушке безразлично — значимо
+// только то, что он найден и дошёл до провайдера.
+func (dryRunClient) SupportsAttachments() bool { return true }
+
 func (c dryRunClient) NewChat(context.Context, int64) (llm.Chat, error) {
-	stages := dryRunStageResponses()
+	stages := c.stageResponses()
 	return &dryRunChat{responses: []llm.Response{
 		{Text: stages["review"], Model: dryRunModelPrefix + "review", InputTokens: 240, OutputTokens: 420},
 		{Text: stages["fix"], Model: dryRunModelPrefix + "fix", InputTokens: 80, OutputTokens: 60},
@@ -112,20 +140,50 @@ func dryRunStageSet(source config.LLMConfig) config.LLMConfig {
 			targets[index] = config.LLMTargetConfig{Provider: target.Provider, Model: dryRunModelPrefix + name}
 		}
 		stage.Targets = targets
+		// Ненайденный документ стадии офлайн-прогон не роняет: регламент вёрстки — файл
+		// боевого запуска, и его отсутствие уже названо в отчёте маршрутизации отдельной
+		// строкой. Прогон при этом обязан дойти до конца и проверить поток, поэтому каталог
+		// остаётся у стадии ровно тогда, когда документ в нём действительно есть.
+		if stage.AttachmentsDir != "" {
+			if _, err := config.ResolveStageAttachments(name, stage.AttachmentsDir); err != nil {
+				stage.AttachmentsDir = ""
+			}
+		}
 		stages[name] = stage
 	}
 	return config.LLMConfig{Providers: source.Providers, Stages: stages}
 }
 
-func dryRunStageResponses() map[string]string {
-	return map[string]string{
+// dryRunStageResponses — ответ заглушки на каждую стадию.
+//
+// Ключ — имя стадии: его заглушка берёт из запроса. Набор обязан покрывать стадии всех задач,
+// а не только task_1: стадия без ответа роняет прогон с «dry-run has no response for stage».
+//
+// reviewReturnsArticle разводит два смысла стадии review. У task_1 она возвращает замечания,
+// а исправленный текст приходит отдельной стадией fix. У задач без fix (pprof_1, pprof_2)
+// готовый текст возвращает сама review — и заглушка с замечаниями положила бы их в
+// fixed_article.txt вместо статьи, то есть прогон «прошёл бы» с мусором вместо результата.
+func dryRunStageResponses(reviewReturnsArticle bool) map[string]string {
+	reviewedArticle := strings.ReplaceAll(dryRunArticle, "[[ARTICLE_COMPLETE]]", "") + "\n\n[[ARTICLE_COMPLETE]]"
+	responses := map[string]string{
 		"structure": "H1 - Тестовая статья\nH2 - Основной раздел\nH2 - FAQ",
 		"article":   dryRunArticle,
 		"info":      dryRunInfo,
 		"review":    "Структура и содержание подходят для локальной проверки. Критичных замечаний нет.",
-		"fix":       strings.ReplaceAll(dryRunArticle, "[[ARTICLE_COMPLETE]]", "") + "\n\n[[ARTICLE_COMPLETE]]",
+		"fix":       reviewedArticle,
 		"html":      "<h1>Тестовая статья</h1>\n<h2>Основной раздел</h2>\n<p>Локальная проверка SEO-пайплайна без внешних запросов.</p>",
+		// Стадии собственных потоков задач. expert и seo_editor возвращают текст статьи:
+		// в потоке pprof_1 они и есть автор и редактор.
+		"expert":     dryRunArticle,
+		"seo_editor": reviewedArticle,
+		// keywords — резервный подбор запросов в prepare. В офлайн-прогоне research
+		// подставляется напрямую, но ответ пусть будет: стадия объявлена в схеме задач.
+		"keywords": "тестовый запрос\nпроверка dry-run",
 	}
+	if reviewReturnsArticle {
+		responses["review"] = reviewedArticle
+	}
+	return responses
 }
 
 // runDryRun — безопасная проверка перед дорогим прогоном.
@@ -151,7 +209,7 @@ func runDryRun(
 		return fmt.Errorf("dry-run load LLM config: %w", err)
 	}
 	routing := newLLMResolver(stages, newGeminiAvailability()).Resolve()
-	if err := writeRoutingReport(report, routing); err != nil {
+	if err := writeRoutingReport(report, routing, articleStageOrder(profile)); err != nil {
 		return fmt.Errorf("dry-run write routing report: %w", err)
 	}
 
@@ -173,13 +231,33 @@ func runDryRun(
 	if err := articleRepository.Reset(ctx); err != nil {
 		return fmt.Errorf("dry-run reset isolated database: %w", err)
 	}
-	stub := dryRunClient{}
+	// Набор ответов заглушки зависит от задачи: стадия review возвращает готовый текст
+	// везде, где у задачи нет отдельной стадии fix.
+	stub := dryRunClient{responses: dryRunStageResponses(!slices.Contains(profile.LLMStages, string(stageFix)))}
 	clients := make(map[string]llm.Client, len(llmConfig.Providers))
 	for name := range llmConfig.Providers {
 		clients[name] = stub
 	}
 	router := llm.NewRouter(llmConfig, clients, logger)
-	pipeline := generation.NewPipeline(articleRepository, router, stub, writer, logger, resultService)
+
+	// Прогон идёт тем же путём, что и в бою: у задачи со своим потоком — её потоком, у
+	// task_1 — общим конвейером. Иначе dry-run проверял бы не ту схему, которая выполнится:
+	// у pprof_1 он падал на стадии fix, которой у задачи нет вовсе, а у pprof_2 — на полях
+	// чужого промпта.
+	flow, err := newTaskFlow(profile, taskFlowDeps{
+		repository: articleRepository, writer: writer, router: router, logger: logger,
+	})
+	if err != nil {
+		return fmt.Errorf("dry-run build task flow: %w", err)
+	}
+	runArticle := func(ctx context.Context, externalID string) (articleoutput.ArticlePaths, error) {
+		if flow != nil {
+			return runDryRunTaskFlow(ctx, flow, articleRepository, resultService, externalID)
+		}
+		output, runErr := generation.NewPipeline(articleRepository, router, stub, writer, logger, resultService).
+			RunByExternalID(ctx, externalID)
+		return output.Paths, runErr
+	}
 
 	for _, input := range inputs {
 		selected, _, err := articleRepository.Import(ctx, input)
@@ -189,16 +267,52 @@ func runDryRun(
 		if err := seedDryRunResearch(ctx, articleRepository, selected.ID); err != nil {
 			return err
 		}
-		output, err := pipeline.RunByExternalID(ctx, selected.ExternalID)
+		paths, err := runArticle(ctx, selected.ExternalID)
 		if err != nil {
 			return fmt.Errorf("dry-run pipeline external_id %s: %w", selected.ExternalID, err)
 		}
-		if err := verifyDryRunResult(ctx, articleRepository, writer, selected.ExternalID, output.Paths); err != nil {
+		if err := verifyDryRunResult(ctx, articleRepository, writer, selected.ExternalID, paths,
+			!profile.WithoutMetadataStage, slices.Contains(profile.LLMStages, string(stageReview))); err != nil {
 			return err
 		}
-		logger.Info("dry-run article verified", "article_id", selected.ID, "external_id", selected.ExternalID, "status", "completed", "result_path", output.Paths.ResultPath)
+		logger.Info("dry-run article verified", "article_id", selected.ID, "external_id", selected.ExternalID, "status", "completed", "result_path", paths.ResultPath)
 	}
 	return nil
+}
+
+// runDryRunTaskFlow проводит статью по собственному потоку задачи: три чата, затем сборка
+// result.md и завершение статьи.
+//
+// Этапы те же и в том же порядке, что у боевого раннера, — отличается только источник
+// research: в офлайн-прогоне он подставлен напрямую, без Keys.so и Arsenkin.
+func runDryRunTaskFlow(
+	ctx context.Context,
+	flow taskFlow,
+	articleRepository *repository.ArticleRepository,
+	resultService *resultassembly.Service,
+	externalID string,
+) (articleoutput.ArticlePaths, error) {
+	if err := flow.RunStructure(ctx, externalID); err != nil {
+		return articleoutput.ArticlePaths{}, err
+	}
+	if err := flow.RunArticle(ctx, externalID); err != nil {
+		return articleoutput.ArticlePaths{}, err
+	}
+	if err := flow.RunHTML(ctx, externalID); err != nil {
+		return articleoutput.ArticlePaths{}, err
+	}
+	paths, err := resultService.Build(ctx, externalID)
+	if err != nil {
+		return articleoutput.ArticlePaths{}, err
+	}
+	input, err := articleRepository.GetResultInput(ctx, externalID)
+	if err != nil {
+		return articleoutput.ArticlePaths{}, err
+	}
+	if err := articleRepository.CompleteGeneration(ctx, input.Article.ID); err != nil {
+		return articleoutput.ArticlePaths{}, err
+	}
+	return paths, nil
 }
 
 func seedDryRunResearch(ctx context.Context, articleRepository *repository.ArticleRepository, articleID int64) error {
@@ -214,7 +328,11 @@ func seedDryRunResearch(ctx context.Context, articleRepository *repository.Artic
 	return nil
 }
 
-func verifyDryRunResult(ctx context.Context, articleRepository *repository.ArticleRepository, writer *articleoutput.Writer, externalID string, paths articleoutput.ArticlePaths) error {
+// verifyDryRunResult проверяет, что прогон оставил все артефакты и завершил статью.
+//
+// withMetadata снимает требование article_info у задачи без стадии info: файла у неё не
+// будет никогда, и требовать его — значит объявить исправный прогон сломанным.
+func verifyDryRunResult(ctx context.Context, articleRepository *repository.ArticleRepository, writer *articleoutput.Writer, externalID string, paths articleoutput.ArticlePaths, withMetadata, withReviewArtifacts bool) error {
 	input, err := articleRepository.GetResultInput(ctx, externalID)
 	if err != nil {
 		return fmt.Errorf("dry-run verify state for external_id %s: %w", externalID, err)
@@ -224,10 +342,19 @@ func verifyDryRunResult(ctx context.Context, articleRepository *repository.Artic
 	}
 	required := []string{
 		paths.StructurePromptPath, paths.StructurePath,
-		paths.ArticlePromptPath, paths.ArticlePath, paths.GenerationInfoPath,
-		paths.ReviewPromptPath, paths.ReviewPath,
-		paths.FixPromptPath, paths.FixedArticlePath,
+		paths.ArticlePromptPath, paths.ArticlePath,
 		paths.HTMLPromptPath, paths.HTMLPath, paths.ResultPath,
+	}
+	// Артефакты ревью спрашиваются только у задачи, которая его выполняет. У потока без
+	// ревью отдельного текста и промпта нет вовсе: финальным текстом остаётся сама статья,
+	// и требование сорвало бы офлайн-прогон на файле, которого никто не обещал.
+	if withReviewArtifacts {
+		required = append(required,
+			paths.ReviewPromptPath, paths.ReviewPath,
+			paths.FixPromptPath, paths.FixedArticlePath)
+	}
+	if withMetadata {
+		required = append(required, paths.GenerationInfoPath)
 	}
 	for _, path := range required {
 		if !writer.Exists(path) {

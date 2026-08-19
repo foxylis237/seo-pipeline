@@ -176,7 +176,7 @@ func TestRunFullPipelineRunsEveryStageOnce(t *testing.T) {
 		return nil
 	}
 
-	if err := runFullPipeline(context.Background(), repository, execute, runPipelineTestLogger(), "37"); err != nil {
+	if err := runFullPipeline(context.Background(), repository, execute, runPipelineTestLogger(), "37", false); err != nil {
 		t.Fatal(err)
 	}
 	want := []pipelineStage{stagePrepare, stageStructure, stageArticle, stageReview, stageFix, stageHTML, stageResult}
@@ -196,7 +196,7 @@ func TestRunFullPipelineResumesAndSkipsFinishedStages(t *testing.T) {
 		return nil
 	}
 
-	if err := runFullPipeline(context.Background(), repository, execute, runPipelineTestLogger(), "37"); err != nil {
+	if err := runFullPipeline(context.Background(), repository, execute, runPipelineTestLogger(), "37", false); err != nil {
 		t.Fatal(err)
 	}
 	want := []pipelineStage{stageHTML, stageResult}
@@ -211,7 +211,7 @@ func TestRunFullPipelineSkipsCompletedArticle(t *testing.T) {
 		t.Fatalf("для завершённой статьи выполнен этап %s", stage)
 		return nil
 	}
-	if err := runFullPipeline(context.Background(), repository, execute, runPipelineTestLogger(), "37"); err != nil {
+	if err := runFullPipeline(context.Background(), repository, execute, runPipelineTestLogger(), "37", false); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -225,7 +225,7 @@ func TestRunFullPipelineStopsWhenStageSavesNothing(t *testing.T) {
 		return nil
 	}
 
-	err := runFullPipeline(context.Background(), repository, execute, runPipelineTestLogger(), "37")
+	err := runFullPipeline(context.Background(), repository, execute, runPipelineTestLogger(), "37", false)
 	if err == nil {
 		t.Fatal("прогон не остановлен")
 	}
@@ -246,7 +246,7 @@ func TestRunFullPipelineStopsOnStageError(t *testing.T) {
 		}
 		return wantErr
 	}
-	if err := runFullPipeline(context.Background(), repository, execute, runPipelineTestLogger(), "37"); !errors.Is(err, wantErr) {
+	if err := runFullPipeline(context.Background(), repository, execute, runPipelineTestLogger(), "37", false); !errors.Is(err, wantErr) {
 		t.Fatalf("error = %v, want %v", err, wantErr)
 	}
 }
@@ -275,4 +275,56 @@ type fakeIncompleteRepository struct{ articles []article.Article }
 
 func (r *fakeIncompleteRepository) GetAll(context.Context) ([]article.Article, error) {
 	return r.articles, nil
+}
+
+// У задачи без стадии info метаданных не будет никогда, и требовать их от этапа article
+// нельзя: раннер выбирал бы его бесконечно и остановился бы на «результат не сохранён».
+func TestNextStageSkipsMetadataForTaskWithoutInfoStage(t *testing.T) {
+	state := readyThrough(stageArticle)
+	state.MetadataText = ""
+	state.MetadataOptional = true
+	if got := nextStage(state); got != stageReview {
+		t.Fatalf("nextStage = %q, want %q", got, stageReview)
+	}
+	if !stageArtifactReady(stageArticle, state) {
+		t.Fatal("этап article считается незавершённым без метаданных, которых у задачи не бывает")
+	}
+	done := completedStages(state)
+	if len(done) == 0 || done[len(done)-1] != stageArticle {
+		t.Fatalf("готовые этапы %v, ожидался article последним", done)
+	}
+}
+
+// Нулевое значение признака — прежнее поведение: метаданные нужны. Иначе задача со стадией
+// info молча проскочила бы этап, не сохранив TL;DR и FAQ.
+func TestMetadataIsStillRequiredByDefault(t *testing.T) {
+	state := readyThrough(stageArticle)
+	state.MetadataText = ""
+	if state.MetadataOptional {
+		t.Fatal("признак «метаданных не бывает» включён по умолчанию")
+	}
+	if got := nextStage(state); got != stageArticle {
+		t.Fatalf("nextStage = %q, want %q", got, stageArticle)
+	}
+}
+
+// Полный прогон задачи без метаданных обязан дойти до конца, а не остановиться на article.
+func TestRunFullPipelineCompletesWithoutMetadata(t *testing.T) {
+	repository := &fakeRunRepository{state: pipelineState{Status: "pending", MetadataOptional: true}}
+	var executed []pipelineStage
+	execute := func(_ context.Context, stage pipelineStage, _ string) error {
+		executed = append(executed, stage)
+		repository.advance(stage)
+		// Стадии info у задачи нет: метаданные не появляются ни на одном этапе.
+		repository.state.MetadataText = ""
+		repository.state.MetadataOptional = true
+		return nil
+	}
+	if err := runFullPipeline(context.Background(), repository, execute, runPipelineTestLogger(), "37", true); err != nil {
+		t.Fatal(err)
+	}
+	want := []pipelineStage{stagePrepare, stageStructure, stageArticle, stageReview, stageFix, stageHTML, stageResult}
+	if !reflect.DeepEqual(executed, want) {
+		t.Fatalf("выполнены этапы %v, ожидались %v", executed, want)
+	}
 }

@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"context"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/foxylis237/seo-pipeline/internal/llm"
+	"github.com/foxylis237/seo-pipeline/internal/tasks"
+	"github.com/foxylis237/seo-pipeline/internal/tasks/pprof2"
 	"github.com/foxylis237/seo-pipeline/internal/tasks/task1"
 )
 
@@ -136,7 +139,7 @@ func TestRoutingReportShowsModeProvidersAndStages(t *testing.T) {
 
 	routing := testResolver(t, time.Date(2026, 8, 7, 12, 0, 0, 0, time.UTC), true).Resolve()
 	var report bytes.Buffer
-	if err := writeRoutingReport(&report, routing); err != nil {
+	if err := writeRoutingReport(&report, routing, pipelineStageOrder); err != nil {
 		t.Fatal(err)
 	}
 	output := report.String()
@@ -195,5 +198,23 @@ func TestDryRunStageSetRewritesTargetsAndReachesTheStub(t *testing.T) {
 		if response.Model != dryRunModelPrefix+stage {
 			t.Fatalf("стадия %q ответила моделью %q", stage, response.Model)
 		}
+	}
+}
+
+// Отчёт маршрутизации печатает стадии задачи, а не общий список. Пока список был общим, у
+// pprof_2 он показывал «не настроена» на стадиях info и fix, которых у задачи нет вовсе, —
+// то есть отчёт врал ровно там, где его читают перед дорогим прогоном.
+func TestArticleStageOrderFollowsTaskProfile(t *testing.T) {
+	order := articleStageOrder(pprof2.Profile())
+	expected := []string{"structure", "article", "html"}
+	if !slices.Equal(order, expected) {
+		t.Fatalf("порядок стадий pprof_2 = %v, ожидался %v", order, expected)
+	}
+	if !slices.Equal(articleStageOrder(task1.Profile()), pipelineStageOrder) {
+		t.Fatalf("порядок стадий task_1 = %v, ожидался %v", articleStageOrder(task1.Profile()), pipelineStageOrder)
+	}
+	// Задача без объявленных стадий остаётся с историческим порядком task_1.
+	if !slices.Equal(articleStageOrder(tasks.Profile{}), pipelineStageOrder) {
+		t.Fatalf("пустой профиль дал порядок %v", articleStageOrder(tasks.Profile{}))
 	}
 }

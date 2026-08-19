@@ -64,8 +64,6 @@ func TestValidatePublicationInputRejects(t *testing.T) {
 		"нет ключа":        {func(i *article.PublicationInput) { i.Keyword = "" }, "фокусное ключевое слово"},
 		"нет мета":         {func(i *article.PublicationInput) { i.MetaDescription = "" }, "мета-описание"},
 		"нет заголовка H1": {func(i *article.PublicationInput) { i.Header = "" }, "заголовок профблока"},
-		"нет TL;DR":        {func(i *article.PublicationInput) { i.TLDR = "" }, "TL;DR"},
-		"нет FAQ":          {func(i *article.PublicationInput) { i.FAQ = "" }, "FAQ"},
 		// Без слага картинке неоткуда взять подпись в медиабиблиотеке, а исправить
 		// вложение приложение не умеет.
 		"нет image_slug": {func(i *article.PublicationInput) { i.Article.Slug = "" }, "image_slug"},
@@ -82,6 +80,46 @@ func TestValidatePublicationInputRejects(t *testing.T) {
 				t.Fatalf("ошибка %q не называет причину %q", err, testCase.want)
 			}
 		})
+	}
+}
+
+// TL;DR и FAQ проверяются отдельно: задача без стадии info их не генерирует, и общая
+// проверка, требующая их со всех, не дала бы опубликовать её никогда. У задачи со стадией
+// info требование остаётся — пустое поле там означает сорванную генерацию.
+func TestValidateArticleMetadataRequiresTLDRAndFAQ(t *testing.T) {
+	if err := ValidateArticleMetadata(publishableInput()); err != nil {
+		t.Fatalf("готовая статья отбита: %v", err)
+	}
+	cases := map[string]struct {
+		mutate func(*article.PublicationInput)
+		want   string
+	}{
+		"нет TL;DR": {func(i *article.PublicationInput) { i.TLDR = "" }, "TL;DR"},
+		"нет FAQ":   {func(i *article.PublicationInput) { i.FAQ = "" }, "FAQ"},
+	}
+	for name, testCase := range cases {
+		t.Run(name, func(t *testing.T) {
+			input := publishableInput()
+			testCase.mutate(&input)
+			err := ValidateArticleMetadata(input)
+			if err == nil {
+				t.Fatal("ожидалась ошибка")
+			}
+			if !strings.Contains(err.Error(), testCase.want) {
+				t.Fatalf("ошибка %q не называет причину %q", err, testCase.want)
+			}
+		})
+	}
+}
+
+// Статья без TL;DR и FAQ общей проверкой не отбивается: их отсутствие — свойство задачи,
+// а не негодность статьи.
+func TestValidatePublicationInputIgnoresArticleMetadata(t *testing.T) {
+	input := publishableInput()
+	input.TLDR = ""
+	input.FAQ = ""
+	if err := ValidatePublicationInput(input); err != nil {
+		t.Fatalf("статья без TL;DR и FAQ отбита общей проверкой: %v", err)
 	}
 }
 

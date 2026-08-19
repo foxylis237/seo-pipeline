@@ -27,7 +27,6 @@ import (
 	resultassembly "github.com/foxylis237/seo-pipeline/internal/pipeline/result"
 	"github.com/foxylis237/seo-pipeline/internal/storage"
 	"github.com/foxylis237/seo-pipeline/internal/tasks"
-	"github.com/foxylis237/seo-pipeline/internal/tasks/pprof1"
 	"github.com/foxylis237/seo-pipeline/internal/tasks/task1"
 )
 
@@ -121,7 +120,13 @@ func main() {
 	defer pool.Close()
 
 	logger.Info("подключение к PostgreSQL успешно установлено")
-	if err := repository.ValidateSchema(ctx, pool); err != nil {
+	// Проверка знает про необщие колонки этой задачи: у той, что их объявила, отсутствие
+	// колонки — ошибка, а у той, что не объявляла, лишняя колонка в схеме означает чужую
+	// или недоприменённую миграцию. Так поля одной задачи не расползаются по таблицам другой.
+	if err := repository.ValidateSchema(ctx, pool, repository.SchemaProfile{
+		ExtraInputColumns: profile.ExtraInputColumns,
+		WithoutTLDR:       profile.MetadataFAQOnly,
+	}); err != nil {
 		if isGracefulCancellation(ctx, err) {
 			logger.Info("завершение приложения по сигналу", "stage", "shutdown")
 			return
@@ -149,6 +154,15 @@ func main() {
 	}()
 	taskLogger := slog.New(logRouter.Handler(logger.Handler())).With("task", profile.Name, "operation", command.Name)
 	articleRepository := repository.NewArticleRepository(pool, taskLogger)
+	// Тот же список, что ушёл в проверку схемы: запись и чтение обязаны называть ровно те
+	// колонки, которые в этой схеме есть.
+	if err := articleRepository.UseExtraInputColumns(profile.ExtraInputColumns); err != nil {
+		logger.Error("профиль задачи называет неизвестные колонки article_inputs", "task", profile.Name, "error", err)
+		os.Exit(1)
+	}
+	// Та же причина, что и у колонок article_inputs: у задачи без TL;DR колонки tldr в схеме
+	// нет, и запрос, который её называет, упал бы на «column does not exist».
+	articleRepository.UseMetadataWithoutTLDR(profile.MetadataFAQOnly)
 	resultService := resultassembly.NewService(articleRepository, writer, taskLogger, profile.TemplatePath)
 	// Корни диагностики разводятся по задачам здесь, один раз: сами интеграции о задачах не
 	// знают и получают готовый путь.
@@ -171,7 +185,8 @@ func main() {
 	case "import-check":
 		var workbook string
 		if workbook, err = importer.ResolveWorkbook(cfg.InputFilePath, cfg.InputDir); err == nil {
-			err = runImportCheck(ctx, articleRepository, workbook, os.Stdout, command.ExternalID)
+			err = runImportCheck(ctx, articleRepository, workbook, os.Stdout, command.ExternalID,
+				profile.ExtraInputColumns)
 		}
 
 	case "reset":
@@ -203,7 +218,7 @@ func main() {
 	case "google-publish":
 		// Ни LLM, ни Keys.so, ни Arsenkin: команда берёт уже сохранённый промпт с диска.
 		publisher := google.NewPublisher(
-			google.NewSessionFactory(googleConfig(true, debugDirs.google), taskLogger, 0),
+			google.NewSessionFactory(googleConfig(true, debugDirs.google, profile.GoogleFolderURL), taskLogger, 0),
 			google.DefaultRetryPolicy(),
 		)
 		err = runGooglePublish(ctx, articleRepository, writer, publisher.Publish, taskLogger, os.Stdout, profile.Command, command.ExternalID)
@@ -223,6 +238,10 @@ func main() {
 			in:          os.Stdin,
 			assumeYes:   command.AssumeYes,
 			interactive: isCharDevice(os.Stdin),
+			// Что публиковать, знает профиль: у задачи без стадии info ни TL;DR, ни FAQ,
+			// ни времени чтения нет, и требовать их от неё нечем.
+			withoutArticleMetadata: profile.WithoutMetadataStage,
+			metadataFAQOnly:        profile.MetadataFAQOnly,
 		}, command.Name, command.ExternalID, command.WordPressPostID, command.Plan)
 
 	case "clear":
@@ -306,7 +325,7 @@ func main() {
 		}
 		// Публикация промпта идёт рядом с генерацией и не задерживает её. Wait обязателен:
 		// без него команда завершилась бы с живым Chromium и недописанным документом.
-		promptPublisher := newGooglePublisher(ctx, googleConfig(true, debugDirs.google), articleRepository, taskLogger)
+		promptPublisher := newGooglePublisher(ctx, googleConfig(true, debugDirs.google, profile.GoogleFolderURL), articleRepository, taskLogger)
 		defer promptPublisher.Wait()
 		mode, closeLLM, buildErr := buildLLM(ctx, stages, availability, generationDeps{
 			repository: articleRepository, writer: writer, result: resultService, logger: taskLogger,
@@ -319,14 +338,18 @@ func main() {
 		// Резервный источник исходных запросов для prepare: та же схема маршрутизации, что
 		// у генерации этой статьи.
 		newKeywordsFallback := newKeywordsFallbackFactory(mode, taskLogger)
-		// pprof_1 идёт своим потоком: три чата и свои стадии. Всё остальное — репозиторий,
-		// writer, сборка result.md, публикация промпта — у задач общее.
-		var pprofFlow *pprof1.Flow
-		if profile.Name == pprof1.Name {
-			pprofFlow, err = newPProf1Flow(articleRepository, writer, mode.routers[schemeDeepSeek], taskLogger, promptPublisher)
-			if err != nil {
-				break
-			}
+		// Задача может идти своим потоком: три чата и свои стадии. Всё остальное —
+		// репозиторий, writer, сборка result.md, публикация промпта — у задач общее.
+		// nil означает «своего потока нет», и тогда работает общий конвейер task_1.
+		var flow taskFlow
+		if flow, err = newTaskFlow(profile, taskFlowDeps{
+			repository: articleRepository,
+			writer:     writer,
+			router:     mode.routers[schemeDeepSeek],
+			logger:     taskLogger,
+			publisher:  promptPublisher,
+		}); err != nil {
+			break
 		}
 		// DEMO собирается отдельной операцией: статус, current_step и error_message статьи
 		// её не выбирают и ею не меняются, а маршрутизация берётся та же, что у боевого
@@ -354,8 +377,8 @@ func main() {
 			runOneArticle := func(ctx context.Context, externalID string) error {
 				return mode.stage(ctx, externalID, run)
 			}
-			if pprofFlow != nil {
-				flowRun, runErr := pprof1StageRunner(pprofFlow, name)
+			if flow != nil {
+				flowRun, runErr := taskFlowStageRunner(flow, name)
 				if runErr != nil {
 					return runErr
 				}
@@ -411,9 +434,9 @@ func main() {
 		runOne := func(ctx context.Context, externalID string) error {
 			scheme, pipeline := mode.pipelineFor(externalID)
 			stages := execute(pipeline)
-			if pprofFlow != nil {
+			if flow != nil {
 				// Этапы prepare и result у задач общие, поэтому берутся у того же исполнителя.
-				stages = pprof1StageExecutor(pprofFlow,
+				stages = taskFlowStageExecutor(flow,
 					func(ctx context.Context, externalID string) error {
 						return execute(pipeline)(ctx, stagePrepare, externalID)
 					},
@@ -421,17 +444,17 @@ func main() {
 						return execute(pipeline)(ctx, stageResult, externalID)
 					})
 			}
-			runErr := runFullPipeline(ctx, articleRepository, stages, taskLogger, externalID)
+			runErr := runFullPipeline(ctx, articleRepository, stages, taskLogger, externalID, profile.WithoutMetadataStage)
 			return mode.guard(ctx, externalID, scheme, runErr)
 		}
 		switch command.Name {
 		case "generate":
-			// У pprof_1 генерация — это его собственный поток, и отдельного «прогнать все
-			// стадии одним вызовом» у него нет: им и является полный прогон.
+			// У задачи со своим потоком генерация — это он сам, и отдельного «прогнать все
+			// стадии одним вызовом» у неё нет: им и является полный прогон.
 			generateOne := func(ctx context.Context, externalID string) error {
 				return mode.run(ctx, externalID, runGenerate)
 			}
-			if pprofFlow != nil {
+			if flow != nil {
 				generateOne = runOne
 			}
 			if command.ExternalID == "" {
@@ -441,7 +464,7 @@ func main() {
 			}
 		case "run", "regenerate":
 			if command.Plan {
-				err = runPipelinePlan(ctx, articleRepository, os.Stdout, command.ExternalID)
+				err = runPipelinePlan(ctx, articleRepository, os.Stdout, command.ExternalID, profile.WithoutMetadataStage)
 				break
 			}
 			if command.Name == "regenerate" {
@@ -453,14 +476,16 @@ func main() {
 			// отдельной командой. Поэтому publisher стоит поверх runOne, а не внутри
 			// раннера этапов: тот обязан останавливаться на первой ошибке, а этот — нет.
 			publisher := newRunPublisherFor(wordPressCommandDeps{
-				repository:  articleRepository,
-				writer:      writer,
-				images:      newArticleImages(profile.InputDir),
-				resultBuild: resultService,
-				settings:    cfg.WordPress,
-				logger:      taskLogger,
-				out:         os.Stdout,
-				in:          os.Stdin,
+				repository:             articleRepository,
+				writer:                 writer,
+				images:                 newArticleImages(profile.InputDir),
+				resultBuild:            resultService,
+				settings:               cfg.WordPress,
+				logger:                 taskLogger,
+				out:                    os.Stdout,
+				in:                     os.Stdin,
+				withoutArticleMetadata: profile.WithoutMetadataStage,
+				metadataFAQOnly:        profile.MetadataFAQOnly,
 			}, cfg.WordPress.PublishAfterRun)
 			runAndPublish := publisher.wrap(runOne)
 			if command.ExternalID == "" {

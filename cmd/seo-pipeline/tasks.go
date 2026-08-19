@@ -7,6 +7,7 @@ import (
 
 	"github.com/foxylis237/seo-pipeline/internal/tasks"
 	"github.com/foxylis237/seo-pipeline/internal/tasks/pprof1"
+	"github.com/foxylis237/seo-pipeline/internal/tasks/pprof2"
 	"github.com/foxylis237/seo-pipeline/internal/tasks/task1"
 )
 
@@ -16,7 +17,7 @@ import (
 // импортировал бы пакеты задач, а те — его, и получился бы цикл. Четвёртая задача добавляется
 // одной строкой здесь плюс своим пакетом конфигурации и каталогами на диске.
 func taskRegistry() []tasks.Profile {
-	return []tasks.Profile{task1.Profile(), pprof1.Profile()}
+	return []tasks.Profile{task1.Profile(), pprof1.Profile(), pprof2.Profile()}
 }
 
 // lookupTask находит профиль по имени задачи в любой из двух форм.

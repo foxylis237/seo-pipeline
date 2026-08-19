@@ -10,6 +10,10 @@ import (
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/importer"
 )
 
+// blogInputColumns — необязательные колонки задач, которые пишут статьи блога. Сверка
+// импорта спрашивает только те поля, что у задачи есть; тесты проверяют полный набор.
+var blogInputColumns = []string{"author", "links", "professions", "tags"}
+
 func excelRow(number int, externalID, title string) importer.Row {
 	return importer.Row{
 		Number: number, ExternalID: externalID, Title: title,
@@ -34,7 +38,7 @@ func TestCheckImportAcceptsExactTransfer(t *testing.T) {
 	rows := []importer.Row{excelRow(2, "37", "Как стать логопедом"), excelRow(3, "38", "Как стать поваром")}
 	imported := []article.ImportedArticle{importedFromRow(rows[0]), importedFromRow(rows[1])}
 
-	report := checkImport(rows, imported)
+	report := checkImport(rows, imported, blogInputColumns)
 	if !report.countsMatch() {
 		t.Fatalf("количества не совпали: excel=%d articles=%d inputs=%d",
 			report.ExcelRows, report.Articles, report.ArticleInputs)
@@ -51,7 +55,7 @@ func TestCheckImportFindsShiftedFields(t *testing.T) {
 	imported[0].Input.Keyword = "инструктор по физической культуре"
 	imported[0].Input.ReferenceURL = ""
 
-	report := checkImport(rows, imported)
+	report := checkImport(rows, imported, blogInputColumns)
 	failed := report.failed()
 	if !reflect.DeepEqual(failed, []string{"37"}) {
 		t.Fatalf("статьи с ошибками = %v", failed)
@@ -74,7 +78,7 @@ func TestCheckImportFindsMissingArticleInputs(t *testing.T) {
 	imported[0].HasInput = false
 	imported[0].Input = article.Input{}
 
-	report := checkImport(rows, imported)
+	report := checkImport(rows, imported, blogInputColumns)
 	if report.ArticleInputs != 0 || report.countsMatch() {
 		t.Fatalf("отсутствие строки ввода не отражено: inputs=%d", report.ArticleInputs)
 	}
@@ -92,7 +96,7 @@ func TestCheckImportFindsRowsLostAndExtra(t *testing.T) {
 		{Article: article.Article{ExternalID: "41", Title: "Старая статья"}, HasInput: true},
 	}
 
-	report := checkImport(rows, imported)
+	report := checkImport(rows, imported, blogInputColumns)
 	if !reflect.DeepEqual(report.MissingInDB, []string{"38"}) {
 		t.Fatalf("потерянные при импорте = %v", report.MissingInDB)
 	}
@@ -112,7 +116,7 @@ func TestCheckImportReportsExcelRowErrors(t *testing.T) {
 	row.Errors = []string{`поле "id": дубликат строки 5`}
 	imported := []article.ImportedArticle{importedFromRow(row)}
 
-	report := checkImport([]importer.Row{row}, imported)
+	report := checkImport([]importer.Row{row}, imported, blogInputColumns)
 	issues := report.Reports[0].Issues
 	if len(issues) != 1 || !strings.Contains(issues[0].Text, "дубликат строки 5") {
 		t.Fatalf("проблемы = %+v", issues)
@@ -121,7 +125,7 @@ func TestCheckImportReportsExcelRowErrors(t *testing.T) {
 
 func TestCheckImportSkipsEmptyExcelRows(t *testing.T) {
 	rows := []importer.Row{excelRow(2, "37", "Тема"), {Number: 3, Empty: true}}
-	report := checkImport(rows, []article.ImportedArticle{importedFromRow(rows[0])})
+	report := checkImport(rows, []article.ImportedArticle{importedFromRow(rows[0])}, blogInputColumns)
 	if report.ExcelRows != 1 {
 		t.Fatalf("строк Excel = %d, ожидалась одна", report.ExcelRows)
 	}
@@ -133,7 +137,7 @@ func TestRenderImportReportListsFailedArticles(t *testing.T) {
 	imported[1].Input.Keyword = "чужой ключ"
 
 	var output bytes.Buffer
-	report := checkImport(rows, imported)
+	report := checkImport(rows, imported, blogInputColumns)
 	report.ExcelPath = "input/task_1/input.xlsx"
 	renderImportReport(&output, report)
 
@@ -152,7 +156,7 @@ func TestRenderImportReportListsFailedArticles(t *testing.T) {
 func TestRenderImportArticleReportPrintsOneArticle(t *testing.T) {
 	rows := []importer.Row{excelRow(2, "37", "Как стать логопедом"), excelRow(3, "38", "Как стать поваром")}
 	imported := []article.ImportedArticle{importedFromRow(rows[0]), importedFromRow(rows[1])}
-	report := checkImport(rows, imported)
+	report := checkImport(rows, imported, blogInputColumns)
 
 	var output bytes.Buffer
 	if err := renderImportArticleReport(&output, report, "38"); err != nil {

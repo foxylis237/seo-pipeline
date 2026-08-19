@@ -75,7 +75,9 @@ func TestBuildUsesStructuredMetadataOrderEmptyHTMLAndOverwrites(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(first)
-	labels := []string{"## Название", "## Рубрика", "## Метки", "## TL;DR", "## Допинфо", "## Вопрос 1", "## Вопрос 2", "## Похожие профессии", "## HTML"}
+	// Время чтения стоит сразу после меток: карточку в блоге заполняют сверху вниз, и
+	// раздел, лежавший в самом низу файла, приходилось искать глазами через весь result.md.
+	labels := []string{"## Название", "## Рубрика", "## Метки", "## Время чтения", "## TL;DR", "## Допинфо", "## Вопрос 1", "## Вопрос 2", "## Похожие профессии", "## HTML"}
 	last := -1
 	for _, label := range labels {
 		index := strings.Index(text, label)

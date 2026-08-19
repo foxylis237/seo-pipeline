@@ -59,6 +59,9 @@ func Profile() tasks.Profile {
 		DiagnosticsDir:   "output/pprof_1/debug",
 		DBSchema:         Name,
 		EnvPrefix:        "PPROF_1_",
-		LLMStages:        Stages,
+		// Те же колонки, что и у task_1: pprof_1 пишет статьи блога, и автор, перелинковка,
+		// похожие профессии и метки ему нужны.
+		ExtraInputColumns: []string{"author", "links", "professions", "tags"},
+		LLMStages:         Stages,
 	}
 }

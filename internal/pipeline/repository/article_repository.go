@@ -19,35 +19,46 @@ import (
 type ArticleRepository struct {
 	pool   *pgxpool.Pool
 	logger *slog.Logger
+	// extraInputs — необязательные колонки article_inputs, которые есть у схемы этой задачи.
+	// Пустой список означает только обязательный набор: запросы к остальным колонкам
+	// подставят пустую строку вместо чтения, и разбирается ответ ровно так же.
+	extraInputs []string
+	// withoutTLDR — в article_metadata этой задачи нет колонки tldr.
+	withoutTLDR bool
 }
 
 // GetResultInput loads article, inputs, structured metadata and output paths.
 func (r *ArticleRepository) GetResultInput(ctx context.Context, externalID string) (article.ResultInput, error) {
-	const query = `
+	var input article.ResultInput
+	var rawMetadata string
+	// Необщие колонки дописываются в конец выборки, а не вставляются в середину: базовая
+	// часть запроса и порядок её сканирования остаются теми же, что были до появления задач
+	// со своими колонками.
+	extraProjection, extraTargets := r.resultInputProjection(&input)
+	query := `
 		SELECT a.id, a.external_id, a.title, COALESCE(i.image_slug, ''),
 			a.status, a.current_step, a.error_message, a.created_at, a.updated_at,
-			COALESCE(i.category, ''), COALESCE(i.tags, ''), COALESCE(m.tldr, ''), COALESCE(m.faq, ''),
+			COALESCE(i.category, ''), ` + r.inputColumn("tags") + `, ` + r.metadataTLDR() + `, COALESCE(m.faq, ''),
 			COALESCE(m.metadata_text, ''),
-			COALESCE(i.professions, ''), COALESCE(i.author, ''), COALESCE(i.key_word, ''),
+			` + r.inputColumn("professions") + `, ` + r.inputColumn("author") + `, COALESCE(i.key_word, ''),
 			COALESCE(i.meta_description, ''), COALESCE(i.header, ''),
 			COALESCE(o.article_path, ''), COALESCE(o.html_path, ''), COALESCE(o.google_doc_url, ''),
-			COALESCE(a.wordpress_url, '')
+			COALESCE(a.wordpress_url, '')` + extraProjection + `
 		FROM articles AS a
 		LEFT JOIN article_inputs AS i ON i.article_id = a.id
 		LEFT JOIN article_metadata AS m ON m.article_id = a.id
 		LEFT JOIN article_outputs AS o ON o.article_id = a.id
 		WHERE a.external_id = $1
 	`
-	var input article.ResultInput
-	var rawMetadata string
-	err := r.pool.QueryRow(ctx, query, externalID).Scan(
+	targets := append([]any{
 		&input.Article.ID, &input.Article.ExternalID, &input.Article.Title, &input.Article.Slug,
 		&input.Article.Status, &input.Article.CurrentStep, &input.Article.ErrorMessage,
 		&input.Article.CreatedAt, &input.Article.UpdatedAt,
 		&input.Category, &input.Tags, &input.TLDR, &input.FAQ, &rawMetadata, &input.Professions, &input.Author,
 		&input.Keyword, &input.MetaDescription, &input.Header,
 		&input.ArticlePath, &input.HTMLPath, &input.GoogleDocURL, &input.WordPressURL,
-	)
+	}, extraTargets...)
+	err := r.pool.QueryRow(ctx, query, externalID).Scan(targets...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return article.ResultInput{}, fmt.Errorf("статья с external_id %q не найдена", externalID)
 	}
@@ -62,10 +73,10 @@ func (r *ArticleRepository) GetResultInput(ctx context.Context, externalID strin
 
 // GetDemoGenerationInput loads only fields needed by article and info generation.
 func (r *ArticleRepository) GetDemoGenerationInput(ctx context.Context, externalID string) (article.GenerationInput, error) {
-	const query = `
+	query := `
 		SELECT a.id, a.external_id, a.title, COALESCE(i.image_slug, ''),
 			a.status, a.current_step, a.error_message, a.created_at, a.updated_at,
-			COALESCE(i.professions, ''), COALESCE(i.links, '')
+			` + r.inputColumn("professions") + `, ` + r.inputColumn("links") + `
 		FROM articles AS a
 		LEFT JOIN article_inputs AS i ON i.article_id = a.id
 		WHERE a.external_id = $1
@@ -176,13 +187,8 @@ func (r *ArticleRepository) SaveDemoArticleInfo(ctx context.Context, articleID i
 	`, articleID, articlePath); err != nil {
 		return fmt.Errorf("сохранить путь demo-статьи: %w", err)
 	}
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO article_metadata (article_id, tldr, faq, metadata_text, updated_at)
-		VALUES ($1, $2, $3, $4, NOW())
-		ON CONFLICT (article_id) DO UPDATE
-		SET tldr = EXCLUDED.tldr, faq = EXCLUDED.faq,
-			metadata_text = EXCLUDED.metadata_text, updated_at = NOW()
-	`, articleID, info.TLDR, info.FAQ, rawText); err != nil {
+	metadataQuery, metadataArgs := r.articleMetadataUpsert(articleID, rawText, info)
+	if _, err := tx.Exec(ctx, metadataQuery, metadataArgs...); err != nil {
 		return fmt.Errorf("сохранить информацию demo-статьи: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -193,10 +199,10 @@ func (r *ArticleRepository) SaveDemoArticleInfo(ctx context.Context, articleID i
 
 // GetSavedGenerationInput loads only persisted artifacts needed to resume generation.
 func (r *ArticleRepository) GetSavedGenerationInput(ctx context.Context, externalID string) (article.SavedGenerationInput, error) {
-	const query = `
+	query := `
 		SELECT a.id, a.external_id, a.title, COALESCE(i.image_slug, ''),
 			a.status, a.current_step, a.error_message, a.created_at, a.updated_at,
-			COALESCE(i.professions, ''), COALESCE(i.links, ''),
+			` + r.inputColumn("professions") + `, ` + r.inputColumn("links") + `,
 			COALESCE(o.structure_path, ''), COALESCE(o.article_path, ''),
 			COALESCE(o.review_path, ''), COALESCE(o.fixed_article_path, '')
 		FROM articles AS a
@@ -226,10 +232,10 @@ func (r *ArticleRepository) GetSavedGenerationInput(ctx context.Context, externa
 
 // GetGenerationInput loads persisted data required by implemented LLM stages.
 func (r *ArticleRepository) GetGenerationInput(ctx context.Context, externalID string) (article.GenerationInput, error) {
-	const query = `
+	query := `
 		SELECT a.id, a.external_id, a.title, COALESCE(i.image_slug, ''),
 			a.status, a.current_step, a.error_message, a.created_at, a.updated_at,
-			COALESCE(i.professions, ''), COALESCE(i.links, ''),
+			` + r.inputColumn("professions") + `, ` + r.inputColumn("links") + `,
 			r.competitor_structure,
 			COALESCE(r.wordstat_keywords, '[]'::jsonb),
 			COALESCE(r.lsi_words, '[]'::jsonb)
@@ -297,6 +303,28 @@ func NewArticleRepository(pool *pgxpool.Pool, logger ...*slog.Logger) *ArticleRe
 	return repository
 }
 
+// UseExtraInputColumns объявляет необщие колонки article_inputs схемы этой задачи.
+//
+// Вызывается один раз в composition root сразу после конструктора. Отдельный метод, а не
+// параметр конструктора: колонки есть у одной задачи из трёх, и обязательный параметр
+// заставил бы остальных передавать nil на каждом вызове, в том числе в тестах.
+func (r *ArticleRepository) UseExtraInputColumns(names []string) error {
+	if err := ValidateExtraInputColumns(names); err != nil {
+		return err
+	}
+	r.extraInputs = append([]string(nil), names...)
+	return nil
+}
+
+// UseMetadataWithoutTLDR объявляет, что в article_metadata схемы этой задачи нет колонки tldr.
+//
+// Отдельный вызов рядом с UseExtraInputColumns и по той же причине: набор колонок у задач
+// разный, и знать о нём репозиторий обязан до первого запроса, а не выяснять из ошибки
+// PostgreSQL посреди прогона.
+func (r *ArticleRepository) UseMetadataWithoutTLDR(withoutTLDR bool) {
+	r.withoutTLDR = withoutTLDR
+}
+
 // BeginGeneration atomically makes completed, failed, or processing articles ready for a fresh generation run.
 func (r *ArticleRepository) BeginGeneration(ctx context.Context, articleID int64) error {
 	const query = `
@@ -353,15 +381,8 @@ func (r *ArticleRepository) SaveArticleInfo(ctx context.Context, articleID int64
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO article_metadata (article_id, tldr, faq, metadata_text, updated_at)
-		VALUES ($1, $2, $3, $4, NOW())
-		ON CONFLICT (article_id) DO UPDATE
-		SET tldr = EXCLUDED.tldr,
-			faq = EXCLUDED.faq,
-			metadata_text = EXCLUDED.metadata_text,
-			updated_at = NOW()
-	`, articleID, info.TLDR, info.FAQ, rawText); err != nil {
+	metadataQuery, metadataArgs := r.articleMetadataUpsert(articleID, rawText, info)
+	if _, err := tx.Exec(ctx, metadataQuery, metadataArgs...); err != nil {
 		return fmt.Errorf("сохранить информацию для публикации: %w", err)
 	}
 	result, err := tx.Exec(ctx, `
@@ -499,53 +520,17 @@ func (r *ArticleRepository) Create(
 		return article.Article{}, fmt.Errorf("сохранить статью: %w", err)
 	}
 
-	const createInputQuery = `
-		INSERT INTO article_inputs (
-			article_id,
-			category,
-			header,
-			image_slug,
-			meta_description,
-			key_word,
-			reference_url,
-			author,
-			links,
-			professions,
-			tags
-		)
-		VALUES (
-			$1, $2, $3, $4, $5,
-			$6, $7, $8, $9, $10, $11
-		)
+	// Список колонок собирается из базового набора и необщих колонок задачи: запрос обязан
+	// называть ровно те колонки, которые есть в её схеме PostgreSQL.
+	inputColumns, inputValues := r.insertInputColumns(input)
+	createInputQuery := fmt.Sprintf(`
+		INSERT INTO article_inputs (article_id, %s)
+		VALUES ($1, %s)
 		ON CONFLICT (article_id) DO UPDATE
-		SET
-			category = EXCLUDED.category,
-			header = EXCLUDED.header,
-			image_slug = EXCLUDED.image_slug,
-			meta_description = EXCLUDED.meta_description,
-			key_word = EXCLUDED.key_word,
-			reference_url = EXCLUDED.reference_url,
-			author = EXCLUDED.author,
-			links = EXCLUDED.links,
-			professions = EXCLUDED.professions,
-			tags = EXCLUDED.tags
-	`
+		SET %s
+	`, strings.Join(inputColumns, ", "), placeholders(2, len(inputColumns)), excludedAssignments(inputColumns))
 
-	_, err = tx.Exec(
-		ctx,
-		createInputQuery,
-		created.ID,
-		input.Category,
-		input.Header,
-		input.ImageSlug,
-		input.MetaDescription,
-		input.Keyword,
-		input.ReferenceURL,
-		input.Author,
-		input.Links,
-		input.Professions,
-		input.Tags,
-	)
+	_, err = tx.Exec(ctx, createInputQuery, append([]any{created.ID}, inputValues...)...)
 	if err != nil {
 		return article.Article{}, fmt.Errorf("сохранить входные данные статьи: %w", err)
 	}
@@ -567,7 +552,8 @@ func (r *ArticleRepository) Create(
 // не переписывает уже импортированную статью.
 func (r *ArticleRepository) Import(ctx context.Context, input article.Input) (article.Article, bool, error) {
 	var selected article.Article
-	err := r.pool.QueryRow(ctx, `
+	inputColumns, inputValues := r.insertInputColumns(input)
+	importQuery := fmt.Sprintf(`
 		WITH created AS (
 			INSERT INTO articles (external_id, title)
 			VALUES ($1, $2)
@@ -579,21 +565,17 @@ func (r *ArticleRepository) Import(ctx context.Context, input article.Input) (ar
 			SELECT id FROM articles
 			WHERE external_id = $1 AND NOT EXISTS (SELECT 1 FROM created)
 		), saved_input AS (
-			INSERT INTO article_inputs (
-				article_id, category, header, image_slug, meta_description,
-				key_word, reference_url, author, links, professions, tags
-			)
-			SELECT id, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12 FROM target
+			INSERT INTO article_inputs (article_id, %s)
+			SELECT id, %s FROM target
 			ON CONFLICT (article_id) DO NOTHING
 			RETURNING article_id
 		)
 		SELECT id, external_id, title, status, current_step, error_message, created_at, updated_at
 		FROM created
 		WHERE EXISTS (SELECT 1 FROM saved_input)
-	`, fmt.Sprint(input.ExcelID), input.Title, input.Category, input.Header, input.ImageSlug,
-		input.MetaDescription, input.Keyword, input.ReferenceURL, input.Author, input.Links, input.Professions,
-		input.Tags,
-	).Scan(
+	`, strings.Join(inputColumns, ", "), placeholders(3, len(inputColumns)))
+	importArgs := append([]any{fmt.Sprint(input.ExcelID), input.Title}, inputValues...)
+	err := r.pool.QueryRow(ctx, importQuery, importArgs...).Scan(
 		&selected.ID, &selected.ExternalID, &selected.Title, &selected.Status,
 		&selected.CurrentStep, &selected.ErrorMessage, &selected.CreatedAt, &selected.UpdatedAt,
 	)
@@ -717,8 +699,8 @@ func (r *ArticleRepository) ListImportedArticles(ctx context.Context) ([]article
 			i.article_id IS NOT NULL,
 			COALESCE(i.header, ''), COALESCE(i.image_slug, ''), COALESCE(i.meta_description, ''),
 			COALESCE(i.key_word, ''), COALESCE(i.reference_url, ''), COALESCE(i.category, ''),
-			COALESCE(i.author, ''), COALESCE(i.links, ''), COALESCE(i.professions, ''),
-			COALESCE(i.tags, '')
+			`+r.inputColumn("author")+`, `+r.inputColumn("links")+`, `+r.inputColumn("professions")+`,
+			`+r.inputColumn("tags")+`
 		FROM articles AS a
 		LEFT JOIN article_inputs AS i ON i.article_id = a.id
 		ORDER BY a.id
@@ -760,8 +742,8 @@ func (r *ArticleRepository) GetArticleInput(ctx context.Context, articleID int64
 		SELECT a.external_id, a.title,
 			COALESCE(i.header, ''), COALESCE(i.image_slug, ''), COALESCE(i.meta_description, ''),
 			COALESCE(i.key_word, ''), COALESCE(i.reference_url, ''), COALESCE(i.category, ''),
-			COALESCE(i.author, ''), COALESCE(i.links, ''), COALESCE(i.professions, ''),
-			COALESCE(i.tags, '')
+			`+r.inputColumn("author")+`, `+r.inputColumn("links")+`, `+r.inputColumn("professions")+`,
+			`+r.inputColumn("tags")+`
 		FROM articles AS a
 		LEFT JOIN article_inputs AS i ON i.article_id = a.id
 		WHERE a.id = $1

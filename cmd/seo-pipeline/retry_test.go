@@ -90,7 +90,7 @@ func TestRunRetryDrivesFullPipeline(t *testing.T) {
 				completedAfter = append(completedAfter, stage)
 			}
 			return nil
-		}, runPipelineTestLogger(), externalID)
+		}, runPipelineTestLogger(), externalID, false)
 	}
 
 	if err := runRetry(context.Background(), retryRepo, "37", runOne, slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
@@ -124,7 +124,7 @@ func TestRunRetryDoesNotCompleteArticleWithoutHTML(t *testing.T) {
 			}
 			runRepo.advance(stage)
 			return nil
-		}, runPipelineTestLogger(), externalID)
+		}, runPipelineTestLogger(), externalID, false)
 	}
 
 	err := runRetry(context.Background(), retryRepo, "37", runOne, slog.New(slog.NewTextHandler(io.Discard, nil)))

@@ -17,14 +17,14 @@ import (
 // собранным данным. Так проверка остаётся в одном месте и одинаково работает и для publish
 // с идентификатором, и для массового прогона.
 func (r *ArticleRepository) GetPublicationInput(ctx context.Context, externalID string) (article.PublicationInput, error) {
-	const query = `
+	query := `
 		SELECT
 			a.id, a.external_id, a.title, COALESCE(i.image_slug, ''), COALESCE(i.reference_url, ''),
 			a.status, a.current_step, a.error_message, a.created_at, a.updated_at,
 			a.wordpress_status, a.wordpress_post_id, COALESCE(a.wordpress_url, ''),
-			COALESCE(i.category, ''), COALESCE(i.tags, ''), COALESCE(i.key_word, ''),
+			COALESCE(i.category, ''), ` + r.inputColumn("tags") + `, COALESCE(i.key_word, ''),
 			COALESCE(i.meta_description, ''), COALESCE(i.header, ''),
-			COALESCE(m.tldr, ''), COALESCE(m.faq, ''),
+			` + r.metadataTLDR() + `, COALESCE(m.faq, ''),
 			COALESCE(o.html_path, '')
 		FROM articles AS a
 		LEFT JOIN article_inputs AS i ON i.article_id = a.id
@@ -155,6 +155,8 @@ func (r *ArticleRepository) LinkPublication(ctx context.Context, externalID stri
 //
 // Существование файла article.html здесь не проверяется: репозиторий о файловой системе не
 // знает. Это делает вызывающий, у которого есть writer.
+//
+// TL;DR и FAQ проверяются отдельно — см. ValidateArticleMetadata: они есть не у каждой задачи.
 func ValidatePublicationInput(input article.PublicationInput) error {
 	if input.Article.Status != "completed" {
 		return fmt.Errorf("статья %s не прошла пайплайн: статус %q, а публикуются только completed",
@@ -184,6 +186,28 @@ func ValidatePublicationInput(input article.PublicationInput) error {
 		// они означали бы картинку без альтернативного текста в опубликованной статье, а
 		// исправить её приложение не умеет.
 		{"слаг картинки (image_slug)", input.Article.Slug},
+	}
+	for _, field := range required {
+		if strings.TrimSpace(field.value) == "" {
+			return fmt.Errorf("у статьи %s не заполнено обязательное для публикации поле: %s",
+				input.Article.ExternalID, field.name)
+		}
+	}
+	return nil
+}
+
+// ValidateArticleMetadata проверяет разделы, которые рождает стадия info: TL;DR и FAQ.
+//
+// Отдельно от общей проверки потому, что стадии info есть не у каждой задачи. Требовать
+// TL;DR и FAQ от задачи, которая их не генерирует, — значит не опубликовать её никогда;
+// не требовать их от задачи со стадией info — значит выложить статью с пустыми полями
+// темы, чего по ней потом не видно. Кто из двух перед нами, знает вызывающий: движок имён
+// задач не знает и знать не должен.
+func ValidateArticleMetadata(input article.PublicationInput) error {
+	required := []struct {
+		name  string
+		value string
+	}{
 		{"TL;DR", input.TLDR},
 		{"FAQ", input.FAQ},
 	}

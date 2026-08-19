@@ -1075,12 +1075,12 @@ func newTestRepository(t *testing.T) (*ArticleRepository, *pgxpool.Pool) {
 	t.Cleanup(pool.Close)
 
 	// Тот же набор файлов и в том же порядке, что применяет docker-entrypoint.
-	migrations, err := filepath.Glob(filepath.Join("..", "..", "..", "migrations", "*.up.sql"))
+	migrations, err := filepath.Glob(filepath.Join("..", "..", "..", "migrations", "task_1", "*.up.sql"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(migrations) == 0 {
-		t.Fatal("не найдено ни одной миграции в migrations/*.up.sql")
+		t.Fatal("не найдено ни одной миграции в migrations/task_1/*.up.sql")
 	}
 	sort.Strings(migrations)
 	for _, name := range migrations {
@@ -1092,10 +1092,18 @@ func newTestRepository(t *testing.T) (*ArticleRepository, *pgxpool.Pool) {
 			t.Fatalf("применить миграцию %s: %v", filepath.Base(name), err)
 		}
 	}
-	if err := ValidateSchema(ctx, pool); err != nil {
+	// Общие миграции заводят author, links, professions и tags — колонки задач, которые пишут
+	// статьи блога. Схема, собранная из них, принадлежит именно такой задаче, и проверка
+	// обязана спрашивать их наравне с остальными.
+	blogColumns := []string{"author", "links", "professions", "tags"}
+	if err := ValidateSchema(ctx, pool, SchemaProfile{ExtraInputColumns: blogColumns}); err != nil {
 		t.Fatalf("проверить схему после миграций: %v", err)
 	}
-	return NewArticleRepository(pool), pool
+	repository := NewArticleRepository(pool)
+	if err := repository.UseExtraInputColumns(blogColumns); err != nil {
+		t.Fatal(err)
+	}
+	return repository, pool
 }
 
 func assertCount(t *testing.T, pool *pgxpool.Pool, table, condition string, want int) {

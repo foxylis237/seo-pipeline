@@ -1,0 +1,111 @@
+## Название
+
+```text
+{{.Title}}
+```
+
+## Название услуги
+
+```text
+{{.ServiceName}}
+```
+
+## Рубрика
+
+```text
+{{.Section}}
+```
+
+## Категория
+
+```text
+{{.Category}}
+```
+
+## Фокусное ключевое слово
+
+```text
+{{.Keyword}}
+```
+
+## Преподаватели
+
+```text
+{{.Teachers}}
+```
+
+## SEO-заголовок
+
+```text
+{{.SEOTitle}}
+```
+
+## Alt главной картинки
+
+```text
+{{.ImageName}}
+```
+
+## Мета-описание
+
+```text
+{{.MetaDescription}}
+```
+
+## Заголовок (H1)
+
+```text
+{{.Header}}
+```
+
+## Название профессии
+
+```text
+{{.ProfessionName}}
+```
+{{range $index, $item := .FAQItems}}
+
+## Вопрос {{add $index 1}}
+
+### Вопрос
+
+```text
+{{$item.Question}}
+```
+
+### Ответ
+
+```text
+{{$item.Answer}}
+```
+{{end}}
+
+## URL картинки
+
+```text
+{{.ImageURL}}
+```
+
+## Файл статьи
+
+```text
+{{.ArticlePath}}
+```
+
+## HTML
+
+```text
+{{.HTMLPath}}
+```
+
+## Гугл Док
+
+```text
+{{.GoogleDocURL}}
+```
+
+## Ссылка на статью
+
+```text
+{{.WordPressURL}}
+```

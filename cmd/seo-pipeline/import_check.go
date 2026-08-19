@@ -4,12 +4,14 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/article"
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/importer"
+	"github.com/foxylis237/seo-pipeline/internal/pipeline/repository"
 )
 
 // importIssue — одна найденная проблема переноса. Field, Excel и Stored заполняются, когда
@@ -67,8 +69,13 @@ type comparedField struct {
 	Store func(article.ImportedArticle) string
 }
 
-func comparedFields() []comparedField {
-	return []comparedField{
+// comparedFields отбирает поля, которые сверяются у этой задачи.
+//
+// optional — необязательные колонки article_inputs из её профиля. Поле, которого нет в схеме
+// задачи, сравнивать не с чем: импортёр читает его из книги, база не хранит, и сверка
+// сообщала бы «не перенесён из Excel» о колонке, которой у задачи нет по замыслу.
+func comparedFields(optional []string) []comparedField {
+	all := []comparedField{
 		{"title", func(in article.Input) string { return in.Title },
 			func(im article.ImportedArticle) string { return im.Article.Title }},
 		{"header", func(in article.Input) string { return in.Header },
@@ -92,11 +99,19 @@ func comparedFields() []comparedField {
 		{"tags", func(in article.Input) string { return in.Tags },
 			func(im article.ImportedArticle) string { return im.Input.Tags }},
 	}
+	fields := make([]comparedField, 0, len(all))
+	for _, field := range all {
+		if repository.IsOptionalInputColumn(field.Name) && !slices.Contains(optional, field.Name) {
+			continue
+		}
+		fields = append(fields, field)
+	}
+	return fields
 }
 
 // checkImport сверяет перенос Excel → PostgreSQL. Функция чистая: ни базы, ни файлов,
 // ни внешних вызовов — только сравнение уже прочитанных данных.
-func checkImport(rows []importer.Row, imported []article.ImportedArticle) importReport {
+func checkImport(rows []importer.Row, imported []article.ImportedArticle, optional []string) importReport {
 	excelRows := make(map[string]importer.Row, len(rows))
 	excelOrder := make([]string, 0, len(rows))
 	report := importReport{}
@@ -134,7 +149,7 @@ func checkImport(rows []importer.Row, imported []article.ImportedArticle) import
 			})
 			continue
 		}
-		report.Reports = append(report.Reports, checkImportedArticle(row, item))
+		report.Reports = append(report.Reports, checkImportedArticle(row, item, optional))
 	}
 	for _, item := range imported {
 		if _, found := excelRows[item.Article.ExternalID]; found {
@@ -151,7 +166,7 @@ func checkImport(rows []importer.Row, imported []article.ImportedArticle) import
 }
 
 // checkImportedArticle сверяет одну строку Excel с тем, что лежит в базе.
-func checkImportedArticle(row importer.Row, item article.ImportedArticle) importArticleReport {
+func checkImportedArticle(row importer.Row, item article.ImportedArticle, optional []string) importArticleReport {
 	report := importArticleReport{ExternalID: item.Article.ExternalID, Title: item.Article.Title}
 	if len(row.Errors) > 0 {
 		report.Issues = append(report.Issues, importIssue{
@@ -162,7 +177,7 @@ func checkImportedArticle(row importer.Row, item article.ImportedArticle) import
 		report.Issues = append(report.Issues, importIssue{Text: "нет строки article_inputs"})
 		return report
 	}
-	for _, field := range comparedFields() {
+	for _, field := range comparedFields(optional) {
 		excelValue := strings.TrimSpace(field.Excel(row.Input))
 		storedValue := strings.TrimSpace(field.Store(item))
 		if excelValue == storedValue {
@@ -315,6 +330,7 @@ func runImportCheck(
 	inputFilePath string,
 	writer io.Writer,
 	externalID string,
+	optionalInputColumns []string,
 ) error {
 	rows, err := importer.ReadRows(inputFilePath)
 	if err != nil {
@@ -324,7 +340,7 @@ func runImportCheck(
 	if err != nil {
 		return err
 	}
-	report := checkImport(rows, imported)
+	report := checkImport(rows, imported, optionalInputColumns)
 	report.ExcelPath = inputFilePath
 	if externalID != "" {
 		return renderImportArticleReport(writer, report, externalID)

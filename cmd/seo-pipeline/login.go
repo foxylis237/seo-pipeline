@@ -122,7 +122,7 @@ func runDeepSeekLogin(ctx context.Context, logger *slog.Logger) error {
 func runGoogleLogin(ctx context.Context, logger *slog.Logger) error {
 	// Диагностика входа не принадлежит задаче — вход общий, поэтому каталог по умолчанию
 	// интеграции здесь и нужен.
-	return google.Login(ctx, googleConfig(false, ""), logger)
+	return google.Login(ctx, googleConfig(false, "", ""), logger)
 }
 
 // diagnosticsDirs — корни диагностики интеграций одной задачи.
