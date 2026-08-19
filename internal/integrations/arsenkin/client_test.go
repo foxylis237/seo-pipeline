@@ -132,6 +132,35 @@ func TestNormalizeInputQueriesUsesOneUnnumberedPhrasePerLine(t *testing.T) {
 	}
 }
 
+// TestNormalizeInputQueriesCleansOperatorCharacters: операторные символы форма Wordstat
+// принимает молча и задачу по ним не создаёт, поэтому до отправки во фразе не должно
+// остаться ничего кроме букв, цифр и одиночных пробелов.
+func TestNormalizeInputQueriesCleansOperatorCharacters(t *testing.T) {
+	got := normalizeInputQueries([]string{
+		"seo-продвижение",
+		"курсы/охраны труда",
+		`"обучение!"`,
+		"seo продвижение",
+	})
+	want := []string{"seo продвижение", "курсы охраны труда", "обучение"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("normalizeInputQueries() = %#v, want %#v", got, want)
+	}
+}
+
+// TestSanitizedQueriesCountsOnlySymbolChanges: в лог попадают фразы, которые чистка
+// изменила по существу. Схлопнутые пробелы изменением не считаются — иначе предупреждение
+// звучало бы на каждом прогоне и перестало что-либо значить.
+func TestSanitizedQueriesCountsOnlySymbolChanges(t *testing.T) {
+	count, samples := sanitizedQueries([]string{"курсы  охраны труда", " обучение ", "seo-продвижение"})
+	if count != 1 {
+		t.Fatalf("sanitizedQueries() count = %d, want 1", count)
+	}
+	if !reflect.DeepEqual(samples, []string{"seo-продвижение"}) {
+		t.Fatalf("sanitizedQueries() samples = %#v, want [seo-продвижение]", samples)
+	}
+}
+
 func TestAcceptCopywritersResultRejectsPreviousTask(t *testing.T) {
 	tests := []struct {
 		name       string

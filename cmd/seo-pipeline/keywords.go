@@ -120,16 +120,18 @@ func printKeywordsReport(out io.Writer, taskCommand string, selected article.Art
 		taskCommand, selected.ExternalID)
 }
 
-// warnKeywordsWordstatTrap предупреждает о символах, на которых Wordstat падает молча: форма
-// принимает список, а задача не создаётся вовсе. Запросы при этом сохраняются как есть —
-// отбросить чужую строку молча хуже, чем показать её и дать переставить команду.
+// warnKeywordsWordstatTrap предупреждает о символах, которых форма Wordstat не принимает.
+// Сама отправка их вычистит (arsenkin.sanitizeWordstatQuery), поэтому предупреждение говорит
+// не об отказе, а о том, что фраза уедет изменённой. Запросы сохраняются как есть: чистка
+// нужна Wordstat, а не тексту статьи, и подменять вставленное молча здесь нечем.
 func warnKeywordsWordstatTrap(out io.Writer, suspicious []string) {
 	if len(suspicious) == 0 {
 		return
 	}
 	fmt.Fprintln(out)
 	fmt.Fprintf(out, "Внимание: в %d запросах есть символы кроме букв, цифр и пробелов.\n", len(suspicious))
-	fmt.Fprintln(out, "Wordstat на таких запросах молча не создаёт задачу — проверьте их:")
+	fmt.Fprintln(out, "Перед отправкой в Wordstat они заменяются пробелами — проверьте, что фраза")
+	fmt.Fprintln(out, "от этого не теряет смысл:")
 	for _, query := range suspicious {
 		fmt.Fprintf(out, "    %s\n", query)
 	}

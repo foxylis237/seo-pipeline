@@ -19,6 +19,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unicode"
 
 	"github.com/mxschmitt/playwright-go"
 	"github.com/xuri/excelize/v2"
@@ -46,6 +47,8 @@ const (
 	// тоже валидна, поэтому ждать её долго незачем.
 	wordstatHistoryTimeout = 15_000
 	wordstatForeignSample  = 5
+	// wordstatSanitizeSample ограничивает список примеров вычищенных фраз в логе.
+	wordstatSanitizeSample = 5
 	// wordstatPollInterval — шаг ожидания между перезагрузками списка задач.
 	wordstatPollInterval = 20_000
 	// wordstatStartTimeout — бюджет подтверждения того, что Arsenkin принял запросы.
@@ -149,6 +152,10 @@ func New(cfg Config, logger *slog.Logger) *Service {
 // CollectResearch выполняет Wordstat и Copywriters в одном browser context.
 func (s *Service) CollectResearch(ctx context.Context, queries []string) (Result, error) {
 	s.startedAt = time.Now()
+	if sanitized, samples := sanitizedQueries(queries); sanitized > 0 {
+		s.logCtx(ctx, slog.LevelInfo, "во фразах Wordstat вычищены лишние символы", "wordstat_sanitize",
+			"sanitized_count", sanitized, "samples", samples)
+	}
 	normalized := normalizeInputQueries(queries)
 	if len(normalized) == 0 {
 		return Result{}, s.stageError("validate_queries", fmt.Errorf("cleaned Keys.so queries are empty"))
@@ -1465,11 +1472,13 @@ func limitWordstatQueries(queries []string) []string {
 	return queries[:maxWordstatQueries]
 }
 
+// normalizeInputQueries приводит список к тому виду, который принимает форма Wordstat: без
+// лишних символов, без пустых строк и без повторов.
 func normalizeInputQueries(queries []string) []string {
 	result := make([]string, 0, len(queries))
 	seen := make(map[string]struct{}, len(queries))
 	for _, query := range queries {
-		query = strings.TrimSpace(query)
+		query = sanitizeWordstatQuery(query)
 		if query == "" {
 			continue
 		}
@@ -1480,6 +1489,50 @@ func normalizeInputQueries(queries []string) []string {
 		result = append(result, query)
 	}
 	return result
+}
+
+// sanitizeWordstatQuery оставляет во фразе только буквы, цифры и одиночные пробелы.
+//
+// Чистка живёт здесь, а не у источника запросов: требование ставит сама форма Wordstat, а
+// источников у списка три — сбор у конкурента, ручная вставка и резервный подбор моделью.
+// Ловушка у всех одна и молчаливая: операторные символы («-», «/», «"», «!») форма
+// принимает, а задачу по ним не создаёт вовсе, и прогон встаёт без объяснения. Очистка
+// Keys.so её не снимает: форма delete-double убирает дубли, а символы не трогает.
+//
+// Лишний символ заменяется пробелом, а не выбрасывается: «seo-продвижение» обязано остаться
+// двумя словами, иначе чистка сама превращает фразу в мусор. Дубли, которые она создаёт
+// («курсы/охрана» рядом с «курсы охрана»), снимает отбор повторов выше — он идёт после неё.
+func sanitizeWordstatQuery(query string) string {
+	var cleaned strings.Builder
+	cleaned.Grow(len(query))
+	for _, symbol := range query {
+		if unicode.IsLetter(symbol) || unicode.IsDigit(symbol) {
+			cleaned.WriteRune(symbol)
+			continue
+		}
+		cleaned.WriteRune(' ')
+	}
+	return strings.Join(strings.Fields(cleaned.String()), " ")
+}
+
+// sanitizedQueries сообщает, сколько фраз пришлось чистить, и показывает несколько примеров.
+//
+// Молчаливая чистка опасна тем же, чем молчаливый отказ формы: отправленное расходится с
+// сохранёнными cleaned_keywords, и по логу прогона это должно быть видно. Схлопывание
+// повторных пробелов не считается: оно ничего не меняет по смыслу.
+func sanitizedQueries(queries []string) (int, []string) {
+	count := 0
+	samples := make([]string, 0, wordstatSanitizeSample)
+	for _, query := range queries {
+		if sanitizeWordstatQuery(query) == strings.Join(strings.Fields(query), " ") {
+			continue
+		}
+		count++
+		if len(samples) < wordstatSanitizeSample {
+			samples = append(samples, query)
+		}
+	}
+	return count, samples
 }
 
 func (s *Service) waitWordstatForm() error {
