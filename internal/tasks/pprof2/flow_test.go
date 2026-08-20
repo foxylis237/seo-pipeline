@@ -10,6 +10,7 @@ import (
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/article"
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/generation"
 	articleoutput "github.com/foxylis237/seo-pipeline/internal/pipeline/output"
+	"github.com/foxylis237/seo-pipeline/internal/pipeline/taskflow"
 )
 
 // fakeChats записывает границы чатов и порядок сообщений: именно это и есть контракт потока.
@@ -18,7 +19,7 @@ type fakeChats struct {
 	answers map[string]string
 }
 
-func (c *fakeChats) NewChat(_ context.Context, _ int64, stages ...string) (Chat, error) {
+func (c *fakeChats) NewChat(_ context.Context, _ int64, stages ...string) (taskflow.Chat, error) {
 	c.chats = append(c.chats, nil)
 	return &fakeChat{owner: c, index: len(c.chats) - 1, stages: stages}, nil
 }

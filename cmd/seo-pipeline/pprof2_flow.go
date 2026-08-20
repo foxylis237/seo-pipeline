@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 
+	"github.com/foxylis237/seo-pipeline/internal/pipeline/taskflow"
 	"github.com/foxylis237/seo-pipeline/internal/tasks/pprof2"
 )
 
@@ -19,6 +20,6 @@ func newPProf2Flow(deps taskFlowDeps) (taskFlow, error) {
 	if deps.router == nil {
 		return nil, fmt.Errorf("схема стадий pprof_2 не загружена")
 	}
-	return pprof2.NewFlow(deps.repository, deps.writer, pprof2.NewRouterChats(deps.router),
+	return pprof2.NewFlow(deps.repository, deps.writer, taskflow.NewRouterChats(deps.router),
 		deps.router, deps.logger, deps.publisher), nil
 }

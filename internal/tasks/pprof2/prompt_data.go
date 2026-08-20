@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/article"
-	"github.com/foxylis237/seo-pipeline/internal/pipeline/generation"
 )
 
 // Поля шаблонов промптов pprof_2. Набор полей структуры и набор плейсхолдеров в шаблоне
@@ -101,7 +100,3 @@ func ServiceFacts(input article.ResultInput) string {
 	}
 	return facts.String()
 }
-
-// NormalizeHTML снимает Markdown-обёртку и проверяет разметку теми же правилами, что и
-// остальные задачи: расхождения в проверке HTML между задачами быть не должно.
-func NormalizeHTML(value string) (string, error) { return generation.NormalizeHTML(value) }

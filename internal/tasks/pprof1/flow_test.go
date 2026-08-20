@@ -8,7 +8,9 @@ import (
 
 	"github.com/foxylis237/seo-pipeline/internal/llm"
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/article"
+	"github.com/foxylis237/seo-pipeline/internal/pipeline/generation"
 	articleoutput "github.com/foxylis237/seo-pipeline/internal/pipeline/output"
+	"github.com/foxylis237/seo-pipeline/internal/pipeline/taskflow"
 )
 
 // fakeChats записывает границы чатов и порядок сообщений: именно это и есть контракт потока.
@@ -17,7 +19,7 @@ type fakeChats struct {
 	answers map[string]string
 }
 
-func (c *fakeChats) NewChat(_ context.Context, _ int64, stages ...string) (Chat, error) {
+func (c *fakeChats) NewChat(_ context.Context, _ int64, stages ...string) (taskflow.Chat, error) {
 	c.chats = append(c.chats, nil)
 	return &fakeChat{owner: c, index: len(c.chats) - 1, stages: stages}, nil
 }
@@ -126,9 +128,11 @@ func (r *fakeRepository) SaveError(_ context.Context, _ int64, processingErr err
 	return nil
 }
 
-type recordingPublisher struct{ jobs []ArticlePromptJob }
+type recordingPublisher struct{ jobs []generation.ArticlePromptJob }
 
-func (p *recordingPublisher) PublishArticlePrompt(job ArticlePromptJob) { p.jobs = append(p.jobs, job) }
+func (p *recordingPublisher) PublishArticlePrompt(job generation.ArticlePromptJob) {
+	p.jobs = append(p.jobs, job)
+}
 
 func newFlowFixture(t *testing.T) (*Flow, *fakeChats, *fakeRepository, *recordingPublisher, *articleoutput.Writer) {
 	t.Helper()
