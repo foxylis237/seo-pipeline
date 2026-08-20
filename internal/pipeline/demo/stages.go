@@ -229,7 +229,16 @@ func (b *Builder) articleInfo(ctx context.Context, state articleState, staging, 
 		b.logger.Warn("информация для публикации пропущена: статьи нет", "external_id", state.externalID, "stage", "demo_info")
 		return nil, nil
 	}
-	call := llm.Call{Stage: "info", ArticleID: state.result.Article.ID, Data: struct {
+	// Стадии info у задачи может не быть вовсе: частые вопросы бывают написаны в самом тексте
+	// и разбираются из него, а TL;DR и время чтения задача не генерирует. Спросить стадию у
+	// такой задачи значит уронить сборку на «LLM stage "info" is not configured» — уже после
+	// оплаченных structure и article.
+	if !b.generator.HasStage(infoStage) {
+		b.logger.Info("информация для публикации пропущена: у задачи нет стадии info",
+			"external_id", state.externalID, "stage", "demo_info")
+		return nil, nil
+	}
+	call := llm.Call{Stage: infoStage, ArticleID: state.result.Article.ID, Data: struct {
 		GeneratedStructure string
 		GeneratedArticle   string
 	}{structure, articleText}}

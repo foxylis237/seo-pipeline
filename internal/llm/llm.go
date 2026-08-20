@@ -201,6 +201,16 @@ func NewRouter(cfg config.LLMConfig, clients map[string]Client, logger *slog.Log
 	}
 }
 
+// HasStage отвечает, есть ли стадия в схеме этой задачи.
+//
+// Нужен тем, кто обязан обойтись без стадии, которой у задачи может не быть. Схемы стадий у
+// задач разные — набор объявляет профиль, — и спрашивать несуществующую стадию значит упасть
+// на «LLM stage ... is not configured» уже после того, как соседние стадии оплачены.
+func (r *Router) HasStage(name string) bool {
+	_, found := r.config.Stages[name]
+	return found
+}
+
 func (r *Router) Generate(ctx context.Context, call Call) (RoutedResponse, error) {
 	prepared, err := r.Prepare(call)
 	if err != nil {

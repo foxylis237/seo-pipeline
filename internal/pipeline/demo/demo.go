@@ -57,6 +57,10 @@ const (
 	articleInfoFile = generatedFolder + "/article_info.txt"
 )
 
+// infoStage — имя стадии, которая пишет информацию для публикации. Стадия есть не у каждой
+// задачи: страница, где частые вопросы уже написаны в тексте, разбирает их из него сама.
+const infoStage = "info"
+
 // Repository читает сохранённое состояние статьи. Методов записи здесь нет намеренно: demo
 // не имеет права двигать статью по пайплайну.
 type Repository interface {
@@ -71,6 +75,10 @@ type Repository interface {
 type Generator interface {
 	Prepare(call llm.Call) (llm.PreparedCall, error)
 	Generate(ctx context.Context, call llm.Call) (llm.RoutedResponse, error)
+	// HasStage отвечает, есть ли стадия в схеме задачи. Спрашивается до обращения к модели:
+	// набор стадий у задач разный, и DEMO обязан собраться и у той, чей поток стадию не
+	// вызывает вовсе.
+	HasStage(stage string) bool
 }
 
 // ResultRenderer собирает result.md из сохранённых данных, не записывая его. metadata == nil

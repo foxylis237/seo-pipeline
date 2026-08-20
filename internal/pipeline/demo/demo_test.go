@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -58,6 +59,9 @@ type fakeGenerator struct {
 	prepared []string
 	prompted map[string]any
 	calls    []string
+	// missing — стадии, которых нет в схеме задачи. Так выглядит задача, чей поток стадию не
+	// вызывает вовсе: у неё нет ни настроек стадии, ни её промпта.
+	missing map[string]bool
 }
 
 func newFakeGenerator() *fakeGenerator {
@@ -65,8 +69,11 @@ func newFakeGenerator() *fakeGenerator {
 		answers:  map[string]string{"structure": "СГЕНЕРИРОВАННАЯ СТРУКТУРА", "article": "СГЕНЕРИРОВАННАЯ СТАТЬЯ", "info": "СГЕНЕРИРОВАННАЯ ИНФОРМАЦИЯ"},
 		failures: map[string]error{},
 		prompted: map[string]any{},
+		missing:  map[string]bool{},
 	}
 }
+
+func (g *fakeGenerator) HasStage(stage string) bool { return !g.missing[stage] }
 
 func (g *fakeGenerator) Prepare(call llm.Call) (llm.PreparedCall, error) {
 	g.prepared = append(g.prepared, call.Stage)
@@ -538,6 +545,34 @@ func TestBuildTakesMetadataFromDatabaseWithoutRunningInfo(t *testing.T) {
 
 	if len(fixture.generator.calls) != 0 {
 		t.Fatalf("стадия info запущена при готовых метаданных в БД: %v", fixture.generator.calls)
+	}
+	if !fixture.result.metadataSet || fixture.result.metadata != nil {
+		t.Fatalf("result.md собран с подменой метаданных %+v, want источник БД", fixture.result.metadata)
+	}
+}
+
+// У задачи без стадии info DEMO собирается без неё, а не падает на «стадия не настроена».
+// Стадию у такой задачи не настраивает никто: частые вопросы уже написаны в тексте страницы
+// и разбираются из него, TL;DR и время чтения задача не генерирует вовсе.
+func TestBuildSkipsInfoStageWhenTaskHasNone(t *testing.T) {
+	fixture := newFixture(t)
+	fixture.writeCompleteProduction(t)
+	fixture.generator.missing["info"] = true
+	// Ни метаданных в БД, ни сохранённого article_info.txt: без стадии info взять их неоткуда,
+	// и раньше сборка падала здесь — уже после оплаченных structure и article.
+	if err := os.Remove(filepath.Join(fixture.root, filepath.FromSlash(fixture.paths.ArticleInfoPath))); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := fixture.builder.Build(context.Background(), testExternalID); err != nil {
+		t.Fatalf("Build() = %v", err)
+	}
+
+	if len(fixture.generator.calls) != 0 {
+		t.Fatalf("вызванные стадии = %v, want ни одной", fixture.generator.calls)
+	}
+	if slices.Contains(fixture.generator.prepared, "info") {
+		t.Fatalf("промпт стадии info собран у задачи, у которой её нет: %v", fixture.generator.prepared)
 	}
 	if !fixture.result.metadataSet || fixture.result.metadata != nil {
 		t.Fatalf("result.md собран с подменой метаданных %+v, want источник БД", fixture.result.metadata)
