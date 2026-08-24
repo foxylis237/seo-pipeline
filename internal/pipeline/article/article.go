@@ -169,6 +169,9 @@ func FormatKeywords(keywords []KeywordFrequency) string {
 }
 
 // GenerationInput contains persisted research required by implemented generation stages.
+//
+// Professions, Links и Teachers приходят из колонок, которые заводит не каждая задача:
+// у задачи без такой колонки поле остаётся пустым, а её промпты на него не ссылаются.
 type GenerationInput struct {
 	Article             Article
 	CompetitorStructure string
@@ -176,6 +179,7 @@ type GenerationInput struct {
 	LSIWords            []string
 	Professions         string
 	Links               string
+	Teachers            string
 }
 
 // SavedGenerationInput contains persisted artifacts required to resume one LLM stage.

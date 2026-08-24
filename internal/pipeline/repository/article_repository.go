@@ -236,6 +236,7 @@ func (r *ArticleRepository) GetGenerationInput(ctx context.Context, externalID s
 		SELECT a.id, a.external_id, a.title, COALESCE(i.image_slug, ''),
 			a.status, a.current_step, a.error_message, a.created_at, a.updated_at,
 			` + r.inputColumn("professions") + `, ` + r.inputColumn("links") + `,
+			` + r.inputColumn("teachers") + `,
 			r.competitor_structure,
 			COALESCE(r.wordstat_keywords, '[]'::jsonb),
 			COALESCE(r.lsi_words, '[]'::jsonb)
@@ -251,6 +252,7 @@ func (r *ArticleRepository) GetGenerationInput(ctx context.Context, externalID s
 		&input.Article.ID, &input.Article.ExternalID, &input.Article.Title, &input.Article.Slug,
 		&input.Article.Status, &input.Article.CurrentStep, &input.Article.ErrorMessage,
 		&input.Article.CreatedAt, &input.Article.UpdatedAt, &input.Professions, &input.Links,
+		&input.Teachers,
 		&competitorStructure, &wordstatJSON, &lsiJSON,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
