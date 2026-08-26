@@ -137,6 +137,21 @@ func TestTaskFlowStageRunnerRejectsUnknownOperation(t *testing.T) {
 	}
 }
 
+// Поля промптов объявляет задача, чьи это промпты. У pprof_2 они свои, у task_1 и pprof_1
+// общие — и nil здесь означает именно общий набор, а не потерянную задачу.
+func TestDemoPromptDataOnlyForTaskWithItsOwnPromptFields(t *testing.T) {
+	var noFlow taskFlow
+	if demoPromptDataOf(noFlow) != nil {
+		t.Fatal("у task_1 своего потока нет, подменять набор полей нечем")
+	}
+	if demoPromptDataOf(&stubFlow{}) != nil {
+		t.Fatal("поток без своих полей промптов подменил общий набор")
+	}
+	if demoPromptDataOf(pprof2.NewFlow(nil, nil, nil, nil, nil, nil)) == nil {
+		t.Fatal("pprof_2 не отдал DEMO поля своих промптов")
+	}
+}
+
 // Свой поток есть не у всякой задачи: task_1 идёт общим конвейером, и nil здесь — законный
 // ответ, а не сбой.
 func TestNewTaskFlowHasNoFlowForTask1(t *testing.T) {

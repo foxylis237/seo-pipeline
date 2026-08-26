@@ -58,12 +58,12 @@ const (
 // Три чата, и границы между ними значимы:
 //
 //	Чат 1: structure
-//	Чат 2: article
+//	Чат 2: article → review
 //	Чат 3: html
 //
-// Чат 2 сегодня состоит из одного сообщения: страницу целиком пишет основной промпт. Место
-// для SEO-редактуры и ревью сохранено — они вернутся следующими сообщениями того же чата,
-// поэтому он и остаётся отдельным чатом, а не сливается с чатом 1.
+// Чат 2 состоит из двух сообщений: основной промпт пишет страницу, редактура возвращает её
+// исправленной целиком. Отдельным чатом он остаётся потому, что историю обсуждения структуры
+// в текст страницы тащить незачем.
 //
 // Частые вопросы после чата 2 вынимаются из написанного текста разбором и сохраняются в
 // article_metadata: к стадии html они уже в базе, и разметка вправе убрать блок из страницы.
@@ -131,12 +131,12 @@ func (f *Flow) RunStructure(ctx context.Context, externalID string) error {
 	return nil
 }
 
-// RunArticle выполняет чат 2: основной промпт пишет страницу, из его ответа забирается FAQ.
+// RunArticle выполняет чат 2 целиком: article → review. FAQ забирается из исправленного текста.
 //
-// Артефакт и метаданные публикуются одним Commit: страница либо прошла чат 2 целиком, либо
+// Чат неделим намеренно. Ревью опирается на историю первого сообщения, а браузерная беседа не
+// переживает завершения процесса — значит и возобновлять её посередине нечем. Поэтому оба
+// артефакта и метаданные публикуются одним Commit: страница либо прошла чат 2 целиком, либо
 // не начинала его, и промежуточных состояний, из которых нельзя продолжить, не возникает.
-// Это же правило сохранит смысл, когда после article вернутся SEO-редактура и ревью —
-// беседа не переживает завершения процесса, и возобновлять её посередине нечем.
 func (f *Flow) RunArticle(ctx context.Context, externalID string) error {
 	input, err := f.repository.GetGenerationInput(ctx, externalID)
 	if err != nil {
@@ -164,17 +164,20 @@ func (f *Flow) RunArticle(ctx context.Context, externalID string) error {
 	return nil
 }
 
-// articleChatOutput — то, что произвёл чат 2.
+// articleChatOutput — то, что произвёл чат 2. Результаты названы по смыслу, а не по слотам
+// хранения: соответствие описано в saveArticleChat.
 type articleChatOutput struct {
 	articlePrompt string
 	articleText   string
+	reviewPrompt  string
+	reviewedPage  string
 }
 
-// runArticleChat проводит три сообщения чата 2. Чат открывается и закрывается здесь же:
+// runArticleChat проводит два сообщения чата 2. Чат открывается и закрывается здесь же:
 // продолжать его снаружи нечем и незачем.
 func (f *Flow) runArticleChat(ctx context.Context, logger *slog.Logger, input article.GenerationInput, structure string) (articleChatOutput, error) {
 	var out articleChatOutput
-	chat, err := f.NewChat(ctx, input.Article.ID, StageArticle)
+	chat, err := f.NewChat(ctx, input.Article.ID, StageArticle, StageReview)
 	if err != nil {
 		return out, f.Fail(ctx, logger, input.Article, "article_generation", err)
 	}
@@ -186,22 +189,32 @@ func (f *Flow) runArticleChat(ctx context.Context, logger *slog.Logger, input ar
 		return out, f.Fail(ctx, logger, input.Article, "article_generation", err)
 	}
 	logger.Info("article generated", "stage", "article_generation", "prompt_size", len([]rune(out.articlePrompt)))
+
+	if out.reviewPrompt, out.reviewedPage, err = f.Message(ctx, chat.Continue,
+		StageReview, reviewData(input, out.articleText)); err != nil {
+		return out, f.Fail(ctx, logger, input.Article, "article_review", err)
+	}
+	logger.Info("article review completed", "stage", "article_review")
 	return out, nil
 }
 
 // saveArticleChat публикует артефакты чата 2 одним Commit и отдаёт основной промпт в очередь
 // публикации.
 //
-// Файл у страницы один — generated/article.txt. Слоты review_path и fixed_article_path
-// движка указывают на него же: ревью и SEO-редактуры в потоке сейчас нет, финальный текст
-// страницы — это и есть текст основного промпта. Класть рядом две одинаковые копии значило бы
-// показывать человеку review.txt, которого никто не писал; оставлять слоты пустыми нельзя —
-// раннер полного прогона считает этап невыполненным по пустому пути и возвращался бы на него
-// вечно. Вернётся ревью — вернутся и свои файлы, менять придётся только это место.
+// Текстов у страницы два, и лежат они в существующих слотах движка:
 //
-// FAQ вынимается здесь же, из написанного текста, и сохраняется в article_metadata до стадии
-// html: разметка вправе убрать блок частых вопросов из страницы, потому что в базе он уже
-// есть. Пустой FAQ генерацию не роняет — страница написана и оплачена, — но и не прячется:
+//	articleText  → article.txt        (черновик основного промпта)
+//	reviewedPage → fixed_article.txt  (страница после редактуры — финальный текст)
+//
+// Слот review_path указывает на тот же fixed_article.txt: списка замечаний ревью не отдаёт,
+// отдельного текста у него нет, а пустым слот оставлять нельзя — раннер полного прогона
+// считает этап невыполненным по пустому пути и возвращался бы на него вечно. Второй копии
+// финального текста рядом не появляется — файл один на оба слота.
+//
+// FAQ вынимается из финального текста, а не из черновика: редактура вправе переписать блок
+// частых вопросов, и в базу обязан попасть тот набор, который опубликован. Сохраняется он до
+// стадии html — разметка вправе убрать блок со страницы, потому что в базе он уже есть.
+// Пустой FAQ генерацию не роняет — страница написана и оплачена, — но и не прячется:
 // он остаётся пустым, и публиковать статью без него не даст проверка публикации.
 func (f *Flow) saveArticleChat(ctx context.Context, logger *slog.Logger, input article.GenerationInput, externalID string, chat articleChatOutput) error {
 	selected := input.Article
@@ -210,19 +223,24 @@ func (f *Flow) saveArticleChat(ctx context.Context, logger *slog.Logger, input a
 		return f.Fail(ctx, logger, selected, "save_article", err)
 	}
 	defer articlePending.Abort()
+	finalPending, err := f.writer.StageFixedArticle(selected.ExternalID, selected.Slug, chat.reviewPrompt, chat.reviewedPage)
+	if err != nil {
+		return f.Fail(ctx, logger, selected, "save_reviewed_article", err)
+	}
+	defer finalPending.Abort()
 
 	structurePath, err := f.SavedStructurePath(ctx, externalID)
 	if err != nil {
 		return f.Fail(ctx, logger, selected, "load_structure_data", err)
 	}
-	faq := ExtractFAQ(chat.articleText)
+	faq := ExtractFAQ(chat.reviewedPage)
 	if strings.TrimSpace(faq) == "" {
 		logger.Warn("блок частых вопросов не найден в тексте страницы, FAQ останется пустым",
-			"stage", "article_generation")
+			"stage", "article_review")
 	}
-	pagePath := articlePending.Paths.ArticlePath
+	pagePath := finalPending.Paths.FixedArticlePath
 	commitErr := articleoutput.Commit(func() error {
-		if err := f.repository.SaveGenerationPaths(ctx, selected.ID, structurePath, pagePath); err != nil {
+		if err := f.repository.SaveGenerationPaths(ctx, selected.ID, structurePath, articlePending.Paths.ArticlePath); err != nil {
 			return err
 		}
 		if err := f.repository.SaveReviewPath(ctx, selected.ID, pagePath); err != nil {
@@ -234,7 +252,7 @@ func (f *Flow) saveArticleChat(ctx context.Context, logger *slog.Logger, input a
 		// Сырой текст метаданных — тот же FAQ: у pprof_2 нет ответа модели, из которого он
 		// разбирался бы, и хранить в metadata_text нечего, кроме самого результата разбора.
 		return f.repository.SaveArticleInfo(ctx, selected.ID, faq, article.ArticleInfo{FAQ: faq})
-	}, articlePending)
+	}, articlePending, finalPending)
 	if commitErr != nil {
 		return f.Fail(ctx, logger, selected, "save_article_state", commitErr)
 	}
@@ -249,7 +267,8 @@ func (f *Flow) saveArticleChat(ctx context.Context, logger *slog.Logger, input a
 		PromptPath: articlePending.Paths.ArticlePromptPath,
 	})
 	logger.Info("article artifacts saved", "stage", "article_generation",
-		"result_path", pagePath, "faq_saved", strings.TrimSpace(faq) != "")
+		"draft_path", articlePending.Paths.ArticlePath, "result_path", pagePath,
+		"faq_saved", strings.TrimSpace(faq) != "")
 	return nil
 }
 

@@ -3,7 +3,9 @@ package main
 import (
 	"strings"
 	"testing"
+	"text/template"
 
+	"github.com/foxylis237/seo-pipeline/internal/pipeline/article"
 	"github.com/foxylis237/seo-pipeline/internal/tasks/pprof2"
 )
 
@@ -36,6 +38,53 @@ func TestPProf2HasSingleDeepSeekScheme(t *testing.T) {
 	}
 	if _, found := configs.deepseek.Stages["info"]; found {
 		t.Fatal("в схеме pprof_2 есть стадия info, хотя задача её не выполняет")
+	}
+}
+
+// DEMO рендерит те же шаблоны, что и боевой прогон, а поля для них собирает задача. Разойдись
+// наборы — сборка падала бы на рендере основного промпта, уже после оплаченной структуры,
+// и папка выходила бы без промпта и без текста страницы.
+func TestPProf2DemoPromptDataRendersItsRealPrompts(t *testing.T) {
+	chdirProjectRoot(t)
+	t.Setenv("LLM_MODE", "")
+
+	configs, err := loadStageConfigs(mustProfile(pprof2.Command), modeTestLogger(), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	promptData := demoPromptDataOf(pprof2.NewFlow(nil, nil, nil, nil, nil, nil))
+	if promptData == nil {
+		t.Fatal("pprof_2 не отдал DEMO поля своих промптов")
+	}
+	input := article.GenerationInput{
+		Article:             article.Article{ID: 4, ExternalID: "4", Title: "Онкология", Slug: "onkologiya"},
+		CompetitorStructure: "H2 О программе",
+		WordstatKeywords:    []article.KeywordFrequency{{Query: "онкология обучение", Frequency: 880}},
+		LSIWords:            []string{"диспансеризация"},
+		Teachers:            "Иванова И. И., врач-онколог",
+	}
+	for _, stage := range []struct {
+		name string
+		data any
+	}{
+		{pprof2.StageStructure, promptData.StructureData(input)},
+		{pprof2.StageArticle, promptData.ArticleData(input, "СГЕНЕРИРОВАННАЯ СТРУКТУРА")},
+	} {
+		settings, found := configs.deepseek.Stages[stage.name]
+		if !found {
+			t.Fatalf("стадия %s отсутствует в схеме pprof_2", stage.name)
+		}
+		prompt, parseErr := template.New(stage.name).Parse(settings.PromptTemplate)
+		if parseErr != nil {
+			t.Fatalf("промпт стадии %s не разобран: %v", stage.name, parseErr)
+		}
+		var rendered strings.Builder
+		if execErr := prompt.Execute(&rendered, stage.data); execErr != nil {
+			t.Fatalf("промпт стадии %s не собрался полями задачи: %v", stage.name, execErr)
+		}
+		if strings.Contains(rendered.String(), "<no value>") {
+			t.Fatalf("в промпте стадии %s осталось незаполненное поле:\n%s", stage.name, rendered.String())
+		}
 	}
 }
 

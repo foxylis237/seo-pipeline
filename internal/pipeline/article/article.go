@@ -76,6 +76,12 @@ type PublicationInput struct {
 	Header          string
 	TLDR            string
 	FAQ             string
+	// Поля ниже приходят из колонок, которые заводит не каждая задача, и у задачи без такой
+	// колонки остаются пустыми. Требовать их обязана та раскладка полей площадки, которой
+	// они действительно нужны, а не общая проверка публикации.
+	SEOTitle   string
+	Teachers   string
+	Profession string
 	// HTMLPath — путь к article.html относительно OUTPUT_DIR. Пуст, если стадия html не
 	// доходила до конца: тогда публиковать нечего.
 	HTMLPath string
@@ -207,7 +213,12 @@ type ResultInput struct {
 	MetaDescription string
 	Header          string
 	ArticlePath     string
-	HTMLPath        string
+	// FixedArticlePath — финальный текст статьи, если задача правит написанное отдельной
+	// стадией. У pprof_1 и pprof_2 это результат ревью, у task_1 — результат fix; пусто, пока
+	// стадия не отработала. ArticlePath рядом остаётся тем, что написала стадия article, и
+	// шаблон result.md задачи сам выбирает, какой из двух путей показать человеку.
+	FixedArticlePath string
+	HTMLPath         string
 	// GoogleDocURL — адрес документа с промптом статьи. Пуст, пока промпт не опубликован:
 	// result.md печатает раздел в любом случае, но с пустым значением.
 	GoogleDocURL string

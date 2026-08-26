@@ -6,6 +6,7 @@ import (
 	"log/slog"
 
 	"github.com/foxylis237/seo-pipeline/internal/llm"
+	"github.com/foxylis237/seo-pipeline/internal/pipeline/demo"
 	articleoutput "github.com/foxylis237/seo-pipeline/internal/pipeline/output"
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/repository"
 	"github.com/foxylis237/seo-pipeline/internal/tasks"
@@ -50,6 +51,20 @@ func newTaskFlow(profile tasks.Profile, deps taskFlowDeps) (taskFlow, error) {
 	default:
 		return nil, nil
 	}
+}
+
+// demoPromptDataOf отдаёт сборщику DEMO данные промптов задачи, если её промпты просят свой
+// набор полей. nil — общий набор: так работают task_1 и pprof_1.
+//
+// Спрашивается поток, а не имя задачи: второй switch по задачам стал бы вторым местом, где
+// список задач нужно помнить, а поля промптов знает тот же пакет, что и промпты. Задача без
+// своих полей метода просто не объявляет, и трогать этот файл ей не придётся.
+func demoPromptDataOf(flow taskFlow) demo.PromptData {
+	provider, found := flow.(interface{ DemoPromptData() demo.PromptData })
+	if !found {
+		return nil
+	}
+	return provider.DemoPromptData()
 }
 
 // taskFlowStageExecutor выполняет этапы возобновляемого раннера потоком задачи.

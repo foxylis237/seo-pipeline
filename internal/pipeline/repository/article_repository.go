@@ -42,7 +42,8 @@ func (r *ArticleRepository) GetResultInput(ctx context.Context, externalID strin
 			COALESCE(m.metadata_text, ''),
 			` + r.inputColumn("professions") + `, ` + r.inputColumn("author") + `, COALESCE(i.key_word, ''),
 			COALESCE(i.meta_description, ''), COALESCE(i.header, ''),
-			COALESCE(o.article_path, ''), COALESCE(o.html_path, ''), COALESCE(o.google_doc_url, ''),
+			COALESCE(o.article_path, ''), COALESCE(o.fixed_article_path, ''),
+			COALESCE(o.html_path, ''), COALESCE(o.google_doc_url, ''),
 			COALESCE(a.wordpress_url, '')` + extraProjection + `
 		FROM articles AS a
 		LEFT JOIN article_inputs AS i ON i.article_id = a.id
@@ -56,7 +57,7 @@ func (r *ArticleRepository) GetResultInput(ctx context.Context, externalID strin
 		&input.Article.CreatedAt, &input.Article.UpdatedAt,
 		&input.Category, &input.Tags, &input.TLDR, &input.FAQ, &rawMetadata, &input.Professions, &input.Author,
 		&input.Keyword, &input.MetaDescription, &input.Header,
-		&input.ArticlePath, &input.HTMLPath, &input.GoogleDocURL, &input.WordPressURL,
+		&input.ArticlePath, &input.FixedArticlePath, &input.HTMLPath, &input.GoogleDocURL, &input.WordPressURL,
 	}, extraTargets...)
 	err := r.pool.QueryRow(ctx, query, externalID).Scan(targets...)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -76,7 +77,8 @@ func (r *ArticleRepository) GetDemoGenerationInput(ctx context.Context, external
 	query := `
 		SELECT a.id, a.external_id, a.title, COALESCE(i.image_slug, ''),
 			a.status, a.current_step, a.error_message, a.created_at, a.updated_at,
-			` + r.inputColumn("professions") + `, ` + r.inputColumn("links") + `
+			` + r.inputColumn("professions") + `, ` + r.inputColumn("links") + `,
+			` + r.inputColumn("teachers") + `
 		FROM articles AS a
 		LEFT JOIN article_inputs AS i ON i.article_id = a.id
 		WHERE a.external_id = $1
@@ -86,6 +88,7 @@ func (r *ArticleRepository) GetDemoGenerationInput(ctx context.Context, external
 		&input.Article.ID, &input.Article.ExternalID, &input.Article.Title, &input.Article.Slug,
 		&input.Article.Status, &input.Article.CurrentStep, &input.Article.ErrorMessage,
 		&input.Article.CreatedAt, &input.Article.UpdatedAt, &input.Professions, &input.Links,
+		&input.Teachers,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return article.GenerationInput{}, fmt.Errorf("статья с external_id %q не найдена", externalID)

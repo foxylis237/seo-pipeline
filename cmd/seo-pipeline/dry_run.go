@@ -369,12 +369,27 @@ func verifyDryRunResult(ctx context.Context, articleRepository *repository.Artic
 		paths.HTMLPromptPath, paths.HTMLPath, paths.ResultPath,
 	}
 	// Артефакты ревью спрашиваются только у задачи, которая его выполняет. У потока без
-	// ревью отдельного текста и промпта нет вовсе: финальным текстом остаётся сама статья,
-	// и требование сорвало бы офлайн-прогон на файле, которого никто не обещал.
+	// ревью отдельного текста нет вовсе: финальным текстом остаётся сама статья, и
+	// требование сорвало бы офлайн-прогон на файле, которого никто не обещал.
+	//
+	// Пути берутся из состояния, а не из раскладки каталога: какой файл занял слот, решает
+	// поток задачи. У task_1 и pprof_1 правок две, и файла тоже два; у pprof_2 правка одна —
+	// ревью возвращает готовую страницу, и оба слота указывают на неё. Проверяется то, что и
+	// требуется: слот заполнен, а файл на месте.
 	if withReviewArtifacts {
-		required = append(required,
-			paths.ReviewPromptPath, paths.ReviewPath,
-			paths.FixPromptPath, paths.FixedArticlePath)
+		saved, savedErr := articleRepository.GetSavedGenerationInput(ctx, externalID)
+		if savedErr != nil {
+			return fmt.Errorf("dry-run verify artifacts for external_id %s: %w", externalID, savedErr)
+		}
+		for _, slot := range []struct {
+			name string
+			path string
+		}{{"review_path", saved.ReviewPath}, {"fixed_article_path", saved.FixedArticlePath}} {
+			if strings.TrimSpace(slot.path) == "" {
+				return fmt.Errorf("dry-run external_id %s finished with empty %s", externalID, slot.name)
+			}
+			required = append(required, slot.path)
+		}
 	}
 	if withMetadata {
 		required = append(required, paths.GenerationInfoPath)

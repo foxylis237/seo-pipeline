@@ -184,13 +184,45 @@ func TestCreatePostKeepsPasswordOutOfFaultMessage(t *testing.T) {
 	}
 }
 
+// Своя таксономия и свой тип записи уходят в запрос как есть, а пустой post_tag не
+// отправляется вовсе: у типа записи, к которому метки не привязаны, WordPress отвечает на
+// такую таксономию отказом, а не молчаливым пропуском.
+func TestCreatePostSendsOwnTypeAndTaxonomyWithoutTags(t *testing.T) {
+	var body string
+	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		body = string(raw)
+		w.Header().Set("Content-Type", "text/xml")
+		fmt.Fprint(w, methodResponse(`<value><string>30100</string></value>`))
+	})
+
+	payload := samplePayload()
+	payload.PostType = "course"
+	payload.CategoryTaxonomy = "obuch_med-cat"
+	payload.CategoryID = 1106951
+	payload.TagIDs = nil
+	if _, err := client.CreatePost(context.Background(), payload); err != nil {
+		t.Fatalf("CreatePost: %v", err)
+	}
+	for _, want := range []string{
+		"<name>post_type</name><value><string>course</string></value>",
+		"<name>obuch_med-cat</name><value><array><data><value><int>1106951</int></value></data></array></value>",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("в запросе нет %q:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "post_tag") {
+		t.Fatalf("в запросе есть post_tag, хотя меток не было:\n%s", body)
+	}
+}
+
 func TestCreatePostRejectsBrokenPayloadWithoutRequest(t *testing.T) {
 	cases := map[string]func(*PostPayload){
 		"пустой заголовок":        func(p *PostPayload) { p.Title = "  " },
 		"пустое тело":             func(p *PostPayload) { p.ContentHTML = "" },
 		"недопустимый статус":     func(p *PostPayload) { p.Status = "future" },
 		"рубрика не разрешена":    func(p *PostPayload) { p.CategoryID = 0 },
-		"метки не разрешены":      func(p *PostPayload) { p.TagIDs = nil },
 		"нулевой идентификатор":   func(p *PostPayload) { p.TagIDs = []int64{1801, 0} },
 		"пустое имя поля":         func(p *PostPayload) { p.Fields[0].Key = "" },
 		"повторяющийся ключ поля": func(p *PostPayload) { p.Fields[1].Key = p.Fields[0].Key },
@@ -255,11 +287,11 @@ func TestGetPostReadsTermsAndCustomFields(t *testing.T) {
 	if post.Link != "https://example.test/blog/post/" {
 		t.Fatalf("адрес записи = %q", post.Link)
 	}
-	if len(post.CategoryIDs) != 1 || post.CategoryIDs[0] != 2575 {
-		t.Fatalf("рубрики = %v", post.CategoryIDs)
+	if categories := post.TermIDs["category"]; len(categories) != 1 || categories[0] != 2575 {
+		t.Fatalf("рубрики = %v", post.TermIDs)
 	}
-	if len(post.TagIDs) != 1 || post.TagIDs[0] != 1801 {
-		t.Fatalf("метки = %v", post.TagIDs)
+	if tags := post.TermIDs["post_tag"]; len(tags) != 1 || tags[0] != 1801 {
+		t.Fatalf("метки = %v", post.TermIDs)
 	}
 	if post.Fields["blog_read"] != "9 мин" {
 		t.Fatalf("custom_fields = %v", post.Fields)
@@ -295,9 +327,11 @@ func TestVerifyPassesWhenWordPressKeptEverything(t *testing.T) {
 		Title:       payload.Title,
 		Status:      payload.Status,
 		ContentHTML: payload.ContentHTML,
-		CategoryIDs: []int64{payload.CategoryID},
-		// Порядок меток WordPress не сохраняет — сверка обязана это переживать.
-		TagIDs:      []int64{49416, 1801, 1251},
+		TermIDs: map[string][]int64{
+			"category": {payload.CategoryID},
+			// Порядок меток WordPress не сохраняет — сверка обязана это переживать.
+			"post_tag": {49416, 1801, 1251},
+		},
 		ThumbnailID: payload.ThumbnailID,
 		Fields:      map[string]string{},
 	}
@@ -315,8 +349,10 @@ func TestVerifyCatchesSilentlyDroppedField(t *testing.T) {
 		Title:       payload.Title,
 		Status:      payload.Status,
 		ContentHTML: payload.ContentHTML,
-		CategoryIDs: []int64{payload.CategoryID},
-		TagIDs:      payload.TagIDs,
+		TermIDs: map[string][]int64{
+			"category": {payload.CategoryID},
+			"post_tag": payload.TagIDs,
+		},
 		ThumbnailID: payload.ThumbnailID,
 		Fields:      map[string]string{},
 	}
@@ -349,9 +385,11 @@ func TestVerifyCatchesLostThumbnail(t *testing.T) {
 		Title:       payload.Title,
 		Status:      payload.Status,
 		ContentHTML: payload.ContentHTML,
-		CategoryIDs: []int64{payload.CategoryID},
-		TagIDs:      payload.TagIDs,
-		Fields:      map[string]string{},
+		TermIDs: map[string][]int64{
+			"category": {payload.CategoryID},
+			"post_tag": payload.TagIDs,
+		},
+		Fields: map[string]string{},
 	}
 	for _, field := range payload.Fields {
 		stored.Fields[field.Key] = field.Value
@@ -368,8 +406,10 @@ func TestVerifyCatchesChangedTermsAndStatus(t *testing.T) {
 		Title:       payload.Title,
 		Status:      PostStatusDraft,
 		ContentHTML: payload.ContentHTML,
-		CategoryIDs: []int64{506},
-		TagIDs:      []int64{1801},
+		TermIDs: map[string][]int64{
+			"category": {506},
+			"post_tag": {1801},
+		},
 		ThumbnailID: payload.ThumbnailID,
 		Fields:      map[string]string{},
 	}

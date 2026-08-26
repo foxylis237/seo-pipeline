@@ -76,6 +76,66 @@ func (c *Client) FindCategoryID(ctx context.Context, name string) (int64, error)
 	return 0, &ErrTermNotFound{Taxonomy: "рубрики", Name: name}
 }
 
+// FindTermIDInTaxonomy ищет термин произвольной таксономии по точному имени.
+//
+// Идёт через XML-RPC, а не через REST, и это не прихоть. У встроенных category и post_tag
+// маршрут REST известен заранее (/wp/v2/categories, /wp/v2/tags); у таксономии, заведённой
+// темой или плагином, он существует, только если её зарегистрировали с show_in_rest, а имя
+// маршрута задаётся отдельным rest_base и с именем таксономии не обязано совпадать. Угадывать
+// его — значит получить 404 вместо ответа «термина нет». wp.getTerms принимает имя таксономии
+// как есть и работает независимо от настроек REST.
+//
+// FindCategoryID остаётся на REST: он обслуживает уже работающие задачи, и менять транспорт
+// у живой публикации ради единообразия — риск без выгоды.
+//
+// Отбор точный, как и везде: search у WordPress ищет подстрокой, и «Медицина» вернула бы
+// заодно «Медицинский массаж».
+func (c *Client) FindTermIDInTaxonomy(ctx context.Context, taxonomy, name string) (int64, error) {
+	if strings.TrimSpace(taxonomy) == "" {
+		return 0, fmt.Errorf("имя таксономии пусто")
+	}
+	wanted := normalizeTermName(name)
+	if wanted == "" {
+		return 0, fmt.Errorf("имя термина таксономии %s пусто", taxonomy)
+	}
+	for page := 0; page < maxTermPages; page++ {
+		var response xmlrpcResponse
+		params := []any{
+			xmlrpcBlogID,
+			c.cfg.Username,
+			c.cfg.AppPassword,
+			taxonomy,
+			xmlrpcStruct{
+				{Name: "search", Value: strings.TrimSpace(name)},
+				{Name: "number", Value: termsPerPage},
+				{Name: "offset", Value: page * termsPerPage},
+				{Name: "hide_empty", Value: false},
+			},
+		}
+		if err := c.call(ctx, "wp.getTerms", params, &response); err != nil {
+			return 0, err
+		}
+		items, ok := response.Value.([]any)
+		if !ok {
+			return 0, &ResponseError{Endpoint: "wp.getTerms", Message: "ответ не похож на список терминов"}
+		}
+		for _, item := range items {
+			term, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			id := int64(intFromValue(term["term_id"]))
+			if id > 0 && normalizeTermName(stringFromValue(term["name"])) == wanted {
+				return id, nil
+			}
+		}
+		if len(items) < termsPerPage {
+			break
+		}
+	}
+	return 0, &ErrTermNotFound{Taxonomy: taxonomy, Name: name}
+}
+
 // FindTagID ищет метку по точному имени, ничего не создавая.
 //
 // Чистое чтение нужно тем, кому запрещено писать, — прежде всего сухому прогону публикации:

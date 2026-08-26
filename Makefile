@@ -89,7 +89,12 @@ help: ## этот список
 		'make pprof-2 retry [ID]'          'снять ошибку и прогнать' \
 		'make pprof-2 regenerate ID'       'пересоздать страницу целиком' \
 		'make pprof-2 result [ID]'         'собрать result.md' \
+		'make pprof-2 demo-generate [ID]'  'пересобрать каталог DEMO' \
 		'make pprof-2 google-publish [ID]' 'промпты в Google Docs' \
+		'make pprof-2 wordpress-check'     'проверка доступа к WordPress, без записи' \
+		'make pprof-2 publish [ID]'        'опубликовать в WordPress; без ID — все готовые' \
+		'make pprof-2 publish plan [ID]'   'что именно уйдёт в WordPress, без записи' \
+		'make pprof-2 mark-published ID [post_id]' 'привязать к существующей записи блога' \
 		'make pprof-2 dry-run'             'офлайн-прогон без сервисов' \
 		'make pprof-2 clear ID'            'страницу к состоянию импорта' \
 		'make pprof-2 reset [ID]'          'страницу или всю pprof_2 к нулю'

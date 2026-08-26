@@ -27,11 +27,11 @@ const (
 	// отрендеренный текст сохраняется артефактом и выгружается в Google Docs — второго
 	// «базового промпта, который никуда не отправляется» у задачи нет.
 	StageArticle = "article"
-	// StageSEOEditor и StageReview объявлены, но в поток не входят: сегодня страницу пишет
-	// один промпт article, а SEO-редактура и ревью вернутся отдельными сообщениями после
-	// него. Их промпты — заглушки, настройки стадий ждут в config/pprof_2.yaml.
-	StageSEOEditor = "seo_editor"
-	StageReview    = "review"
+	// StageReview — чат 2, сообщение 2: редактура возвращает исправленную страницу целиком.
+	//
+	// Отдельного шага fix у задачи нет, как и у pprof_1: промпт отдаёт готовый текст, а не
+	// список замечаний, и этот текст и есть финальная страница.
+	StageReview = "review"
 	// StageHTML — чат 3: разметка по регламенту. Перелинковки у pprof_2 нет — промпт
 	// запрещает любые ссылки.
 	StageHTML = "html"
@@ -43,15 +43,14 @@ const (
 
 // Stages — стадии, без которых схема pprof_2 неполна.
 //
-// Набор описывает сегодняшний поток: structure → article → html. Из него же строится
-// проверка схемы и отчёт dry-run, поэтому seo_editor и review сюда не входят — их промпты
-// заглушки, и требовать от схемы рабочие настройки для стадий, которые никто не вызывает,
-// значит обещать несуществующее.
+// Набор описывает поток целиком: structure → article → review → html. Из него же строится
+// проверка схемы и отчёт dry-run, поэтому лишних имён здесь быть не должно — стадия,
+// объявленная без промпта и настроек, обещала бы несуществующее.
 //
 // Стадии info здесь нет и не появится: частые вопросы уже написаны в тексте страницы, и FAQ
 // вынимается из него разбором (ExtractFAQ), а не отдельным запросом к модели.
 var Stages = []string{
-	StageKeywords, StageStructure, StageArticle, StageHTML,
+	StageKeywords, StageStructure, StageArticle, StageReview, StageHTML,
 }
 
 // InputColumns — колонки article_inputs, которые есть только в схеме pprof_2.
@@ -99,6 +98,7 @@ func Profile() tasks.Profile {
 		ExtraInputColumns:    InputColumns,
 		WithoutMetadataStage: true,
 		MetadataFAQOnly:      true,
+		CommercialPages:      true,
 		LLMStages:            Stages,
 	}
 }

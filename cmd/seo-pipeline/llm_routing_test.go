@@ -206,7 +206,7 @@ func TestDryRunStageSetRewritesTargetsAndReachesTheStub(t *testing.T) {
 // то есть отчёт врал ровно там, где его читают перед дорогим прогоном.
 func TestArticleStageOrderFollowsTaskProfile(t *testing.T) {
 	order := articleStageOrder(pprof2.Profile())
-	expected := []string{"structure", "article", "html"}
+	expected := []string{"structure", "article", "review", "html"}
 	if !slices.Equal(order, expected) {
 		t.Fatalf("порядок стадий pprof_2 = %v, ожидался %v", order, expected)
 	}

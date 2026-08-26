@@ -119,7 +119,8 @@ func (r *fakeRepository) SaveGenerationPaths(_ context.Context, _ int64, _, arti
 	return nil
 }
 
-// Слот называется review, но у pprof_2 в нём лежит та же страница: ревью в потоке пока нет.
+// В слоте review у pprof_2 лежит та же страница, что и в слоте финального текста: ревью
+// возвращает готовый текст, а не список замечаний, и второго файла у него нет.
 func (r *fakeRepository) SaveReviewPath(_ context.Context, _ int64, reviewPath string) error {
 	r.reviewPath = reviewPath
 	return nil
@@ -203,7 +204,7 @@ func TestFlowUsesThreeChats(t *testing.T) {
 	}
 	want := [][]string{
 		{StageStructure},
-		{StageArticle},
+		{StageArticle, StageReview},
 		{StageHTML},
 	}
 	for index, expected := range want {
@@ -213,14 +214,17 @@ func TestFlowUsesThreeChats(t *testing.T) {
 	}
 }
 
-// Отдельного запроса за метаданными у pprof_2 нет: FAQ берётся из уже написанной страницы.
+// Отдельного запроса за метаданными у pprof_2 нет: FAQ берётся из уже написанной страницы —
+// и именно из той, что вышла из редактуры, а не из черновика.
 //
 // Это не мелочь оформления: второй запрос к модели дал бы второй набор вопросов, отличный от
-// опубликованного на странице. Проверяется обе половины сразу — ни одна лишняя стадия в чаты
-// не ушла, а FAQ в article_metadata всё равно попал.
-func TestFlowTakesFAQFromPageWithoutExtraStage(t *testing.T) {
+// опубликованного, а черновик даёт набор, который редактура успела переписать. Проверяется всё
+// сразу — лишних стадий в чатах нет, FAQ в article_metadata попал, и он из финального текста.
+func TestFlowTakesFAQFromReviewedPageWithoutExtraStage(t *testing.T) {
 	flow, chats, repository, _, _ := newFlowFixture(t)
-	chats.answers[StageArticle] = "H1 - Обучение\n\nтекст\n\nH2 - Частые вопросы\n\n" +
+	chats.answers[StageArticle] = "H1 - Обучение\n\nчерновик\n\nH2 - Частые вопросы\n\n" +
+		"H3 - Вопрос черновика?\n\nОтвет черновика."
+	chats.answers[StageReview] = "H1 - Обучение\n\nтекст\n\nH2 - Частые вопросы\n\n" +
 		"H3 - Сколько длится обучение?\n\nОт двух недель.\n\nH3 - Какой документ выдают?\n\nУдостоверение."
 	ctx := context.Background()
 	if err := flow.RunStructure(ctx, "7"); err != nil {
@@ -231,18 +235,21 @@ func TestFlowTakesFAQFromPageWithoutExtraStage(t *testing.T) {
 	}
 	for _, chat := range chats.chats {
 		for _, stage := range chat {
-			if stage == "info" || stage == StageSEOEditor || stage == StageReview {
+			if stage == "info" {
 				t.Fatalf("выполнена стадия %q, которой нет в потоке pprof_2", stage)
 			}
 		}
 	}
 	for _, stage := range Stages {
-		if stage == "info" || stage == StageSEOEditor || stage == StageReview {
+		if stage == "info" {
 			t.Fatalf("стадия %q объявлена в схеме pprof_2, хотя поток её не выполняет", stage)
 		}
 	}
 	if !repository.infoSaved {
 		t.Fatal("FAQ не сохранён: article_metadata осталась пустой")
+	}
+	if strings.Contains(repository.info.FAQ, "черновик") {
+		t.Fatalf("FAQ разобран из черновика, а не из отредактированной страницы: %q", repository.info.FAQ)
 	}
 	if !strings.Contains(repository.info.FAQ, "Вопрос: Сколько длится обучение?") ||
 		!strings.Contains(repository.info.FAQ, "Ответ: Удостоверение.") {
@@ -253,10 +260,11 @@ func TestFlowTakesFAQFromPageWithoutExtraStage(t *testing.T) {
 	}
 }
 
-// Файл у страницы один: ревью и SEO-редактуры нет, и слоты движка указывают на текст статьи.
-// Пустыми их оставлять нельзя — раннер полного прогона считал бы этап невыполненным вечно.
-func TestFlowPointsReviewSlotsAtThePage(t *testing.T) {
-	flow, _, repository, _, _ := newFlowFixture(t)
+// Черновик и отредактированная страница — разные файлы, а слот review_path указывает на
+// финальный: списка замечаний ревью не отдаёт, а пустым слот оставлять нельзя — раннер полного
+// прогона считал бы этап невыполненным вечно.
+func TestFlowSeparatesDraftFromReviewedPage(t *testing.T) {
+	flow, _, repository, _, writer := newFlowFixture(t)
 	ctx := context.Background()
 	if err := flow.RunStructure(ctx, "7"); err != nil {
 		t.Fatal(err)
@@ -264,13 +272,27 @@ func TestFlowPointsReviewSlotsAtThePage(t *testing.T) {
 	if err := flow.RunArticle(ctx, "7"); err != nil {
 		t.Fatal(err)
 	}
-	page := repository.saved.ArticlePath
-	if page == "" {
-		t.Fatal("страница не сохранена")
+	draft := repository.saved.ArticlePath
+	if !strings.HasSuffix(draft, "generated/article.txt") {
+		t.Fatalf("черновик основного промпта сохранён как %q", draft)
 	}
-	if repository.reviewPath != page || repository.finalArticlePath != page {
-		t.Fatalf("слоты ревью и финального текста: %q и %q, ожидалась страница %q",
-			repository.reviewPath, repository.finalArticlePath, page)
+	final := repository.finalArticlePath
+	if !strings.HasSuffix(final, "generated/fixed_article.txt") {
+		t.Fatalf("отредактированная страница сохранена как %q", final)
+	}
+	if repository.reviewPath != final {
+		t.Fatalf("слот ревью %q, ожидался финальный текст %q", repository.reviewPath, final)
+	}
+	draftText, err := writer.Read(draft)
+	if err != nil {
+		t.Fatal(err)
+	}
+	finalText, err := writer.Read(final)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if draftText == finalText {
+		t.Fatal("черновик и финальный текст совпали: редактура не сохранена отдельным файлом")
 	}
 }
 
@@ -324,9 +346,9 @@ func TestArticleChatSavesEveryArtifact(t *testing.T) {
 	}
 
 	for name, path := range map[string]string{
-		"article":    repository.saved.ArticlePath,
-		"final page": repository.finalArticlePath,
-		"structure":  repository.saved.StructurePath,
+		"article draft": repository.saved.ArticlePath,
+		"final page":    repository.finalArticlePath,
+		"structure":     repository.saved.StructurePath,
 	} {
 		if strings.TrimSpace(path) == "" {
 			t.Fatalf("артефакт %s не сохранён", name)
@@ -353,8 +375,8 @@ func TestHTMLUsesSavedPage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(page, StageArticle) {
-		t.Fatalf("в слоте финального текста лежит не страница: %q", page)
+	if !strings.Contains(page, StageReview) {
+		t.Fatalf("в слоте финального текста лежит не отредактированная страница: %q", page)
 	}
 	if err := flow.RunHTML(ctx, "7"); err != nil {
 		t.Fatal(err)

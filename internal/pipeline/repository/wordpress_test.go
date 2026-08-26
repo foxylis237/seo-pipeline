@@ -58,9 +58,11 @@ func TestValidatePublicationInputRejects(t *testing.T) {
 			func(i *article.PublicationInput) {
 				i.Publication = article.Publication{Status: article.WordPressLinked, PostID: &published}
 			}, "уже есть в WordPress"},
-		"нет HTML":         {func(i *article.PublicationInput) { i.HTMLPath = "" }, "HTML статьи"},
+		"нет HTML": {func(i *article.PublicationInput) { i.HTMLPath = "" }, "HTML статьи"},
+		// Меток в этом списке нет намеренно: они обязательны статье блога и не существуют
+		// у страницы услуги, у которой и колонки tags не заведено. Требование принадлежит
+		// раскладке задачи и проверяется вместе с ней.
 		"нет рубрики":      {func(i *article.PublicationInput) { i.Category = "  " }, "рубрика"},
-		"нет меток":        {func(i *article.PublicationInput) { i.Tags = "" }, "метки"},
 		"нет ключа":        {func(i *article.PublicationInput) { i.Keyword = "" }, "фокусное ключевое слово"},
 		"нет мета":         {func(i *article.PublicationInput) { i.MetaDescription = "" }, "мета-описание"},
 		"нет заголовка H1": {func(i *article.PublicationInput) { i.Header = "" }, "заголовок профблока"},

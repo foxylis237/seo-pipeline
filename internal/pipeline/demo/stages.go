@@ -45,6 +45,17 @@ func (s articleState) links() string {
 
 func (s articleState) title() string { return s.result.Article.Title }
 
+// promptInput — то, из чего собираются данные промптов стадий: собранный research и заголовок
+// статьи.
+//
+// Заголовок берётся из ResultInput, а не из research: research может быть не собран вовсе, и
+// тогда на его месте стоит запасной набор из article_inputs — с заголовком, но без ключей.
+func (s articleState) promptInput() article.GenerationInput {
+	input := s.research
+	input.Article.Title = s.title()
+	return input
+}
+
 // hasStoredMetadata сообщает, что стадия info уже отработала и её результат лежит в
 // PostgreSQL. Признак читается из того же ResultInput, по которому собирается result.md,
 // поэтому «есть метаданные» и «они попадут в result.md» — одно и то же условие.
@@ -143,10 +154,7 @@ func (b *Builder) structure(ctx context.Context, state articleState, staging str
 		b.logger.Warn("структура пропущена: research не собран", "external_id", state.externalID, "stage", "demo_structure")
 		return "", nil
 	}
-	call := llm.Call{Stage: "structure", ArticleID: state.result.Article.ID, Data: struct {
-		Title     string
-		Structure string
-	}{state.title(), state.research.CompetitorStructure}}
+	call := b.structureCall(state)
 	if err := b.writePrompt(state, staging, structurePromptFile, call); err != nil {
 		return "", err
 	}
@@ -190,17 +198,37 @@ func (b *Builder) article(ctx context.Context, state articleState, staging, stru
 	return text, writeDemoFile(staging, articleFile, text)
 }
 
+// structureCall собирает вызов стадии structure. Поля даёт задача, если её промпт просит
+// свой набор; иначе — общий набор ниже, тот же, что и был.
+func (b *Builder) structureCall(state articleState) llm.Call {
+	input := state.promptInput()
+	var data any = struct {
+		Title     string
+		Structure string
+	}{input.Article.Title, input.CompetitorStructure}
+	if b.promptData != nil {
+		data = b.promptData.StructureData(input)
+	}
+	return llm.Call{Stage: "structure", ArticleID: state.result.Article.ID, Data: data}
+}
+
+// articleCall собирает вызов стадии article — тем же способом и по той же причине.
 func (b *Builder) articleCall(state articleState, structure string) llm.Call {
-	return llm.Call{Stage: "article", ArticleID: state.result.Article.ID, Data: struct {
+	input := state.promptInput()
+	var data any = struct {
 		Title              string
 		Keywords           string
 		LSIWords           string
 		GeneratedStructure string
 	}{
-		Title:    state.title(),
-		Keywords: article.FormatKeywords(state.research.WordstatKeywords),
-		LSIWords: strings.Join(state.research.LSIWords, "\n"), GeneratedStructure: structure,
-	}}
+		Title:    input.Article.Title,
+		Keywords: article.FormatKeywords(input.WordstatKeywords),
+		LSIWords: strings.Join(input.LSIWords, "\n"), GeneratedStructure: structure,
+	}
+	if b.promptData != nil {
+		data = b.promptData.ArticleData(input, structure)
+	}
+	return llm.Call{Stage: "article", ArticleID: state.result.Article.ID, Data: data}
 }
 
 // articleInfo кладёт в DEMO информацию для публикации и возвращает набор метаданных для

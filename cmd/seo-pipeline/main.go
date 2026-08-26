@@ -67,6 +67,13 @@ func main() {
 		logger.Error("не удалось загрузить конфигурацию", "error", err)
 		os.Exit(1)
 	}
+	// Чем прогон занимается помимо генерации, задача объявляет в своём же конфиге —
+	// рядом со стадиями. Читается один раз здесь: дальше это готовые признаки, а не файл.
+	pipelineCfg, err := config.LoadPipelineConfig(profile.LLMConfigPath)
+	if err != nil {
+		logger.Error("не удалось прочитать секцию pipeline конфига задачи", "error", err)
+		os.Exit(1)
+	}
 	logger, err = newLogger(cfg.LogLevel, cfg.LogFormat)
 	if err != nil {
 		logger = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -226,6 +233,7 @@ func main() {
 	case wordPressPublishOperation, wordPressMarkPublishedOperation:
 		// Ни LLM, ни Keys.so, ни Arsenkin: команда берёт готовые данные и артефакты статьи.
 		err = runWordPressCommand(ctx, wordPressCommandDeps{
+			mapping:    newWordPressMapping(profile.CommercialPages),
 			repository: articleRepository,
 			writer:     writer,
 			// Обложки — входные данные задачи, они лежат рядом с её книгой импорта и
@@ -325,7 +333,14 @@ func main() {
 		}
 		// Публикация промпта идёт рядом с генерацией и не задерживает её. Wait обязателен:
 		// без него команда завершилась бы с живым Chromium и недописанным документом.
-		promptPublisher := newGooglePublisher(ctx, googleConfig(true, debugDirs.google, profile.GoogleFolderURL), articleRepository, taskLogger)
+		// Выгрузка промпта выключается конфигом задачи. Нулевой публикатор — законное
+		// состояние: он умеет ничего не делать, и поток о выключенной выгрузке не знает.
+		var promptPublisher *googlePublisher
+		if pipelineCfg.GoogleDocs {
+			promptPublisher = newGooglePublisher(ctx, googleConfig(true, debugDirs.google, profile.GoogleFolderURL), articleRepository, taskLogger)
+		} else {
+			taskLogger.Info("выгрузка промпта в Google Docs выключена конфигом задачи", "stage", "start")
+		}
 		defer promptPublisher.Wait()
 		mode, closeLLM, buildErr := buildLLM(ctx, stages, availability, generationDeps{
 			repository: articleRepository, writer: writer, result: resultService, logger: taskLogger,
@@ -359,11 +374,12 @@ func main() {
 				return runDemoPrepare(ctx, articleRepository, cfg, taskLogger, writer, logRouter, newKeywordsFallback, debugDirs, externalID)
 			})
 			// Сборщик общий у всех задач и о них не знает. Задача даёт ему свой роутер:
-			// промпты стадий у каждой свои. Объединённый промпт ручного чата, наоборот,
-			// берётся из общего каталога — DEMO у задач один и тот же.
+			// промпты стадий у каждой свои — и вместе с ним поля этих промптов, если общего
+			// набора им мало. Объединённый промпт ручного чата, наоборот, берётся из общего
+			// каталога — DEMO у задач один и тот же.
 			builder := demo.NewBuilder(cfg.OutputDir, filepath.Join(tasks.CommonPromptsDir, demo.FixLinksHTMLPromptFile),
 				articleRepository, writer, resultService,
-				mode.routerFor(externalID), preparer, taskLogger)
+				mode.routerFor(externalID), demoPromptDataOf(flow), preparer, taskLogger)
 			buildDemoErr := builder.Build(ctx, externalID)
 			// Промпт выгружается и после неудачной сборки: он рендерится до обращения к модели,
 			// и именно ради него DEMO собирают, когда генерация не удалась. Ошибка Build
@@ -476,6 +492,7 @@ func main() {
 			// отдельной командой. Поэтому publisher стоит поверх runOne, а не внутри
 			// раннера этапов: тот обязан останавливаться на первой ошибке, а этот — нет.
 			publisher := newRunPublisherFor(wordPressCommandDeps{
+				mapping:                newWordPressMapping(profile.CommercialPages),
 				repository:             articleRepository,
 				writer:                 writer,
 				images:                 newArticleImages(profile.InputDir),
@@ -486,7 +503,7 @@ func main() {
 				in:                     os.Stdin,
 				withoutArticleMetadata: profile.WithoutMetadataStage,
 				metadataFAQOnly:        profile.MetadataFAQOnly,
-			}, cfg.WordPress.PublishAfterRun)
+			}, pipelineCfg.PublishAfterRun)
 			runAndPublish := publisher.wrap(runOne)
 			if command.ExternalID == "" {
 				var pending []article.Article

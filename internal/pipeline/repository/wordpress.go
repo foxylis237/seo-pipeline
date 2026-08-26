@@ -25,6 +25,8 @@ func (r *ArticleRepository) GetPublicationInput(ctx context.Context, externalID 
 			COALESCE(i.category, ''), ` + r.inputColumn("tags") + `, COALESCE(i.key_word, ''),
 			COALESCE(i.meta_description, ''), COALESCE(i.header, ''),
 			` + r.metadataTLDR() + `, COALESCE(m.faq, ''),
+			` + r.inputColumn("seo_title") + `, ` + r.inputColumn("teachers") + `,
+			` + r.inputColumn("profession") + `,
 			COALESCE(o.html_path, '')
 		FROM articles AS a
 		LEFT JOIN article_inputs AS i ON i.article_id = a.id
@@ -42,6 +44,7 @@ func (r *ArticleRepository) GetPublicationInput(ctx context.Context, externalID 
 		&input.Category, &input.Tags, &input.Keyword,
 		&input.MetaDescription, &input.Header,
 		&input.TLDR, &input.FAQ,
+		&input.SEOTitle, &input.Teachers, &input.Profession,
 		&input.HTMLPath,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -178,7 +181,6 @@ func ValidatePublicationInput(input article.PublicationInput) error {
 		{"заголовок", input.Article.Title},
 		{"HTML статьи", input.HTMLPath},
 		{"рубрика", input.Category},
-		{"метки", input.Tags},
 		{"фокусное ключевое слово", input.Keyword},
 		{"мета-описание", input.MetaDescription},
 		{"заголовок профблока", input.Header},

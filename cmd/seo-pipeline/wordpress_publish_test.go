@@ -81,12 +81,34 @@ type fakeWPClient struct {
 	uploadsAtCreate int
 	stored          wordpress.StoredPost
 	getErr          error
-	dropField       string
-	dropThumbnail   bool
+	// Поля страницы услуги: рубрика своей таксономии и связь с записью преподавателя.
+	termLookups   []string
+	postLookups   []string
+	teacherID     int64
+	teacherErr    error
+	dropField     string
+	dropThumbnail bool
 }
 
 func (c *fakeWPClient) FindCategoryID(context.Context, string) (int64, error) {
 	return c.categoryID, c.categoryErr
+}
+
+// FindTermIDInTaxonomy обслуживает рубрику страницы услуги: та живёт в своей таксономии, а
+// не во встроенной category. Ответ тот же самый — раскладка задачи выбирает вызов, а не
+// поведение площадки.
+func (c *fakeWPClient) FindTermIDInTaxonomy(_ context.Context, taxonomy, name string) (int64, error) {
+	c.termLookups = append(c.termLookups, taxonomy+"/"+name)
+	return c.categoryID, c.categoryErr
+}
+
+// FindPostIDByTitle обслуживает связь с преподавателем: ACF хранит идентификатор записи.
+func (c *fakeWPClient) FindPostIDByTitle(_ context.Context, postType, title string) (int64, error) {
+	c.postLookups = append(c.postLookups, postType+"/"+title)
+	if c.teacherErr != nil {
+		return 0, c.teacherErr
+	}
+	return c.teacherID, nil
 }
 
 func (c *fakeWPClient) FindTagID(_ context.Context, name string) (int64, error) {
@@ -127,6 +149,14 @@ func (c *fakeWPClient) EnsureTag(ctx context.Context, name string) (wordpress.Ta
 	return wordpress.Tag{ID: c.nextTagID, Name: name, Created: true}, nil
 }
 
+// storedTaxonomy повторяет умолчание интеграции: пустое имя означает встроенную category.
+func storedTaxonomy(taxonomy string) string {
+	if taxonomy == "" {
+		return "category"
+	}
+	return taxonomy
+}
+
 func (c *fakeWPClient) UploadMedia(_ context.Context, file wordpress.MediaFile) (wordpress.UploadedMedia, error) {
 	c.uploaded = append(c.uploaded, file)
 	if c.uploadErr != nil {
@@ -151,8 +181,13 @@ func (c *fakeWPClient) CreatePost(_ context.Context, payload wordpress.PostPaylo
 	}
 	stored := wordpress.StoredPost{
 		ID: 21602, Title: payload.Title, Status: payload.Status, ContentHTML: payload.ContentHTML,
-		Link:        "https://example.test/blog/razryady/",
-		CategoryIDs: []int64{payload.CategoryID}, TagIDs: payload.TagIDs,
+		Link: "https://example.test/blog/razryady/",
+		// Таксономия берётся та же, что уйдёт в запросе: пустая означает встроенную
+		// category — ровно так её подставляет интеграция, и сверка ищет термины по ней же.
+		TermIDs: map[string][]int64{
+			storedTaxonomy(payload.CategoryTaxonomy): {payload.CategoryID},
+			"post_tag":                               payload.TagIDs,
+		},
 		ThumbnailID: payload.ThumbnailID,
 		Fields:      map[string]string{},
 	}
@@ -267,7 +302,10 @@ func newWPPublishDeps() (wordPressPublishDeps, *fakeWPRepository, *fakeWPClient,
 	builder := &fakeWPResultBuilder{}
 	out := &bytes.Buffer{}
 	deps := wordPressPublishDeps{
-		client:      client,
+		client: client,
+		// Раскладка статьи блога: её проверяет большинство тестов публикации, потому что
+		// именно с ней работают task_1 и pprof_1.
+		mapping:     blogWordPressMapping{},
 		repository:  repository,
 		writer:      &fakeWPWriter{files: map[string]string{testWPHTMLPath: testWPArticleHTML, testWPResultPath: testWPResultMD}},
 		images:      newWPImages(),
@@ -536,8 +574,9 @@ func TestPublishFailsWhenThumbnailWasNotKept(t *testing.T) {
 	if !strings.Contains(err.Error(), "post_thumbnail") {
 		t.Fatalf("ошибка не называет обложку: %v", err)
 	}
-	// Отметка остаётся: запись создана, и без неё следующий запуск создал бы дубль.
-	if len(repository.saved) != 1 {
+	// Отметка остаётся: запись создана, и без неё следующий запуск создал бы дубль. Второе
+	// сохранение — адрес записи, он известен сразу после чтения и от сверки не зависит.
+	if len(repository.saved) != 2 {
 		t.Fatalf("отметка о публикации: %+v", repository.saved)
 	}
 }
@@ -556,12 +595,38 @@ func TestPublishSavesPostIDBeforeVerificationFails(t *testing.T) {
 		t.Fatalf("ошибка не называет несошедшееся поле: %v", err)
 	}
 	// Отметка обязана остаться: запись создана, удалить её нельзя, и без отметки следующий
-	// запуск создал бы второй пост.
-	if len(repository.saved) != 1 || repository.saved[0].postID != 21602 {
+	// запуск создал бы второй пост. Сохранений два: сразу после создания записи — с одним
+	// идентификатором, и после чтения — уже с адресом.
+	if len(repository.saved) != 2 {
 		t.Fatalf("отметка о публикации не сохранена: %+v", repository.saved)
 	}
-	if len(builder.built) != 0 {
-		t.Fatal("result.md пересобран при неуспешной публикации")
+	for _, saved := range repository.saved {
+		if saved.postID != 21602 {
+			t.Fatalf("отметка о публикации: %+v", repository.saved)
+		}
+	}
+	// Адрес записи сохраняется и при несошедшейся сверке: запись в блоге есть, и человеку
+	// нужна ссылка именно тогда, когда идти смотреть глазами.
+	if repository.saved[1].url != "https://example.test/blog/razryady/" {
+		t.Fatalf("адрес записи не сохранён: %+v", repository.saved)
+	}
+	// Лист пересобирается тоже: без него ссылка на запись не дойдёт до result.md.
+	if len(builder.built) != 1 {
+		t.Fatalf("result.md не пересобран: %v", builder.built)
+	}
+}
+
+// Лишний пробел из книги в заголовок записи не уходит: на странице его не видно, но в теге
+// title и в выдаче он остаётся, а править заголовок опубликованной записи приложение не умеет.
+func TestPublishCollapsesSpacesInTitle(t *testing.T) {
+	deps, repository, client, _, _ := newWPPublishDeps()
+	repository.input.Article.Title = "Косметолог  - дистанционное  обучение"
+
+	if err := runWordPressPublish(context.Background(), deps, "16"); err != nil {
+		t.Fatalf("публикация: %v", err)
+	}
+	if got := client.created[0].Title; got != "Косметолог - дистанционное обучение" {
+		t.Fatalf("заголовок записи = %q", got)
 	}
 }
 

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"strconv"
 	"strings"
 	"time"
 
@@ -33,10 +32,6 @@ const (
 // обратную сверку не хватило бы.
 const wordPressPublishDeadline = 10 * time.Minute
 
-// profBlueValue — содержимое синего блока со стоимостью. Значение одно на все статьи и
-// задано человеком; из данных статьи оно не выводится и моделью не генерируется.
-const profBlueValue = "от 7 000 р"
-
 // readingTimeSection — заголовок раздела result.md, откуда берётся время чтения.
 //
 // Значение не пересчитывается при публикации: в блог уходит ровно то, что уже собрано в
@@ -49,7 +44,9 @@ const readingTimeSection = "## Время чтения"
 // разбор отказов и порядок записи в БД, проверяется без живого сайта.
 type wordPressPublishClient interface {
 	FindCategoryID(ctx context.Context, name string) (int64, error)
+	FindTermIDInTaxonomy(ctx context.Context, taxonomy, name string) (int64, error)
 	FindTagID(ctx context.Context, name string) (int64, error)
+	FindPostIDByTitle(ctx context.Context, postType, title string) (int64, error)
 	EnsureTag(ctx context.Context, name string) (wordpress.Tag, error)
 	UploadMedia(ctx context.Context, file wordpress.MediaFile) (wordpress.UploadedMedia, error)
 	CreatePost(ctx context.Context, payload wordpress.PostPayload) (int64, error)
@@ -86,7 +83,10 @@ type wordPressResultBuilder interface {
 }
 
 type wordPressPublishDeps struct {
-	client      wordPressPublishClient
+	client wordPressPublishClient
+	// mapping — раскладка данных статьи по полям площадки. Единственное, чем задачи
+	// отличаются при публикации; см. wordpress_mapping.go.
+	mapping     wordPressMapping
 	repository  wordPressPublishRepository
 	writer      wordPressPublishWriter
 	images      wordPressImageSource
@@ -135,6 +135,7 @@ func runWordPressPublish(ctx context.Context, deps wordPressPublishDeps, externa
 	}
 
 	logger.Info("публикация начата",
+		"post_type", payload.PostType, "category_taxonomy", payload.CategoryTaxonomy,
 		"category_id", payload.CategoryID, "tag_ids", payload.TagIDs, "fields", len(payload.Fields),
 		"image", plan.Image.Path)
 
@@ -177,6 +178,12 @@ func runWordPressPublish(ctx context.Context, deps wordPressPublishDeps, externa
 		logger.Error("запись создана, но прочитать её обратно не удалось", "post_id", postID, "error", err)
 		return fmt.Errorf("запись %d создана, но сверить её не удалось: %w", postID, err)
 	}
+	// Адрес сохраняется сразу после чтения, до сверки. Он факт о созданной записи, а не
+	// награда за сошедшуюся сверку: запись существует в блоге при любом её исходе, и человеку
+	// нужна ссылка на неё именно тогда, когда что-то разошлось и надо смотреть глазами.
+	if saveErr := deps.repository.SavePublication(ctx, externalID, postID, stored.Link); saveErr != nil {
+		logger.Warn("адрес записи сохранить не удалось", "post_id", postID, "error", saveErr)
+	}
 	if mismatches := payload.Verify(stored); len(mismatches) > 0 {
 		logger.Error("запись создана, но сверка не сошлась",
 			"post_id", postID, "mismatches", len(mismatches),
@@ -187,17 +194,18 @@ func runWordPressPublish(ctx context.Context, deps wordPressPublishDeps, externa
 		}
 		// Тип, а не fmt.Errorf: это отказ площадки, а не негодные данные статьи, и полный
 		// прогон обязан различать их — от этого зависит, выключать ли публикацию дальше.
+		// Лист пересобирается и здесь: запись создана, адрес известен, и человеку он нужен
+		// тем более — разбираться с расхождением он пойдёт по этой ссылке.
+		if _, buildErr := deps.resultBuild.Build(ctx, externalID); buildErr != nil {
+			logger.Warn("result.md не пересобран", "error", buildErr)
+		}
 		return &wordpress.ResponseError{
 			Endpoint: "wp.newPost",
 			Message: fmt.Sprintf("запись %d создана, но сохранилось не всё — публикация неуспешна:%s\n"+
-				"Запись не переписывается и не удаляется, отметка в базе оставлена: без неё\n"+
+				"Запись %s не переписывается и не удаляется, отметка в базе оставлена: без неё\n"+
 				"следующий запуск создал бы дубль. Разберитесь в админке вручную",
-				postID, report.String()),
+				postID, report.String(), stored.Link),
 		}
-	}
-
-	if saveErr := deps.repository.SavePublication(ctx, externalID, postID, stored.Link); saveErr != nil {
-		logger.Warn("адрес записи сохранить не удалось", "post_id", postID, "error", saveErr)
 	}
 
 	logger.Info("публикация завершена",
@@ -273,6 +281,11 @@ func buildWordPressPayload(
 	if err := repository.ValidatePublicationInput(input); err != nil {
 		return wordpress.PostPayload{}, plan, err
 	}
+	// Своё требование задачи: у блоговой статьи это метки, у страницы услуги — SEO-заголовок
+	// и преподаватель. Общая проверка о них не знает: набор колонок у задач разный.
+	if err := deps.mapping.Validate(input); err != nil {
+		return wordpress.PostPayload{}, plan, err
+	}
 	if !deps.writer.Exists(input.HTMLPath) {
 		return wordpress.PostPayload{}, plan, fmt.Errorf(
 			"у статьи %s нет файла %s — публиковать нечего", externalID, input.HTMLPath)
@@ -296,7 +309,7 @@ func buildWordPressPayload(
 		if err := repository.ValidateArticleMetadata(input); err != nil {
 			return wordpress.PostPayload{}, plan, err
 		}
-		readingTime, err = readingTimeFromResult(deps.writer, input.HTMLPath)
+		readingTime, err = resultSectionValue(deps.writer, input.HTMLPath, readingTimeSection)
 		if err != nil {
 			return wordpress.PostPayload{}, plan, fmt.Errorf("статья %s: %w", externalID, err)
 		}
@@ -317,20 +330,15 @@ func buildWordPressPayload(
 		return wordpress.PostPayload{}, plan, err
 	}
 
-	categoryID, err := deps.client.FindCategoryID(ctx, input.Category)
-	if err != nil {
-		return wordpress.PostPayload{}, plan, fmt.Errorf("рубрика статьи %s: %w", externalID, err)
-	}
-	tagNames := wordpress.SplitTermNames(input.Tags)
-	if len(tagNames) == 0 {
-		return wordpress.PostPayload{}, plan, fmt.Errorf("у статьи %s не разобраны метки: %q", externalID, input.Tags)
-	}
-	tags, err := resolveWordPressTags(ctx, deps, externalID, tagNames, createMissingTags)
+	// Дальше данные раскладывает задача: рубрика с её таксономией, метки (если они у неё
+	// есть), подписи вложения и поля ACF с Yoast. Сценарий публикации одинаков у всех и о
+	// раскладке ничего не знает — см. wordpress_mapping.go.
+	mapped, err := deps.mapping.Build(ctx, deps, input, faqItems, readingTime, createMissingTags)
 	if err != nil {
 		return wordpress.PostPayload{}, plan, err
 	}
-	tagIDs := make([]int64, 0, len(tags))
-	for _, tag := range tags {
+	tagIDs := make([]int64, 0, len(mapped.Tags))
+	for _, tag := range mapped.Tags {
 		// Ноль бывает только в сухом прогоне — у метки, которую заведёт публикация.
 		// Идентификатора у неё пока нет, и класть его в нагрузку нечем.
 		if tag.ID > 0 {
@@ -339,23 +347,27 @@ func buildWordPressPayload(
 	}
 
 	plan = wordPressPayloadContext{
-		Image:        image,
-		ImageAlt:     strings.TrimSpace(input.Header),
-		ImageTitle:   strings.TrimSpace(input.Article.Slug),
-		CategoryName: strings.TrimSpace(input.Category),
-		Tags:         tags,
-		ReadingTime:  readingTime,
-		FAQItems:     len(faqItems),
-		HTMLPath:     input.HTMLPath,
-		ContentRunes: len([]rune(contentHTML)),
+		Image:            image,
+		ImageAlt:         mapped.ImageAlt,
+		ImageTitle:       mapped.ImageTitle,
+		PostType:         mapped.PostType,
+		CategoryTaxonomy: mapped.CategoryTaxonomy,
+		CategoryName:     mapped.CategoryName,
+		Tags:             mapped.Tags,
+		ReadingTime:      readingTime,
+		FAQItems:         len(faqItems),
+		HTMLPath:         input.HTMLPath,
+		ContentRunes:     len([]rune(contentHTML)),
 	}
 	return wordpress.PostPayload{
-		Title:       strings.TrimSpace(input.Article.Title),
-		ContentHTML: contentHTML,
-		Status:      wordpress.PostStatusPublish,
-		CategoryID:  categoryID,
-		TagIDs:      tagIDs,
-		Fields:      wordPressCustomFields(input, faqItems, readingTime, tagNames, withBlogMetadata),
+		Title:            collapseSpaces(input.Article.Title),
+		ContentHTML:      contentHTML,
+		Status:           wordpress.PostStatusPublish,
+		PostType:         mapped.PostType,
+		CategoryTaxonomy: mapped.CategoryTaxonomy,
+		CategoryID:       mapped.CategoryID,
+		TagIDs:           tagIDs,
+		Fields:           mapped.Fields,
 	}, plan, nil
 }
 
@@ -418,9 +430,13 @@ type wordPressPayloadContext struct {
 	// есть: alt — заголовок H1 статьи (article_inputs.header), title — слаг картинки
 	// (article_inputs.image_slug). Ни одно из них не выводится из загруженного файла и не
 	// досочиняется после загрузки.
-	ImageAlt     string
-	ImageTitle   string
-	CategoryName string
+	ImageAlt   string
+	ImageTitle string
+	// PostType и CategoryTaxonomy показывают, куда именно ляжет запись: у страницы услуги
+	// это свой тип записи и своя таксономия рубрики, и увидеть их человек обязан до отправки.
+	PostType         string
+	CategoryTaxonomy string
+	CategoryName     string
 	// Tags — метки статьи в том порядке, в каком они перечислены в Excel. Нулевой
 	// идентификатор бывает только в сухом прогоне и означает метку, которой на площадке
 	// пока нет.
@@ -431,87 +447,30 @@ type wordPressPayloadContext struct {
 	ContentRunes int
 }
 
-// wordPressCustomFields раскладывает данные статьи по полям темы dpoprof.
+// resultSectionValue достаёт готовое значение раздела result.md.
 //
-// Имена ключей сняты с живой записи, заполненной вручную, и повторяют её раскладку: репитер
-// FAQ хранится плоскими ключами blog_faq_<N>_question и blog_faq_<N>_answer, а blog_faq —
-// счётчиком строк, тоже текстом.
-//
-// Отображение принадлежит площадке, а не движку: никакая стадия пайплайна про blog_tldr и
-// prof_name не знает и знать не должна. Вторая площадка получит своё отображение здесь же,
-// не трогая ни одного пакета internal/pipeline.
-func wordPressCustomFields(
-	input article.PublicationInput, faqItems []result.FAQItem, readingTime string, tagNames []string,
-	withBlogMetadata bool,
-) []wordpress.CustomField {
-	fields := make([]wordpress.CustomField, 0, 9+2*len(faqItems))
-	// Поля блоговой статьи. Пустыми их не отправляют: в теме они означают «блок есть, но
-	// он пустой», и у страницы, которая этих блоков не имеет, их не должно быть вовсе.
-	// Свои поля коммерческой страницы добавляются здесь же, рядом, — отображение принадлежит
-	// площадке, и менять ради него движок не нужно.
-	if withBlogMetadata {
-		fields = append(fields,
-			wordpress.CustomField{Key: "blog_tldr", Value: strings.TrimSpace(input.TLDR)},
-			wordpress.CustomField{Key: "blog_read", Value: readingTime},
-		)
-	}
-	// Счётчик строк репитера идёт вместе с самими вопросами, а не с полями блога: у задачи,
-	// которая даёт только FAQ, блок вопросов на странице есть, а TL;DR и времени чтения нет.
-	if len(faqItems) > 0 {
-		fields = append(fields, wordpress.CustomField{Key: "blog_faq", Value: strconv.Itoa(len(faqItems))})
-	}
-	for index, item := range faqItems {
-		fields = append(fields,
-			wordpress.CustomField{Key: fmt.Sprintf("blog_faq_%d_question", index), Value: item.Question},
-			wordpress.CustomField{Key: fmt.Sprintf("blog_faq_%d_answer", index), Value: item.Answer},
-		)
-	}
-	return append(fields,
-		wordpress.CustomField{Key: "prof_title", Value: strings.TrimSpace(input.Header)},
-		wordpress.CustomField{Key: "prof_blue", Value: profBlueValue},
-		wordpress.CustomField{Key: "prof_name", Value: professionName(tagNames)},
-		wordpress.CustomField{Key: "_yoast_wpseo_focuskw", Value: strings.TrimSpace(input.Keyword)},
-		wordpress.CustomField{Key: "_yoast_wpseo_title", Value: strings.TrimSpace(input.Article.Title)},
-		wordpress.CustomField{Key: "_yoast_wpseo_metadesc", Value: strings.TrimSpace(input.MetaDescription)},
-	)
-}
-
-// professionName берёт название профессии из первой метки.
-//
-// Правило проверено на одиннадцати записях, заполненных вручную: первая метка совпала с
-// проставленным человеком prof_name в десяти из них, а единственное расхождение —
-// «Кассир-операционист» против «кассир операционист» — только в дефисе. Ключевой запрос для
-// этой роли не годится принципиально: там «разряды газосварщиков», а не профессия.
-func professionName(tagNames []string) string {
-	if len(tagNames) == 0 {
-		return ""
-	}
-	return strings.ToLower(strings.TrimSpace(tagNames[0]))
-}
-
-// readingTimeFromResult достаёт готовое время чтения из result.md.
-//
-// Значение не пересчитывается: в PostgreSQL его нет, а единственный расчёт живёт в сборке
-// result.md. Брать его оттуда — значит опубликовать ровно то, что человек уже видел в файле.
+// Значение не собирается заново: время чтения нигде не хранится, а блок стоимости задан в
+// шаблоне листа — оба уже посчитаны сборкой result.md, и человек их там видел. Брать их
+// оттуда значит опубликовать ровно то, что лежит в листе, а не второй его вариант.
 //
 // Каталог статьи выводится из пути к article.html, а не из slug: у пути к артефакту первый
 // сегмент и есть каталог, и лишнего источника истины не появляется.
-func readingTimeFromResult(writer wordPressPublishWriter, htmlPath string) (string, error) {
+func resultSectionValue(writer wordPressPublishWriter, htmlPath, section string) (string, error) {
 	directory := strings.Split(strings.Trim(strings.ReplaceAll(htmlPath, "\\", "/"), "/"), "/")[0]
 	if directory == "" {
 		return "", fmt.Errorf("не удалось определить каталог статьи по пути %q", htmlPath)
 	}
 	resultPath := directory + "/" + articleoutput.ResultFileName
 	if !writer.Exists(resultPath) {
-		return "", fmt.Errorf("нет файла %s — время чтения брать неоткуда, соберите result", resultPath)
+		return "", fmt.Errorf("нет файла %s — раздел %q брать неоткуда, соберите result", resultPath, section)
 	}
 	content, err := writer.Read(resultPath)
 	if err != nil {
 		return "", fmt.Errorf("прочитать %s: %w", resultPath, err)
 	}
-	value := fencedSectionValue(content, readingTimeSection)
+	value := fencedSectionValue(content, section)
 	if value == "" {
-		return "", fmt.Errorf("в %s пуст раздел %q", resultPath, readingTimeSection)
+		return "", fmt.Errorf("в %s пуст раздел %q", resultPath, section)
 	}
 	return value, nil
 }
@@ -656,7 +615,9 @@ func runWordPressMarkPublished(
 // разбор публикации в её теле добавил бы ещё одну ветвящуюся страницу к тому, что уже
 // перевалило за все ориентиры.
 type wordPressCommandDeps struct {
-	repository  wordPressPublishRepository
+	repository wordPressPublishRepository
+	// mapping — раскладка данных задачи по полям площадки.
+	mapping     wordPressMapping
 	writer      wordPressPublishWriter
 	images      wordPressImageSource
 	resultBuild wordPressResultBuilder
@@ -680,6 +641,7 @@ type wordPressCommandDeps struct {
 func wordPressPublishDepsFrom(deps wordPressCommandDeps, client wordPressPublishClient) wordPressPublishDeps {
 	return wordPressPublishDeps{
 		client:                 client,
+		mapping:                deps.mapping,
 		repository:             deps.repository,
 		writer:                 deps.writer,
 		images:                 deps.images,
@@ -794,8 +756,10 @@ func runWordPressPublishPlan(ctx context.Context, deps wordPressPublishDeps, ext
 	fmt.Fprintln(out, "Запись:")
 	fmt.Fprintf(out, "  %-22s %s\n", "post_title", payload.Title)
 	fmt.Fprintf(out, "  %-22s %s\n", "post_status", payload.Status)
+	fmt.Fprintf(out, "  %-22s %s\n", "post_type", wordPressPlanPostType(plan.PostType))
 	fmt.Fprintf(out, "  %-22s %d символов из %s\n", "post_content", plan.ContentRunes, plan.HTMLPath)
-	fmt.Fprintf(out, "  %-22s %d  «%s»\n", "terms.category", payload.CategoryID, plan.CategoryName)
+	fmt.Fprintf(out, "  %-22s %d  «%s»\n",
+		"terms."+wordPressPlanTaxonomy(plan.CategoryTaxonomy), payload.CategoryID, plan.CategoryName)
 	tags := make([]string, 0, len(plan.Tags))
 	var newTags int
 	for _, tag := range plan.Tags {
@@ -806,7 +770,11 @@ func runWordPressPublishPlan(ctx context.Context, deps wordPressPublishDeps, ext
 		}
 		tags = append(tags, fmt.Sprintf("%d «%s»", tag.ID, tag.Name))
 	}
-	fmt.Fprintf(out, "  %-22s %s\n", "terms.post_tag", strings.Join(tags, ", "))
+	// Строка меток печатается только у задачи, которая их публикует: пустое «terms.post_tag»
+	// у страницы услуги читалось бы как потерянные данные, а их там нет по замыслу.
+	if len(tags) > 0 {
+		fmt.Fprintf(out, "  %-22s %s\n", "terms.post_tag", strings.Join(tags, ", "))
+	}
 	// Обложка показывается путём и именем в библиотеке: имя видно в адресе картинки на
 	// сайте, а путь — единственный способ убедиться, что уйдёт та самая картинка.
 	fmt.Fprintf(out, "  %-22s %s → %s, %s (%s)\n", "post_thumbnail",
@@ -833,7 +801,7 @@ func runWordPressPublishPlan(ctx context.Context, deps wordPressPublishDeps, ext
 		fmt.Fprintln(out, "\nВремени чтения и FAQ у этой задачи нет: стадии info в её потоке не существует.")
 	}
 	fmt.Fprintln(out, "Обложка при публикации уйдёт в медиабиблиотеку отдельным вызовом вместе с alt и title —")
-	fmt.Fprintln(out, "сейчас она не отправлена. alt взят из заголовка H1 статьи, title — из image_slug.")
+	fmt.Fprintln(out, "сейчас она не отправлена. Оба значения показаны выше, как они уйдут.")
 	if newTags > 0 {
 		// Заведение метки необратимо ровно так же, как запись: удалять термины приложение
 		// не умеет. Сухой прогон для того и нужен, чтобы опечатку в Excel заметили здесь.
@@ -881,6 +849,35 @@ func runWordPressPublishPlanAll(ctx context.Context, deps wordPressPublishDeps) 
 		return fmt.Errorf("не готовы к публикации: %s", strings.Join(failed, ", "))
 	}
 	return nil
+}
+
+// collapseSpaces схлопывает повторяющиеся пробелы в заголовке записи.
+//
+// Заголовок пишет человек в Excel, и лишний пробел там появляется легко: «Косметолог  -
+// дистанционное обучение». На странице его не видно — HTML схлопывает пробелы при отрисовке,
+// — но он остаётся в теге title, в выдаче и в списке записей админки, а исправить заголовок
+// опубликованной записи приложение не умеет.
+//
+// Правится только пробельная часть: слова, знаки и регистр остаются как в книге. Это не
+// редактура заголовка, а снятие того, что человек и так не собирался писать.
+func collapseSpaces(title string) string {
+	return strings.Join(strings.Fields(title), " ")
+}
+
+// wordPressPlanPostType и wordPressPlanTaxonomy показывают то же умолчание, которое
+// подставит интеграция: пустое значение в отчёте выглядело бы потерянной настройкой.
+func wordPressPlanPostType(postType string) string {
+	if strings.TrimSpace(postType) == "" {
+		return "post"
+	}
+	return postType
+}
+
+func wordPressPlanTaxonomy(taxonomy string) string {
+	if strings.TrimSpace(taxonomy) == "" {
+		return "category"
+	}
+	return taxonomy
 }
 
 // countNewWordPressTags считает метки, которых на площадке ещё нет.

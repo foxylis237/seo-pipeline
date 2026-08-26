@@ -58,14 +58,6 @@ type WordPressConfig struct {
 	// AppPassword — Application Password из <префикс>WORDPRESS_APP_PASSWORD. Не обычный
 	// пароль администратора: этот отзывается отдельно и не даёт входа в админку.
 	AppPassword string
-	// PublishAfterRun — публиковать ли статью сразу после полного прогона
-	// (<префикс>WORDPRESS_PUBLISH_AFTER_RUN).
-	//
-	// Умолчание — false, и это не осторожность ради осторожности: публикация необратима,
-	// записи в блоге приложение удалять не умеет, а `run` человек запускает ради текста.
-	// Выкладывать десяток статей в живой блог как побочный эффект генерации оно права не
-	// имеет — согласие на это выражается явно, одной строкой в .env.
-	PublishAfterRun bool
 }
 
 // EnvName возвращает имя переменной окружения с префиксом задачи.
@@ -136,18 +128,6 @@ func load(requireEnvFile bool, defaults TaskDefaults) (Config, error) {
 		}
 	}
 
-	// Публикация после прогона выключена, пока её не включили явно. Пустое значение и
-	// «false» здесь одно и то же, а мусор — ошибка конфигурации: молча принять «yes» за
-	// выключено значило бы однажды выложить десяток статей в блог без спроса.
-	publishAfterRun := false
-	if value := defaults.taskEnv("WORDPRESS_PUBLISH_AFTER_RUN"); value != "" {
-		publishAfterRun, err = strconv.ParseBool(value)
-		if err != nil {
-			return Config{}, fmt.Errorf("%sWORDPRESS_PUBLISH_AFTER_RUN must be true or false: %w",
-				defaults.EnvPrefix, err)
-		}
-	}
-
 	// DATABASE_URL — исключение из правила о префиксах: сервер PostgreSQL у задач общий, а
 	// разводит их search_path из профиля. Префикс здесь лишь позволяет увести задачу на
 	// другой сервер, не трогая остальные.
@@ -177,10 +157,9 @@ func load(requireEnvFile bool, defaults TaskDefaults) (Config, error) {
 		// адрес одной задачи не должен протекать в другую. Задача с префиксом видит только
 		// PPROF_1_WORDPRESS_*, задача без префикса — исторические имена без него.
 		WordPress: WordPressConfig{
-			BaseURL:         defaults.taskEnv("WORDPRESS_URL"),
-			Username:        defaults.taskEnv("WORDPRESS_USERNAME"),
-			AppPassword:     defaults.taskEnv("WORDPRESS_APP_PASSWORD"),
-			PublishAfterRun: publishAfterRun,
+			BaseURL:     defaults.taskEnv("WORDPRESS_URL"),
+			Username:    defaults.taskEnv("WORDPRESS_USERNAME"),
+			AppPassword: defaults.taskEnv("WORDPRESS_APP_PASSWORD"),
 		},
 
 		envPrefix: defaults.EnvPrefix,

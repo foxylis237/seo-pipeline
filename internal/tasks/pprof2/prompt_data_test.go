@@ -1,11 +1,39 @@
 package pprof2
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	texttemplate "text/template"
 
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/article"
 )
+
+// Промпт ревью правит написанную страницу, поэтому её текст обязан в него попасть. Набор
+// плейсхолдеров шаблона и набор полей проверяются на настоящем файле: расхождение даёт не
+// ошибку, а «<no value>» — то есть ревью без страницы, уже после оплаченного article.
+func TestReviewPromptGetsThePage(t *testing.T) {
+	template, err := os.ReadFile(filepath.Join("..", "..", "..", "tasks", "pprof_2", "prompts", "review.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompt, err := texttemplate.New("review").Option("missingkey=error").Parse(string(template))
+	if err != nil {
+		t.Fatalf("промпт ревью не разобран: %v", err)
+	}
+	var rendered strings.Builder
+	page := "H1 - Обучение на стропальщика\n\nтекст страницы"
+	if err := prompt.Execute(&rendered, reviewData(article.GenerationInput{}, page)); err != nil {
+		t.Fatalf("промпт ревью не собрался своими полями: %v", err)
+	}
+	if !strings.Contains(rendered.String(), page) {
+		t.Fatal("страница не попала в промпт ревью")
+	}
+	if strings.Contains(rendered.String(), "<no value>") {
+		t.Fatalf("в промпте ревью осталось незаполненное поле:\n%s", rendered.String())
+	}
+}
 
 // Промпт запрещает выдумывать факты, поэтому пустое поле не должно попадать в него вовсе:
 // строка «Профессия: » — это приглашение её заполнить.

@@ -15,6 +15,17 @@ const (
 	PostStatusDraft   = "draft"
 )
 
+const (
+	// defaultPostType — обычная запись блога. Подставляется, когда тип не назван.
+	defaultPostType = "post"
+	// defaultCategoryTaxonomy — встроенная таксономия рубрик. Подставляется, когда своя
+	// таксономия не названа.
+	defaultCategoryTaxonomy = "category"
+	// tagTaxonomy — встроенная таксономия меток. Своей у неё не бывает: метки либо есть у
+	// типа записи, либо их не отправляют вовсе.
+	tagTaxonomy = "post_tag"
+)
+
 // CustomField — одна пара postmeta.
 //
 // Значение всегда строка, даже когда по смыслу это число: репитер ACF хранит и счётчик
@@ -37,6 +48,18 @@ type PostPayload struct {
 	ContentHTML string
 	// Status — PostStatusPublish или PostStatusDraft.
 	Status string
+	// PostType — тип записи. Пустое значение означает обычную запись блога.
+	//
+	// Поле есть потому, что задачи публикуются в разные сущности одной площадки: статья
+	// блога — это post, коммерческая страница услуги живёт своим типом. Тип выбирает
+	// вызывающий, пакет за него не решает.
+	PostType string
+	// CategoryTaxonomy — таксономия рубрики. Пустая означает встроенную category.
+	//
+	// Рубрика у записи одна при любой таксономии: это её место в каталоге. Своя таксономия
+	// нужна тем типам записей, к которым встроенная category не привязана вовсе, — там имя
+	// «category» WordPress просто отбросил бы, и запись легла бы без рубрики.
+	CategoryTaxonomy string
 	// CategoryID — рубрика, уже разрешённая в идентификатор.
 	CategoryID int64
 	// TagIDs — метки, уже разрешённые в идентификаторы.
@@ -44,6 +67,10 @@ type PostPayload struct {
 	// Именно идентификаторы, а не имена: XML-RPC принимает и terms_names, но тот молча
 	// заводит отсутствующие термины. Заводить рубрики и метки нам запрещено, поэтому
 	// несуществующее имя обязано отбиться раньше, при разрешении.
+	//
+	// Пустой список — законное состояние: метки есть не у каждого типа записи, и требовать
+	// их от страницы услуги значило бы не опубликовать её никогда. Требование «метки
+	// обязательны» принадлежит задаче и проверяется до сборки нагрузки.
 	TagIDs []int64
 	// ThumbnailID — вложение, которое станет изображением записи.
 	//
@@ -57,13 +84,24 @@ type PostPayload struct {
 
 // StoredPost — то, чем WordPress ответил на чтение записи.
 type StoredPost struct {
-	ID          int64
-	Title       string
-	Status      string
+	ID     int64
+	Title  string
+	Status string
+	// PostType — фактический тип записи, каким его хранит WordPress.
+	//
+	// Сверкой не проверяется намеренно: у записи, созданной с пустым типом, здесь стоит
+	// подставленное площадкой «post», и сравнение с пустым ожиданием было бы ложной
+	// тревогой. Поле нужно тому, кто читает чужую запись, — например, чтобы узнать, каким
+	// типом заведены уже существующие страницы.
+	PostType    string
 	ContentHTML string
 	Link        string
-	CategoryIDs []int64
-	TagIDs      []int64
+	// TermIDs — термины записи по таксономиям, как их вернул WordPress.
+	//
+	// Карта, а не пара полей под category и post_tag: таксономия рубрики у разных типов
+	// записей своя, и знать её имена заранее пакет не может. Сверка спрашивает ровно те
+	// таксономии, которые были в отправленной нагрузке.
+	TermIDs map[string][]int64
 	// ThumbnailID — вложение, назначенное записи изображением. Ноль означает, что обложки
 	// у записи нет.
 	ThumbnailID int64
@@ -120,8 +158,8 @@ func (c *Client) GetPost(ctx context.Context, postID int64) (StoredPost, error) 
 		c.cfg.Username,
 		c.cfg.AppPassword,
 		postID,
-		xmlrpcArray{"post_id", "post_title", "post_status", "post_content", "link", "terms",
-			"custom_fields", "post_thumbnail"},
+		xmlrpcArray{"post_id", "post_title", "post_status", "post_type", "post_content", "link",
+			"terms", "custom_fields", "post_thumbnail"},
 	}
 	if err := c.call(ctx, "wp.getPost", params, &response); err != nil {
 		return StoredPost{}, err
@@ -148,8 +186,11 @@ func (p PostPayload) Verify(stored StoredPost) []Mismatch {
 	add("post_title", p.Title, stored.Title)
 	add("post_status", p.Status, stored.Status)
 	add("post_content", p.ContentHTML, stored.ContentHTML)
-	add("terms.category", formatIDs([]int64{p.CategoryID}), formatIDs(stored.CategoryIDs))
-	add("terms.post_tag", formatIDs(p.TagIDs), formatIDs(stored.TagIDs))
+	category := p.categoryTaxonomy()
+	add("terms."+category, formatIDs([]int64{p.CategoryID}), formatIDs(stored.TermIDs[category]))
+	// Метки сверяются и тогда, когда их не отправляли: пустое ожидание против непустого
+	// ответа — это метка, повешенная площадкой помимо нас, и знать об этом человек обязан.
+	add("terms."+tagTaxonomy, formatIDs(p.TagIDs), formatIDs(stored.TermIDs[tagTaxonomy]))
 	// Обложка сверяется наравне с остальным: назначить её вторым запросом нельзя —
 	// редактирование записей пакету запрещено, — а запись без картинки в блоге видна сразу.
 	add("post_thumbnail", formatIDs([]int64{p.ThumbnailID}), formatIDs([]int64{stored.ThumbnailID}))
@@ -177,9 +218,9 @@ func (p PostPayload) validate() error {
 	if p.CategoryID <= 0 {
 		return errors.New("WordPress: рубрика не разрешена в идентификатор")
 	}
-	if len(p.TagIDs) == 0 {
-		return errors.New("WordPress: метки не разрешены в идентификаторы")
-	}
+	// Метки не требуются: их наличие — правило задачи, а не структуры записи. Задача, у
+	// которой меток нет вовсе, проверяет это до сборки нагрузки и сюда доходит с пустым
+	// списком намеренно.
 	for _, id := range p.TagIDs {
 		if id <= 0 {
 			return fmt.Errorf("WordPress: недопустимый идентификатор метки %d", id)
@@ -203,11 +244,35 @@ func (p PostPayload) validate() error {
 	return nil
 }
 
+// postType возвращает тип записи, подставляя обычную запись блога.
+func (p PostPayload) postType() string {
+	if strings.TrimSpace(p.PostType) == "" {
+		return defaultPostType
+	}
+	return p.PostType
+}
+
+// categoryTaxonomy возвращает таксономию рубрики, подставляя встроенную.
+func (p PostPayload) categoryTaxonomy() string {
+	if strings.TrimSpace(p.CategoryTaxonomy) == "" {
+		return defaultCategoryTaxonomy
+	}
+	return p.CategoryTaxonomy
+}
+
 // content собирает структуру аргумента wp.newPost.
 func (p PostPayload) content() xmlrpcStruct {
-	tags := make(xmlrpcArray, 0, len(p.TagIDs))
-	for _, id := range p.TagIDs {
-		tags = append(tags, id)
+	terms := xmlrpcStruct{
+		{Name: p.categoryTaxonomy(), Value: xmlrpcArray{p.CategoryID}},
+	}
+	// Пустой post_tag не отправляется вовсе: у типа записи, к которому метки не привязаны,
+	// WordPress отвечает на такую таксономию отказом, а не молчаливым пропуском.
+	if len(p.TagIDs) > 0 {
+		tags := make(xmlrpcArray, 0, len(p.TagIDs))
+		for _, id := range p.TagIDs {
+			tags = append(tags, id)
+		}
+		terms = append(terms, xmlrpcMember{Name: tagTaxonomy, Value: tags})
 	}
 	fields := make(xmlrpcArray, 0, len(p.Fields))
 	for _, field := range p.Fields {
@@ -217,14 +282,11 @@ func (p PostPayload) content() xmlrpcStruct {
 		})
 	}
 	content := xmlrpcStruct{
-		{Name: "post_type", Value: "post"},
+		{Name: "post_type", Value: p.postType()},
 		{Name: "post_status", Value: p.Status},
 		{Name: "post_title", Value: p.Title},
 		{Name: "post_content", Value: p.ContentHTML},
-		{Name: "terms", Value: xmlrpcStruct{
-			{Name: "category", Value: xmlrpcArray{p.CategoryID}},
-			{Name: "post_tag", Value: tags},
-		}},
+		{Name: "terms", Value: terms},
 		{Name: "custom_fields", Value: fields},
 	}
 	// Ноль не отправляется вовсе: пустой post_thumbnail WordPress понимает как «снять
@@ -240,10 +302,14 @@ func storedPostFromMembers(members map[string]any) StoredPost {
 		ID:          int64(intFromValue(members["post_id"])),
 		Title:       stringFromValue(members["post_title"]),
 		Status:      stringFromValue(members["post_status"]),
+		PostType:    stringFromValue(members["post_type"]),
 		ContentHTML: stringFromValue(members["post_content"]),
 		Link:        stringFromValue(members["link"]),
+		TermIDs:     make(map[string][]int64),
 		Fields:      make(map[string]string),
 	}
+	// Термины раскладываются по всем таксономиям, какие вернул WordPress, а не по двум
+	// известным: какая из них рубрика этой записи, знает отправленная нагрузка, а не ответ.
 	if terms, ok := members["terms"].([]any); ok {
 		for _, item := range terms {
 			term, ok := item.(map[string]any)
@@ -251,15 +317,11 @@ func storedPostFromMembers(members map[string]any) StoredPost {
 				continue
 			}
 			id := int64(intFromValue(term["term_id"]))
-			if id <= 0 {
+			taxonomy := stringFromValue(term["taxonomy"])
+			if id <= 0 || taxonomy == "" {
 				continue
 			}
-			switch stringFromValue(term["taxonomy"]) {
-			case "category":
-				post.CategoryIDs = append(post.CategoryIDs, id)
-			case "post_tag":
-				post.TagIDs = append(post.TagIDs, id)
-			}
+			post.TermIDs[taxonomy] = append(post.TermIDs[taxonomy], id)
 		}
 	}
 	// post_thumbnail приезжает целым описанием вложения, а не числом; у записи без обложки

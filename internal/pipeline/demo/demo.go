@@ -81,6 +81,20 @@ type Generator interface {
 	HasStage(stage string) bool
 }
 
+// PromptData собирает данные промптов тех стадий, которые DEMO выполняет сам.
+//
+// Набор плейсхолдеров шаблона — дело задачи, а не движка: основной промпт pprof_2 просит ещё
+// преподавателя, и общий набор полей даёт «can't evaluate field Teachers» уже после
+// оплаченной стадии structure. Поэтому поля приходит собирать та же задача, чьи это промпты,
+// а demo о них не знает.
+//
+// nil означает общий набор — Title, ключи, LSI и структуру: его просят промпты task_1 и
+// pprof_1, и заводить им реализацию ради повторения того же самого незачем.
+type PromptData interface {
+	StructureData(input article.GenerationInput) any
+	ArticleData(input article.GenerationInput, structure string) any
+}
+
 // ResultRenderer собирает result.md из сохранённых данных, не записывая его. metadata == nil
 // означает «взять TL;DR и FAQ из PostgreSQL», иначе они берутся из переданного набора
 // целиком.
@@ -112,6 +126,7 @@ type Builder struct {
 	artifacts        Artifacts
 	result           ResultRenderer
 	generator        Generator
+	promptData       PromptData
 	preparer         Preparer
 	mergedPromptPath string
 	logger           *slog.Logger
@@ -119,13 +134,15 @@ type Builder struct {
 
 // NewBuilder собирает сборщик DEMO. mergedPromptPath — путь к объединённому промпту ручного
 // чата; он свой у каждой задачи, поэтому приходит снаружи, а не берётся из константы.
-func NewBuilder(root, mergedPromptPath string, repository Repository, artifacts Artifacts, result ResultRenderer, generator Generator, preparer Preparer, logger *slog.Logger) *Builder {
+// promptData — сборщики данных промптов задачи; nil означает общий набор полей.
+func NewBuilder(root, mergedPromptPath string, repository Repository, artifacts Artifacts, result ResultRenderer, generator Generator, promptData PromptData, preparer Preparer, logger *slog.Logger) *Builder {
 	if logger == nil {
 		logger = slog.New(slog.DiscardHandler)
 	}
 	return &Builder{
 		root: root, repository: repository, artifacts: artifacts, result: result,
-		generator: generator, preparer: preparer, mergedPromptPath: mergedPromptPath, logger: logger,
+		generator: generator, promptData: promptData, preparer: preparer,
+		mergedPromptPath: mergedPromptPath, logger: logger,
 	}
 }
 

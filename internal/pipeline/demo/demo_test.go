@@ -127,6 +127,29 @@ func (p *fakePreparer) Prepare(context.Context, string) error {
 	return nil
 }
 
+// taskPromptData — задача, чьи промпты просят свой набор полей. Так устроен pprof_2:
+// страницу услуги пишет промпт, которому нужны данные преподавателя.
+type taskPromptData struct{}
+
+type taskStructureData struct {
+	Title     string
+	Structure string
+}
+
+type taskArticleData struct {
+	Title              string
+	GeneratedStructure string
+	Teachers           string
+}
+
+func (taskPromptData) StructureData(input article.GenerationInput) any {
+	return taskStructureData{Title: input.Article.Title, Structure: input.CompetitorStructure}
+}
+
+func (taskPromptData) ArticleData(input article.GenerationInput, structure string) any {
+	return taskArticleData{Title: input.Article.Title, GeneratedStructure: structure, Teachers: input.Teachers}
+}
+
 type fixture struct {
 	root       string
 	builder    *Builder
@@ -168,7 +191,7 @@ func newFixture(t *testing.T) *fixture {
 	// проверять сборку на копии значило бы не заметить, что файл переехал. Путь записан
 	// строкой, а не взят из internal/tasks: движку про задачи знать нечего даже в тесте.
 	mergedPrompt := filepath.Join("..", "..", "..", "tasks", "common", "prompts", FixLinksHTMLPromptFile)
-	builder := NewBuilder(root, mergedPrompt, repository, articleoutput.NewWriter(root), renderer, generator, preparer,
+	builder := NewBuilder(root, mergedPrompt, repository, articleoutput.NewWriter(root), renderer, generator, nil, preparer,
 		slog.New(slog.NewTextHandler(io.Discard, nil)))
 	return &fixture{
 		root: root, builder: builder, repository: repository,
@@ -576,6 +599,53 @@ func TestBuildSkipsInfoStageWhenTaskHasNone(t *testing.T) {
 	}
 	if !fixture.result.metadataSet || fixture.result.metadata != nil {
 		t.Fatalf("result.md собран с подменой метаданных %+v, want источник БД", fixture.result.metadata)
+	}
+}
+
+// Поля промпта — дело задачи, а не движка: основной промпт pprof_2 просит преподавателя, и
+// общий набор полей дал бы ошибку рендера — уже после оплаченной стадии structure.
+func TestBuildAsksTaskForItsPromptFields(t *testing.T) {
+	fixture := newFixture(t)
+	fixture.repository.research.Teachers = "Иванова И. И., логопед высшей категории"
+	fixture.builder.promptData = taskPromptData{}
+
+	if err := fixture.builder.Build(context.Background(), testExternalID); err != nil {
+		t.Fatalf("Build() = %v", err)
+	}
+
+	structureData, collected := fixture.generator.prompted["structure"].(taskStructureData)
+	if !collected {
+		t.Fatalf("данные промпта структуры собрал движок: %T", fixture.generator.prompted["structure"])
+	}
+	if structureData.Title != "Как стать логопедом" || structureData.Structure != "H2 Кто такой логопед" {
+		t.Fatalf("данные промпта структуры = %+v", structureData)
+	}
+	articleData, collected := fixture.generator.prompted["article"].(taskArticleData)
+	if !collected {
+		t.Fatalf("данные основного промпта собрал движок: %T", fixture.generator.prompted["article"])
+	}
+	if articleData.Teachers != "Иванова И. И., логопед высшей категории" {
+		t.Fatalf("преподаватель не попал в промпт: %+v", articleData)
+	}
+	if articleData.GeneratedStructure != "СГЕНЕРИРОВАННАЯ СТРУКТУРА" {
+		t.Fatalf("структура не попала в промпт: %+v", articleData)
+	}
+}
+
+// Задача без своих полей ничего не объявляет, и промпты собираются общим набором — тем же,
+// что и до появления PromptData.
+func TestBuildCollectsCommonPromptFieldsWithoutTaskPromptData(t *testing.T) {
+	fixture := newFixture(t)
+
+	if err := fixture.builder.Build(context.Background(), testExternalID); err != nil {
+		t.Fatalf("Build() = %v", err)
+	}
+
+	prompt := fixture.demoFile(t, articlePromptFile)
+	for _, want := range []string{"Как стать логопедом", "логопед обучение", "дефектология", "СГЕНЕРИРОВАННАЯ СТРУКТУРА"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("в основном промпте нет %q:\n%s", want, prompt)
+		}
 	}
 }
 
