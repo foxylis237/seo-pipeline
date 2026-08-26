@@ -2,6 +2,7 @@ package pprof2
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -17,6 +18,9 @@ import (
 type fakeChats struct {
 	chats   [][]string
 	answers map[string]string
+	// queued — ответы стадии по порядку сообщений. Нужны там, где два сообщения одной
+	// стадии отвечают по-разному: оборвавшаяся разметка и её продолжение.
+	queued map[string][]string
 }
 
 func (c *fakeChats) NewChat(_ context.Context, _ int64, stages ...string) (taskflow.Chat, error) {
@@ -44,6 +48,10 @@ func (c *fakeChat) record(prompt string) (string, error) {
 	stage := c.stages[c.sent]
 	c.sent++
 	c.owner.chats[c.index] = append(c.owner.chats[c.index], stage)
+	if queue := c.owner.queued[stage]; len(queue) > 0 {
+		c.owner.queued[stage] = queue[1:]
+		return queue[0], nil
+	}
 	if answer, found := c.owner.answers[stage]; found {
 		return answer, nil
 	}
@@ -365,5 +373,80 @@ func TestHTMLRequiresFinalArticle(t *testing.T) {
 	}
 	if len(repository.failures) == 0 {
 		t.Fatal("ошибка не сохранена в состоянии статьи")
+	}
+}
+
+// Оборванная разметка дописывается продолжением того же чата, а не уходит в блог половиной
+// страницы.
+//
+// Ответ веб-интерфейса обрывается по двум причинам сразу: длинная страница упирается в предел
+// длины сообщения, а прерванный стрим оставляет на странице только то, что успело прийти. И то,
+// и другое выглядит исправным HTML — теги закрыты, заголовок и абзац на месте, — поэтому
+// обычные проверки разметки такую страницу пропускают.
+func TestFlowCompletesCutHTML(t *testing.T) {
+	flow, chats, repository, _, writer := newFlowFixture(t)
+	page := "H1: Патологическая анатомия\n\n" +
+		"Курс даёт практикующему врачу системные знания для морфологической диагностики материала.\n\n" +
+		"H2: Подайте заявку\n\n" +
+		"Для уточнения деталей программы, дат практики и условий зачисления оставьте заявку на сайте."
+	chats.answers[StageReview] = page
+	chats.queued = map[string][]string{StageHTML: {
+		"<p>Курс даёт практикующему врачу системные знания для морфологической диагностики материала.</p>\n<p class=\"",
+		"<h2>Подайте заявку</h2>\n<p>Для уточнения деталей программы, дат практики и условий зачисления оставьте заявку на сайте.</p>",
+	}}
+
+	ctx := context.Background()
+	if err := flow.RunStructure(ctx, "7"); err != nil {
+		t.Fatal(err)
+	}
+	if err := flow.RunArticle(ctx, "7"); err != nil {
+		t.Fatal(err)
+	}
+	repository.saved.FixedArticlePath = repository.finalArticlePath
+	if err := flow.RunHTML(ctx, "7"); err != nil {
+		t.Fatalf("html: %v", err)
+	}
+
+	html, err := writer.Read(repository.htmlPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := generation.ValidateHTMLCoversPage(page, html); err != nil {
+		t.Fatalf("сохранена оборванная страница: %v\n%s", err, html)
+	}
+	if strings.Contains(html, "<p class=\"") {
+		t.Fatalf("недописанный элемент попал в артефакт: %s", html)
+	}
+	if len(chats.chats[2]) != 2 {
+		t.Fatalf("в чате разметки %d сообщений, ожидалось два: %v", len(chats.chats[2]), chats.chats[2])
+	}
+}
+
+// Разметка, которая так и не дошла до конца страницы, обязана уронить стадию: артефакт с
+// половиной страницы и статус completed — худшее из возможных состояний.
+func TestFlowFailsWhenHTMLStaysCut(t *testing.T) {
+	flow, chats, repository, _, _ := newFlowFixture(t)
+	chats.answers[StageReview] = "H1: Тема\n\n" +
+		"Курс даёт практикующему врачу системные знания для морфологической диагностики материала.\n\n" +
+		"Для уточнения деталей программы, дат практики и условий зачисления оставьте заявку на сайте."
+	chats.answers[StageHTML] = "<p>Курс даёт практикующему врачу системные знания для морфологической диагностики материала.</p>"
+
+	ctx := context.Background()
+	if err := flow.RunStructure(ctx, "7"); err != nil {
+		t.Fatal(err)
+	}
+	if err := flow.RunArticle(ctx, "7"); err != nil {
+		t.Fatal(err)
+	}
+	repository.saved.FixedArticlePath = repository.finalArticlePath
+	err := flow.RunHTML(ctx, "7")
+	if !errors.Is(err, generation.ErrHTMLIncomplete) {
+		t.Fatalf("оборванная разметка принята: %v", err)
+	}
+	if repository.htmlPath != "" {
+		t.Fatalf("путь HTML сохранён при оборванной разметке: %q", repository.htmlPath)
+	}
+	if len(repository.failures) == 0 {
+		t.Fatal("ошибка стадии не сохранена в состоянии статьи")
 	}
 }

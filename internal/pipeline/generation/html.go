@@ -7,7 +7,9 @@ import (
 )
 
 var (
-	htmlTagRE     = regexp.MustCompile(`(?is)<[a-z][^>]*>`)
+	// htmlTagRE опознаёт любой тег, в том числе закрывающий: хвост страницы вправе состоять
+	// из одних закрывающих тегов, и «тегов нет» о нём было бы неправдой.
+	htmlTagRE     = regexp.MustCompile(`(?is)</?[a-z][^>]*>`)
 	htmlContentRE = regexp.MustCompile(`(?is)<(?:h[1-6]|p)\b[^>]*>`)
 	htmlFenceRE   = regexp.MustCompile("(?s)```([a-zA-Z]*)\r?\n(.*?)```")
 	fenceLineRE   = regexp.MustCompile("^[ \t]*```[a-zA-Z]*[ \t]*$")
@@ -50,6 +52,20 @@ func NormalizeHTML(value string) (string, error) {
 }
 
 func normalizeAndValidateHTML(value string) (string, htmlCleanup, error) {
+	html, cleanup, err := cleanHTMLAnswer(value)
+	if err != nil {
+		return "", cleanup, err
+	}
+	if !htmlContentRE.MatchString(html) {
+		return "", cleanup, fmt.Errorf("HTML не содержит заголовка или абзаца")
+	}
+	return html, cleanup, nil
+}
+
+// cleanHTMLAnswer снимает оформление канала: Markdown-обёртку и вступление модели. Проверка
+// содержания сюда не входит — она разная у целой страницы и у её продолжения, а правила
+// очистки у них одни, и второй их копии заводить нельзя.
+func cleanHTMLAnswer(value string) (string, htmlCleanup, error) {
 	html := strings.TrimSpace(value)
 	cleanup := htmlCleanup{SizeBefore: len([]rune(html))}
 	if html == "" {
@@ -71,9 +87,6 @@ func normalizeAndValidateHTML(value string) (string, htmlCleanup, error) {
 	}
 	if !htmlTagRE.MatchString(html) {
 		return "", cleanup, fmt.Errorf("ответ не содержит HTML-тегов")
-	}
-	if !htmlContentRE.MatchString(html) {
-		return "", cleanup, fmt.Errorf("HTML не содержит заголовка или абзаца")
 	}
 	return html, cleanup, nil
 }

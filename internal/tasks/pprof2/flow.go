@@ -281,7 +281,10 @@ func (f *Flow) RunHTML(ctx context.Context, externalID string) error {
 	if err != nil {
 		return f.Fail(ctx, logger, input.Article, "html_generation", err)
 	}
-	chat, err := f.NewChat(ctx, input.Article.ID, StageHTML)
+	// Чат разметки принимает больше одного сообщения: оборванный ответ дописывается
+	// продолжением той же стадии, а чат роутера принимает ровно столько сообщений, сколько
+	// стадий ему названо при создании.
+	chat, err := f.NewChat(ctx, input.Article.ID, generation.HTMLChatStages(StageHTML)...)
 	if err != nil {
 		return f.Fail(ctx, logger, input.Article, "html_generation", err)
 	}
@@ -289,11 +292,17 @@ func (f *Flow) RunHTML(ctx context.Context, externalID string) error {
 
 	started := time.Now()
 	logger.Info("html generation started", "stage", "html_generation", "chat", 3)
-	html, err := f.Answer(ctx, chat.Send, prompt, StageHTML)
-	if err != nil {
-		return f.Fail(ctx, logger, input.Article, "html_generation", err)
-	}
-	html, err = generation.NormalizeHTML(html)
+	html, err := generation.BuildHTMLPage(ctx, generation.HTMLPageRequest{
+		Page:   finalText,
+		Prompt: prompt,
+		Send: func(ctx context.Context, message string) (string, error) {
+			return f.Answer(ctx, chat.Send, message, StageHTML)
+		},
+		Continue: func(ctx context.Context, message string) (string, error) {
+			return f.Answer(ctx, chat.Continue, message, StageHTML)
+		},
+		Logger: logger,
+	})
 	if err != nil {
 		return f.Fail(ctx, logger, input.Article, "html_generation", err)
 	}

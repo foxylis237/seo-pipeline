@@ -12,6 +12,8 @@ import (
 	"github.com/foxylis237/seo-pipeline/internal/tasks/pprof1"
 	"github.com/foxylis237/seo-pipeline/internal/tasks/pprof2"
 	"github.com/foxylis237/seo-pipeline/internal/tasks/task1"
+
+	"github.com/foxylis237/seo-pipeline/internal/pipeline/generation"
 )
 
 // Заглушка обязана отвечать на каждую стадию пайплайна. Стадии article и info в ней
@@ -127,5 +129,15 @@ func TestDryRunStageResponsesCoverEveryTaskStage(t *testing.T) {
 				t.Fatalf("задача %s: у стадии %q нет ответа заглушки", profile.Name, stage)
 			}
 		}
+	}
+}
+
+// Разметка заглушки обязана покрывать её же текст: стадия html сверяет конец страницы с
+// исходником, и разошедшаяся заглушка уронила бы офлайн-прогон на проверке покрытия — то
+// есть на своей же ошибке, а не на ошибке потока.
+func TestDryRunHTMLCoversDryRunArticle(t *testing.T) {
+	page := strings.ReplaceAll(dryRunStageResponses(true)["review"], "[[ARTICLE_COMPLETE]]", "")
+	if err := generation.ValidateHTMLCoversPage(page, dryRunStageResponses(true)["html"]); err != nil {
+		t.Fatalf("разметка заглушки не покрывает её текст: %v", err)
 	}
 }

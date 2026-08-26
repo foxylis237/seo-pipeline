@@ -171,7 +171,7 @@ func dryRunStageResponses(reviewReturnsArticle bool) map[string]string {
 		"info":      dryRunInfo,
 		"review":    "Структура и содержание подходят для локальной проверки. Критичных замечаний нет.",
 		"fix":       reviewedArticle,
-		"html":      "<h1>Тестовая статья</h1>\n<h2>Основной раздел</h2>\n<p>Локальная проверка SEO-пайплайна без внешних запросов.</p>",
+		"html":      dryRunHTML(),
 		// Стадии собственных потоков задач. expert и seo_editor возвращают текст статьи:
 		// в потоке pprof_1 они и есть автор и редактор.
 		"expert":     dryRunArticle,
@@ -184,6 +184,29 @@ func dryRunStageResponses(reviewReturnsArticle bool) map[string]string {
 		responses["review"] = reviewedArticle
 	}
 	return responses
+}
+
+// dryRunHTML собирает разметку заглушки из её же текста статьи.
+//
+// Собранная отдельно, она разошлась бы с текстом: стадия html сверяет конец страницы с
+// исходником и оборванную разметку не принимает, а офлайн-прогон обязан проходить ровно тот
+// же путь, что и боевой. Пока разметка выводится из текста, правка заглушки не может
+// уронить прогон на проверке покрытия.
+func dryRunHTML() string {
+	var markup strings.Builder
+	for line := range strings.SplitSeq(strings.ReplaceAll(dryRunArticle, "[[ARTICLE_COMPLETE]]", ""), "\n") {
+		text := strings.TrimSpace(line)
+		if text == "" {
+			continue
+		}
+		level := len(text) - len(strings.TrimLeft(text, "#"))
+		if level == 0 {
+			fmt.Fprintf(&markup, "<p>%s</p>\n", text)
+			continue
+		}
+		fmt.Fprintf(&markup, "<h%d>%s</h%d>\n", level, strings.TrimSpace(text[level:]), level)
+	}
+	return strings.TrimSpace(markup.String())
 }
 
 // runDryRun — безопасная проверка перед дорогим прогоном.
