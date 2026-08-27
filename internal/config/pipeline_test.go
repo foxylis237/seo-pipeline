@@ -59,13 +59,15 @@ func TestLoadPipelineConfigReadsBothSwitches(t *testing.T) {
 }
 
 // Боевые конфиги задач читаются тем же кодом: опечатка в отступе или в имени ключа обязана
-// падать здесь, а не через два часа генерации. Публикация после прогона сейчас выключена у
-// всех задач — в блог ничего не уходит как побочный эффект генерации.
+// падать здесь, а не через два часа генерации. Ожидаемое значение выключателя записано рядом
+// с конфигом намеренно: публикация после прогона пишет в живой блог, и включиться она имеет
+// право только осознанно — незамеченная правка YAML падает здесь.
 func TestTaskConfigsDeclarePipelineSection(t *testing.T) {
 	cases := map[string]bool{
 		filepath.Join("..", "..", "config", "config.yaml"):  false,
 		filepath.Join("..", "..", "config", "pprof_1.yaml"): false,
-		filepath.Join("..", "..", "config", "pprof_2.yaml"): false,
+		// pprof_2 публикует страницу сразу после прогона — включено по просьбе владельца задачи.
+		filepath.Join("..", "..", "config", "pprof_2.yaml"): true,
 	}
 	for path, wantPublish := range cases {
 		cfg, err := LoadPipelineConfig(path)
