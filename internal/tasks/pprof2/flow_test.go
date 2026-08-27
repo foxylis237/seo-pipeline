@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -179,7 +181,23 @@ func newFlowFixture(t *testing.T) (*Flow, *fakeChats, *fakeRepository, *recordin
 	}}
 	publisher := &recordingPublisher{}
 	flow := NewFlow(repository, writer, chats, &fakeRenderer{}, nil, publisher)
+	// Кнопка лежит в каталоге задачи, а тест пакета запускается в своём: путь подменяется
+	// временным файлом с той же ролью — иначе стадия html отказала бы у всех тестов сразу.
+	flow.ctaButtonPath = writeTestCTAButton(t)
 	return flow, chats, repository, publisher, writer
+}
+
+// testCTAButton — кнопка тестов. От боевой ей нужен только узнаваемый признак: правила
+// вставки от её разметки не зависят.
+const testCTAButton = `<button type="button" class="service feedback__event" data-popup="popup-contact">ЗАЯВКА НА ОБУЧЕНИЕ</button>`
+
+func writeTestCTAButton(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "cta_button.html")
+	if err := os.WriteFile(path, []byte(testCTAButton+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
 
 // Границы чатов — главный контракт потока: три чата, и сообщения распределены по ним так,
@@ -470,5 +488,87 @@ func TestFlowFailsWhenHTMLStaysCut(t *testing.T) {
 	}
 	if len(repository.failures) == 0 {
 		t.Fatal("ошибка стадии не сохранена в состоянии статьи")
+	}
+}
+
+// Кнопка заявки дописывается кодом и стоит последней: у неё фиксированная разметка со
+// стилями и классом формы, и просить её у модели на каждом прогоне — значит получать каждый
+// раз новую.
+func TestHTMLEndsWithCTAButton(t *testing.T) {
+	flow, chats, repository, _, writer := newFlowFixture(t)
+	chats.answers[StageHTML] = "<h2>Заголовок</h2>\n\n<p>текст</p>"
+
+	ctx := context.Background()
+	if err := flow.RunStructure(ctx, "7"); err != nil {
+		t.Fatal(err)
+	}
+	if err := flow.RunArticle(ctx, "7"); err != nil {
+		t.Fatal(err)
+	}
+	repository.saved.FixedArticlePath = repository.finalArticlePath
+	if err := flow.RunHTML(ctx, "7"); err != nil {
+		t.Fatalf("html: %v", err)
+	}
+
+	html, err := writer.Read(repository.htmlPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(strings.TrimSpace(html), testCTAButton) {
+		t.Fatalf("кнопка заявки не дописана в конец разметки:\n%s", html)
+	}
+	if strings.Count(html, "<button") != 1 {
+		t.Fatalf("кнопок в разметке %d, ожидалась одна:\n%s", strings.Count(html, "<button"), html)
+	}
+}
+
+// Кнопка от модели вторую не порождает: две подряд заметнее, чем чужая вёрстка одной.
+func TestHTMLKeepsSingleCTAButton(t *testing.T) {
+	flow, chats, repository, _, writer := newFlowFixture(t)
+	chats.answers[StageHTML] = "<h2>Заголовок</h2>\n\n<p>текст</p>\n\n<button type=\"button\">Заявка</button>"
+
+	ctx := context.Background()
+	if err := flow.RunStructure(ctx, "7"); err != nil {
+		t.Fatal(err)
+	}
+	if err := flow.RunArticle(ctx, "7"); err != nil {
+		t.Fatal(err)
+	}
+	repository.saved.FixedArticlePath = repository.finalArticlePath
+	if err := flow.RunHTML(ctx, "7"); err != nil {
+		t.Fatalf("html: %v", err)
+	}
+
+	html, err := writer.Read(repository.htmlPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(html, "<button") != 1 {
+		t.Fatalf("кнопок в разметке %d, ожидалась одна:\n%s", strings.Count(html, "<button"), html)
+	}
+}
+
+// Без файла кнопки стадия отказывает до первого сообщения модели: страница без кнопки хуже
+// понятной остановки, а платить за разметку, которую всё равно не сохранить, незачем.
+func TestHTMLFailsWithoutCTAButtonFile(t *testing.T) {
+	flow, chats, repository, _, _ := newFlowFixture(t)
+	flow.ctaButtonPath = filepath.Join(t.TempDir(), "missing.html")
+
+	ctx := context.Background()
+	if err := flow.RunStructure(ctx, "7"); err != nil {
+		t.Fatal(err)
+	}
+	if err := flow.RunArticle(ctx, "7"); err != nil {
+		t.Fatal(err)
+	}
+	repository.saved.FixedArticlePath = repository.finalArticlePath
+	if err := flow.RunHTML(ctx, "7"); err == nil {
+		t.Fatal("стадия html без файла кнопки обязана отказать")
+	}
+	if len(chats.chats) > 2 {
+		t.Fatalf("чат разметки открыт при отсутствующей кнопке: %v", chats.chats)
+	}
+	if repository.htmlPath != "" {
+		t.Fatalf("путь HTML сохранён без кнопки: %q", repository.htmlPath)
 	}
 }

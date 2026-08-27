@@ -71,6 +71,10 @@ type Flow struct {
 	*taskflow.Base
 	repository Repository
 	writer     Writer
+	// ctaButtonPath — файл кнопки заявки, дописываемой в конец разметки. Поле, а не
+	// константа прямо в стадии, ради тестов: путь относителен корня проекта, а тест пакета
+	// запускается в своём каталоге.
+	ctaButtonPath string
 }
 
 // NewFlow собирает поток. publisher необязателен и может быть nil.
@@ -80,9 +84,10 @@ type Flow struct {
 func NewFlow(repository Repository, writer Writer, chats taskflow.ChatFactory,
 	prompts taskflow.PromptRenderer, logger *slog.Logger, publisher taskflow.PromptPublisher) *Flow {
 	return &Flow{
-		Base:       taskflow.NewBase(repository, writer, chats, prompts, logger, publisher),
-		repository: repository,
-		writer:     writer,
+		Base:          taskflow.NewBase(repository, writer, chats, prompts, logger, publisher),
+		repository:    repository,
+		writer:        writer,
+		ctaButtonPath: CTAButtonPath,
 	}
 }
 
@@ -292,6 +297,12 @@ func (f *Flow) RunHTML(ctx context.Context, externalID string) error {
 	if err != nil {
 		return f.Fail(ctx, logger, input.Article, "load_article_data", err)
 	}
+	// Кнопка спрашивается до первого сообщения модели: отказ файла обязан стоить нисколько,
+	// а не оплаченный ответ разметки.
+	button, err := readCTAButton(f.ctaButtonPath)
+	if err != nil {
+		return f.Fail(ctx, logger, input.Article, "load_article_data", err)
+	}
 	if err := f.repository.BeginGenerationStage(ctx, input.Article.ID, stepHTML); err != nil {
 		return f.Fail(ctx, logger, input.Article, "html_generation", err)
 	}
@@ -324,6 +335,11 @@ func (f *Flow) RunHTML(ctx context.Context, externalID string) error {
 	})
 	if err != nil {
 		return f.Fail(ctx, logger, input.Article, "html_generation", err)
+	}
+	html, added := appendCTAButton(html, button)
+	if !added {
+		logger.Warn("в разметке уже есть кнопка — свою не дописываем",
+			"stage", "html_generation", "cta_button_path", f.ctaButtonPath)
 	}
 	pending, err := f.writer.StageHTML(input.Article.ExternalID, input.Article.Slug, prompt, html)
 	if err != nil {
