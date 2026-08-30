@@ -16,17 +16,33 @@ import (
 )
 
 const (
-	loginURL                         = "https://www.keys.so/ru/login"
-	homeURL                          = "https://www.keys.so/ru/"
-	cleanupURL                       = "https://www.keys.so/ru/tools/delete-double"
-	profilePath                      = "data/keysso-browser-profile"
-	emailSelector                    = `input[name="email"]`
-	passwordSelector                 = `input[name="password"]`
-	loginLinkSelector                = `a[href="/ru/login"]`
-	searchSelector                   = `input[placeholder="Введите адрес сайта или запрос"]`
-	pageSizeSelector                 = `select.per-page-dropdown`
-	keywordsTableSelector            = `table:has(th#_word)`
-	keywordsEmptySelector            = `table:has(th#_word) tbody tr.p-datatable-emptymessage`
+	loginURL              = "https://www.keys.so/ru/login"
+	homeURL               = "https://www.keys.so/ru/"
+	cleanupURL            = "https://www.keys.so/ru/tools/delete-double"
+	profilePath           = "data/keysso-browser-profile"
+	emailSelector         = `input[name="email"]`
+	passwordSelector      = `input[name="password"]`
+	loginLinkSelector     = `a[href="/ru/login"]`
+	searchSelector        = `input[placeholder="Введите адрес сайта или запрос"]`
+	pageSizeSelector      = `select.per-page-dropdown`
+	keywordsTableSelector = `table:has(th#_word)`
+	keywordsEmptySelector = `table:has(th#_word) tbody tr.p-datatable-emptymessage`
+	// keywordsEmptyInfoSelector — вторая разметка того же ответа «данных нет».
+	//
+	// Пустой результат Keys.so рисует двумя способами: у таблицы PrimeVue это строка
+	// tr.p-datatable-emptymessage внутри tbody, а у vuetable — подпись пагинации над
+	// таблицей со словами «Нет данных», причём в tbody остаётся техническая строка, а
+	// select.per-page-dropdown не появляется вовсе. Вторую разметку проверка не знала, и
+	// окончательный ответ сервиса превращался в таймаут: страница загружена, таблица на
+	// месте, условие ожидания не выполняется до конца бюджета. Цена ошибки не в лишней
+	// минуте — резервный подбор запросов моделью включается только по no_data, а по
+	// таймауту намеренно нет, — поэтому статьи 12, 14 и 15 встали на этапе целиком.
+	keywordsEmptyInfoSelector = `.vuetable-pagination-info`
+	// keywordsEmptySettleMilliseconds — сколько «Нет данных» должно продержаться, прежде чем
+	// считать ответ окончательным. Подпись пагинации живёт на странице и до прихода данных,
+	// а индикатора загрузки у этой разметки нет: поспешный вывод молча подменил бы источник
+	// запросов моделью там, где Keys.so просто отвечал медленно.
+	keywordsEmptySettleMilliseconds  = 3_000
 	keywordsLoaderSelector           = `.p-datatable-loading-overlay, .p-datatable-loading-icon`
 	cleanupInputSelector             = `textarea.p-inputtextarea`
 	resultFieldSelector              = `div.field`
@@ -255,6 +271,38 @@ var ErrNoRawKeywords = errors.New("Keys.so вернул пустой списо�
 // NoRawKeywords сообщает, что этап закончился отсутствием исходных запросов.
 // Таймауты, отказ авторизации и сломанная навигация сюда не попадают.
 func NoRawKeywords(err error) bool { return errors.Is(err, ErrNoRawKeywords) }
+
+// keywordsResultStateJS решает, что показала страница результатов Keys.so: успех, пустой
+// ответ, техработы, ошибку навигации — или ничего из этого, и тогда ждём дальше.
+//
+// Скрипт вынесен константой рядом с селекторами: правило страницы одно, и проверять его
+// тестом по вызову WaitForFunction нечем.
+const keywordsResultStateJS = `selectors => {
+			if (location.protocol === 'chrome-error:') return 'navigation_error';
+			if ((document.title || '').trim() === selectors.maintenance ||
+				(document.body?.innerText || '').trim() === selectors.maintenance) return 'maintenance';
+			const loaders = Array.from(document.querySelectorAll(selectors.loader));
+			const loading = loaders.some(element => {
+				const style = window.getComputedStyle(element);
+				return style.visibility !== 'hidden' && style.display !== 'none' && element.getClientRects().length > 0;
+			});
+			if (loading) return false;
+			const table = document.querySelector(selectors.table);
+			if (!table) return false;
+			const empty = document.querySelector(selectors.empty);
+			if (empty && (empty.textContent || '').trim() === selectors.noData) return 'no_data';
+			const emptyInfo = Array.from(document.querySelectorAll(selectors.emptyInfo))
+				.some(element => (element.textContent || '').trim() === selectors.noData);
+			if (emptyInfo) {
+				const since = window.__seoPipelineKeysSoEmptySince || performance.now();
+				window.__seoPipelineKeysSoEmptySince = since;
+				return performance.now() - since >= selectors.emptySettle ? 'no_data' : false;
+			}
+			window.__seoPipelineKeysSoEmptySince = 0;
+			const rows = table.querySelectorAll('tbody tr:not(.p-datatable-emptymessage)');
+			if (rows.length > 0 && document.querySelector(selectors.pageSize)) return 'success';
+			return false;
+		}`
 
 // authenticateWithRetries доводит сессию до авторизованного состояния, повторяя только
 // временные отказы. Общая для сбора и для отдельно вызванной очистки: обе открывают
@@ -690,26 +738,10 @@ func (s *Service) waitKeywordsResultsOnce(ctx context.Context) error {
 		return err
 	}
 	handle, err := s.page.WaitForFunction(
-		`selectors => {
-			if (location.protocol === 'chrome-error:') return 'navigation_error';
-			if ((document.title || '').trim() === selectors.maintenance ||
-				(document.body?.innerText || '').trim() === selectors.maintenance) return 'maintenance';
-			const loaders = Array.from(document.querySelectorAll(selectors.loader));
-			const loading = loaders.some(element => {
-				const style = window.getComputedStyle(element);
-				return style.visibility !== 'hidden' && style.display !== 'none' && element.getClientRects().length > 0;
-			});
-			if (loading) return false;
-			const table = document.querySelector(selectors.table);
-			if (!table) return false;
-			const empty = document.querySelector(selectors.empty);
-			if (empty && (empty.textContent || '').trim() === selectors.noData) return 'no_data';
-			const rows = table.querySelectorAll('tbody tr:not(.p-datatable-emptymessage)');
-			if (rows.length > 0 && document.querySelector(selectors.pageSize)) return 'success';
-			return false;
-		}`,
+		keywordsResultStateJS,
 		map[string]any{
 			"table": keywordsTableSelector, "empty": keywordsEmptySelector,
+			"emptyInfo": keywordsEmptyInfoSelector, "emptySettle": keywordsEmptySettleMilliseconds,
 			"pageSize": pageSizeSelector, "loader": keywordsLoaderSelector,
 			"noData": "Нет данных", "maintenance": "Технические работы на сайте",
 		},

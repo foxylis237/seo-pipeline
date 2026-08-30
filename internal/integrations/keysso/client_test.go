@@ -227,3 +227,33 @@ func TestNoRawKeywordsDistinguishesEmptyResultFromFailure(t *testing.T) {
 		}
 	}
 }
+
+// Пустой ответ Keys.so рисует двумя разметками. Пока проверка знала одну, окончательный
+// ответ сервиса приходил к нам таймаутом — а по таймауту резервный подбор запросов моделью
+// намеренно не включается, и статья вставала на этапе целиком.
+func TestResultStateScriptKnowsBothEmptyMarkups(t *testing.T) {
+	if !strings.Contains(keywordsResultStateJS, "selectors.empty)") {
+		t.Fatal("скрипт забыл строку tr.p-datatable-emptymessage")
+	}
+	if !strings.Contains(keywordsResultStateJS, "selectors.emptyInfo") {
+		t.Fatal("скрипт не знает подпись пагинации vuetable: «данных нет» снова станет таймаутом")
+	}
+	if !strings.Contains(keywordsEmptyInfoSelector, "vuetable-pagination-info") {
+		t.Fatalf("селектор подписи пагинации: %q", keywordsEmptyInfoSelector)
+	}
+}
+
+// Подпись пагинации живёт на странице и до прихода данных, а индикатора загрузки у этой
+// разметки нет. Поспешный вывод молча подменил бы источник запросов моделью там, где
+// Keys.so просто отвечал медленно, поэтому пустоте дают отстояться.
+func TestResultStateScriptWaitsBeforeCallingPageEmpty(t *testing.T) {
+	if !strings.Contains(keywordsResultStateJS, "selectors.emptySettle") {
+		t.Fatal("пустая страница признаётся окончательной сразу")
+	}
+	if keywordsEmptySettleMilliseconds <= 0 {
+		t.Fatalf("выдержка %d мс", keywordsEmptySettleMilliseconds)
+	}
+	if keywordsEmptySettleMilliseconds >= longOperationTimeoutMilliseconds {
+		t.Fatalf("выдержка %d мс не оставляет времени самому ожиданию", keywordsEmptySettleMilliseconds)
+	}
+}
