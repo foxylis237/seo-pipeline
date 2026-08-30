@@ -222,3 +222,53 @@ func TestRegenerateStopsWhenPipelineFails(t *testing.T) {
 		t.Fatal("сброс должен произойти до запуска пайплайна")
 	}
 }
+
+// Пересоздание выкладывается тем же публикатором и тем же выключателем, что и полный
+// прогон, но обёртка стоит поверх всего runRegenerate: публиковать статью раньше, чем
+// verifyRegenerated ответит, достроена ли она, незачем.
+func TestRegenerateWrappedByPublisherPublishesVerifiedArticle(t *testing.T) {
+	repository := &fakeRegenerateRepository{selected: completedTestArticle()}
+	artifacts := newFakeRegenerateArtifacts("38-tema/generated/article.txt", "38-tema/result.md")
+	run := func(context.Context, string) error {
+		repository.complete()
+		artifacts.files["38-tema/result.md"] = true
+		return nil
+	}
+	var published []string
+	publisher := newRunPublisher(func(_ context.Context, externalID string) error {
+		if repository.selected.Status != "completed" {
+			t.Fatalf("публикация начата со статусом %s", repository.selected.Status)
+		}
+		published = append(published, externalID)
+		return nil
+	}, regenerateTestLogger())
+
+	regenerateOne := func(ctx context.Context, externalID string) error {
+		return runRegenerate(ctx, repository, artifacts, run, regenerateTestLogger(), externalID)
+	}
+	if err := publisher.wrap(regenerateOne)(context.Background(), "38"); err != nil {
+		t.Fatal(err)
+	}
+	if len(published) != 1 || published[0] != "38" {
+		t.Fatalf("опубликовано %v, ожидалась одна статья 38", published)
+	}
+}
+
+func TestRegenerateWrappedByPublisherKeepsUnfinishedArticleOutOfBlog(t *testing.T) {
+	repository := &fakeRegenerateRepository{selected: completedTestArticle()}
+	artifacts := newFakeRegenerateArtifacts()
+	// Прогон завершился без ошибки, но статью не довёл: проверка это поймает, а в блог
+	// уходить нечему.
+	run := func(context.Context, string) error { return nil }
+	publisher := newRunPublisher(func(context.Context, string) error {
+		t.Fatal("незавершённая статья ушла в блог")
+		return nil
+	}, regenerateTestLogger())
+
+	regenerateOne := func(ctx context.Context, externalID string) error {
+		return runRegenerate(ctx, repository, artifacts, run, regenerateTestLogger(), externalID)
+	}
+	if err := publisher.wrap(regenerateOne)(context.Background(), "38"); err == nil {
+		t.Fatal("незавершённая статья принята как пересозданная")
+	}
+}

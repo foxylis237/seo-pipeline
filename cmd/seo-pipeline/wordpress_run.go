@@ -96,6 +96,11 @@ func newRunPublisher(publish func(context.Context, string) error, logger *slog.L
 // Ошибка генерации до публикации не доходит: публиковать недоделанную статью нечего, а
 // сама публикация ошибку наружу не отдаёт — прогон обязан продолжаться независимо от
 // состояния площадки.
+//
+// Оборачивается и run, и regenerate: пересоздание — тот же полный прогон, только со сбросом
+// артефактов перед ним и проверкой итога после. Обёртка у regenerate ставится поверх всего
+// пересоздания, вместе с этой проверкой, — иначе публикация ушла бы раньше, чем выяснится,
+// достроена ли статья.
 func (p *runPublisher) wrap(runOne func(context.Context, string) error) func(context.Context, string) error {
 	return func(ctx context.Context, externalID string) error {
 		if err := runOne(ctx, externalID); err != nil {

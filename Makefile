@@ -61,7 +61,7 @@ help: ## этот список
 		'make pprof-1 run [ID]'            'полный прогон, возобновляемый' \
 		'make pprof-1 run plan [ID]'       'где возобновится, без запуска' \
 		'make pprof-1 retry [ID]'          'снять ошибку и прогнать' \
-		'make pprof-1 regenerate ID'       'пересоздать статью целиком' \
+		'make pprof-1 regenerate ID'       'пересоздать статью целиком и выложить' \
 		'make pprof-1 result [ID]'         'собрать result.md' \
 		'make pprof-1 demo-generate [ID]'  'пересобрать каталог DEMO' \
 		'make pprof-1 google-publish [ID]' 'промпты в Google Docs' \
@@ -87,7 +87,7 @@ help: ## этот список
 		'make pprof-2 run [ID]'            'полный прогон, возобновляемый' \
 		'make pprof-2 run plan [ID]'       'где возобновится, без запуска' \
 		'make pprof-2 retry [ID]'          'снять ошибку и прогнать' \
-		'make pprof-2 regenerate ID'       'пересоздать страницу целиком' \
+		'make pprof-2 regenerate ID'       'пересоздать страницу целиком и выложить' \
 		'make pprof-2 result [ID]'         'собрать result.md' \
 		'make pprof-2 demo-generate [ID]'  'пересобрать каталог DEMO' \
 		'make pprof-2 google-publish [ID]' 'промпты в Google Docs' \
@@ -110,6 +110,9 @@ help: ## этот список
 	@printf 'html, run, retry, regenerate, demo-generate, google-publish. Необратимы:\n'
 	@printf 'clear и reset. У pprof_1 article, info, review и fix — одно действие: чат 2\n'
 	@printf 'целиком.\n'
+	@printf 'run и regenerate выкладывают статью в блог, если у задачи включён\n'
+	@printf 'pipeline.publish_after_run (у pprof_2 включён). Уже выложенную regenerate\n'
+	@printf 'заново не публикует.\n'
 	@printf 'Перед первым запуском pprof-1 и pprof-2 создать их схемы PostgreSQL — см. README.md\n'
 	@printf 'У pprof_2 стадии info нет: TL;DR и FAQ он не генерирует.\n'
 

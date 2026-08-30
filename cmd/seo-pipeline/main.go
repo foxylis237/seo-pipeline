@@ -483,14 +483,14 @@ func main() {
 				err = runPipelinePlan(ctx, articleRepository, os.Stdout, command.ExternalID, profile.WithoutMetadataStage)
 				break
 			}
-			if command.Name == "regenerate" {
-				err = runRegenerate(ctx, articleRepository, writer, runOne, taskLogger, command.ExternalID)
-				break
-			}
 			// Публикация — последний этап прогона и единственный, чья неудача не отменяет
 			// сделанного: статья уже сгенерирована и сохранена, а выложить её можно и
 			// отдельной командой. Поэтому publisher стоит поверх runOne, а не внутри
 			// раннера этапов: тот обязан останавливаться на первой ошибке, а этот — нет.
+			//
+			// Publisher общий у run и regenerate: пересоздание — тот же полный прогон, и
+			// выключатель у выкладки один (`pipeline.publish_after_run`). Двух ответов на
+			// вопрос «выкладываем ли мы эту задачу» быть не должно.
 			publisher := newRunPublisherFor(wordPressCommandDeps{
 				mapping:                newWordPressMapping(profile.CommercialPages),
 				repository:             articleRepository,
@@ -504,6 +504,23 @@ func main() {
 				withoutArticleMetadata: profile.WithoutMetadataStage,
 				metadataFAQOnly:        profile.MetadataFAQOnly,
 			}, pipelineCfg.PublishAfterRun)
+			if command.Name == "regenerate" {
+				// Обёртка ставится поверх всего пересоздания, а не поверх runOne внутри
+				// него: у regenerate есть своя проверка итога (verifyRegenerated), и она
+				// же отвечает на вопрос, достроена ли статья. Опубликовать раньше неё —
+				// значит выложить в блог то, о чём ещё не известно, доведено ли до конца.
+				//
+				// Уже выложенную статью publisher пропустит: отметка `wordpress_status`
+				// живёт в articles и пересоздание её не стирает, а переписывать
+				// существующую запись приложение не умеет. Пересозданный текст в этом
+				// случае остаётся только в артефактах — об этом говорит итог публикации.
+				regenerateOne := func(ctx context.Context, externalID string) error {
+					return runRegenerate(ctx, articleRepository, writer, runOne, taskLogger, externalID)
+				}
+				err = publisher.wrap(regenerateOne)(ctx, command.ExternalID)
+				publisher.printSummary(os.Stdout)
+				break
+			}
 			runAndPublish := publisher.wrap(runOne)
 			if command.ExternalID == "" {
 				var pending []article.Article
