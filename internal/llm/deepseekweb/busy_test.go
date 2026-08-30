@@ -72,3 +72,33 @@ func TestWaitForAnswerAsksAboutServerBusy(t *testing.T) {
 		t.Fatal("ожидание ответа не проверяет перегрузку")
 	}
 }
+
+// Плашка отказа остаётся в треде навсегда, а беседа у задачи одна на несколько сообщений.
+// Пока проверка читала страницу целиком, чужая плашка от предыдущего сообщения роняла
+// каждый следующий ответ на первом же хартбите — при этом ответ в этот момент писался.
+func TestServerBusyScriptIgnoresNoticeFromPreviousMessage(t *testing.T) {
+	if !strings.Contains(serverBusyJS, "findFreshAnswer() !== null") {
+		t.Fatal("скрипт не спрашивает, не пишется ли ответ на наше сообщение")
+	}
+	if !strings.Contains(serverBusyJS, "options.stopSelector") {
+		t.Fatal("скрипт не смотрит на кнопку остановки: генерация до первого узла ответа выпадет")
+	}
+	if !strings.Contains(serverBusyJS, "items[items.length - 1]") {
+		t.Fatal("плашка ищется не в последнем сообщении треда: старая снова будет считаться отказом")
+	}
+	if !strings.Contains(serverBusyJS, "noticeText()") {
+		t.Fatal("нет запасного правила на случай пропажи разметки списка")
+	}
+}
+
+// Снимок треда обязателен: без него скрипту нечем отличить свою плашку от чужой, а правило
+// «какой ответ считать новым» в клиенте должно остаться одно.
+func TestServerBusyDetectionUsesThreadMark(t *testing.T) {
+	source := readSourceFile(t, "busy.go")
+	if !strings.Contains(source, "detectServerBusy(page playwright.Page, mark answerMark)") {
+		t.Fatal("detectServerBusy не принимает снимок треда")
+	}
+	if !strings.Contains(source, "responseStateOptions(mark)") {
+		t.Fatal("параметры скрипта собираются не тем же правилом, что у responseState")
+	}
+}

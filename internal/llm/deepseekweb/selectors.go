@@ -93,12 +93,35 @@ const blockedStateJS = `(options) => {` + noticeTextJS + `
 
 // serverBusyJS сообщает, отказался ли DeepSeek обслуживать уже отправленное сообщение.
 //
-// Отказ приходит вместо ответа отдельной строкой под сообщением: «Server is busy. Try again
-// later, or use Instant Mode». Узла ответа при этом не появляется, кнопки остановки нет,
-// и ожидание ответа висит до конца бюджета стадии — распознать состояние больше нечем.
-const serverBusyJS = `(options) => {` + noticeTextJS + `
-  const text = noticeText();
-  return ["server is busy", "сервер занят", "сервер перегружен"].some((phrase) => text.includes(phrase));
+// Отказ приходит вместо ответа отдельной строкой внутри самого сообщения: «Server is busy.
+// Try again later, or use Instant Mode». Узла ответа при этом не появляется, кнопки
+// остановки нет, и ожидание ответа висит до конца бюджета стадии — распознать состояние
+// больше нечем.
+//
+// Читать ради этого всю страницу нельзя, и это не теория: плашка остаётся в треде навсегда,
+// а беседа у задачи одна на несколько сообщений. Страница, прочитанная целиком, отдавала
+// «сервер занят» и тогда, когда ответ на новое сообщение уже писался, — стадия падала на
+// первом же хартбите, и так на каждой попытке подряд (статья 17, 28.08: плашка от
+// предыдущего сообщения при page_state=generating).
+//
+// Поэтому проверок три, и каждая закрывает свой способ обмануться:
+//
+//  1. появился ответ на наше сообщение — нас обслуживают, плашка чужая;
+//  2. видна кнопка остановки — генерация идёт, даже если узел ответа ещё не смонтирован;
+//  3. сама плашка ищется только в последнем элементе треда: DeepSeek рисует её внутри того
+//     сообщения, которое отказался обслуживать, а старая остаётся выше и больше ни на что
+//     не влияет.
+//
+// Разметку списка мы не контролируем, поэтому при её пропаже остаётся прежнее правило —
+// поиск по тексту всей страницы.
+const serverBusyJS = `(options) => {` + freshAnswerJS + noticeTextJS + `
+  const phrases = ["server is busy", "сервер занят", "сервер перегружен"];
+  const refused = (text) => phrases.some((phrase) => text.includes(phrase));
+  if (findFreshAnswer() !== null) return false;
+  if (Array.from(document.querySelectorAll(options.stopSelector)).some(visible)) return false;
+  const items = Array.from(document.querySelectorAll(options.itemSelector));
+  if (items.length > 0) return refused(((items[items.length - 1].innerText) || "").toLowerCase());
+  return refused(noticeText());
 }`
 
 // copyLastAnswerJS нажимает кнопку копирования последнего ответа.

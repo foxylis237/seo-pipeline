@@ -11,8 +11,12 @@ import (
 // Это не блокировка аккаунта: профиль, авторизация и открытая беседа целы, отказ снимается
 // сам. Поэтому здесь нет ни cooldown, ни сброса сессии — сброс закрыл бы браузер вместе с
 // беседой, а на её историю опираются следующие стадии чата.
-func (c *Client) detectServerBusy(page playwright.Page) bool {
-	value, err := page.Evaluate(serverBusyJS, map[string]any{"answerSelector": answerSelector})
+//
+// Снимок треда обязателен: плашка отказа из беседы не исчезает, и без него собственная
+// плашка предыдущего сообщения выдавалась бы за отказ на новое. Набор параметров тот же,
+// что у responseState, — правило «какой ответ считать новым» в клиенте одно.
+func (c *Client) detectServerBusy(page playwright.Page, mark answerMark) bool {
+	value, err := page.Evaluate(serverBusyJS, responseStateOptions(mark))
 	if err != nil {
 		return false
 	}
