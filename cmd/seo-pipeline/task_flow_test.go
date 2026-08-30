@@ -36,8 +36,8 @@ func TestTaskSchemasDoNotCollide(t *testing.T) {
 		}
 		seen[profile.DBSchema] = profile.Name
 	}
-	if len(seen) != 3 {
-		t.Fatalf("схем %d при трёх задачах: %v", len(seen), seen)
+	if len(seen) != len(taskRegistry()) {
+		t.Fatalf("схем %d при %d задачах: %v", len(seen), len(taskRegistry()), seen)
 	}
 }
 

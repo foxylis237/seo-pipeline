@@ -27,6 +27,7 @@ import (
 	resultassembly "github.com/foxylis237/seo-pipeline/internal/pipeline/result"
 	"github.com/foxylis237/seo-pipeline/internal/storage"
 	"github.com/foxylis237/seo-pipeline/internal/tasks"
+	"github.com/foxylis237/seo-pipeline/internal/tasks/pproffix1"
 	"github.com/foxylis237/seo-pipeline/internal/tasks/task1"
 )
 
@@ -127,6 +128,26 @@ func main() {
 	defer pool.Close()
 
 	logger.Info("подключение к PostgreSQL успешно установлено")
+
+	// Задача правки опубликованных статей идёт своей веткой, до общей обвязки: таблицы у неё
+	// свои, и проверка схемы движка искала бы в её схеме article_inputs и article_metadata,
+	// которых там нет по замыслу. Ветка одна на весь файл и стоит ровно здесь, потому что
+	// пул уже есть, а writer, роутер логов и репозиторий движка этой задаче не нужны.
+	if profile.Name == pproffix1.Name {
+		fixLogger := logger.With("task", profile.Name, "operation", command.Name)
+		if fixErr := runPProfFix1(ctx, pprofFix1Deps{
+			profile: profile, command: command, cfg: cfg, pool: pool, logger: fixLogger, output: os.Stdout,
+		}); fixErr != nil {
+			if isGracefulCancellation(ctx, fixErr) {
+				fixLogger.Info("завершение приложения по сигналу", "stage", "shutdown")
+				return
+			}
+			fixLogger.Error("операция не выполнена", "error", fixErr)
+			os.Exit(1)
+		}
+		return
+	}
+
 	// Проверка знает про необщие колонки этой задачи: у той, что их объявила, отсутствие
 	// колонки — ошибка, а у той, что не объявляла, лишняя колонка в схеме означает чужую
 	// или недоприменённую миграцию. Так поля одной задачи не расползаются по таблицам другой.

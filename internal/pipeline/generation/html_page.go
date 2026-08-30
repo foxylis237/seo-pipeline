@@ -68,6 +68,15 @@ type HTMLPageRequest struct {
 	Send     HTMLMessage
 	Continue HTMLMessage
 	Logger   *slog.Logger
+	// Complete отвечает, дошёл ли ответ до конца. nil — правило по умолчанию: последний
+	// абзац исходного текста обязан найтись в разметке (ValidateHTMLCoversPage).
+	//
+	// Своё правило нужно задаче, у которой ответ модели не обязан повторять исходный текст
+	// дословно. Так у pprof_fix_1: он не размечает написанное, а правит уже опубликованное,
+	// и последний абзац редактура вправе переписать — признаком обрыва там служит структура
+	// статьи, а не совпадение хвоста. Ошибка обязана оборачивать ErrHTMLIncomplete, иначе
+	// продолжение чата не начнётся.
+	Complete func(markup string) error
 }
 
 // BuildHTMLPage получает разметку страницы и дописывает её, если ответ модели оборвался.
@@ -91,7 +100,11 @@ func BuildHTMLPage(ctx context.Context, request HTMLPageRequest) (string, error)
 	if err != nil {
 		return "", err
 	}
-	coverErr := ValidateHTMLCoversPage(request.Page, page)
+	complete := request.Complete
+	if complete == nil {
+		complete = func(markup string) error { return ValidateHTMLCoversPage(request.Page, markup) }
+	}
+	coverErr := complete(page)
 	for attempt := 1; coverErr != nil && attempt <= htmlContinuations; attempt++ {
 		if !errors.Is(coverErr, ErrHTMLIncomplete) || request.Continue == nil {
 			break
@@ -111,7 +124,7 @@ func BuildHTMLPage(ctx context.Context, request HTMLPageRequest) (string, error)
 		if partErr != nil {
 			return "", partErr
 		}
-		coverErr = ValidateHTMLCoversPage(request.Page, page)
+		coverErr = complete(page)
 		if coverErr == nil {
 			logger.Info("страница дописана после обрыва",
 				"stage", "html_generation", "attempt", attempt, "html_runes", len([]rune(page)))
