@@ -106,6 +106,12 @@ type StoredPost struct {
 	// у записи нет.
 	ThumbnailID int64
 	Fields      map[string]string
+	// FieldIDs — идентификаторы postmeta тех же полей.
+	//
+	// Нужны правке: wp.editPost обновляет поле только по его id, а без id заводит вторую
+	// запись postmeta с тем же ключом — и какая из двух достанется get_field(), решал бы
+	// порядок в базе. Создание записи их не спрашивает: у новой записи полей ещё нет.
+	FieldIDs map[string]string
 }
 
 // Mismatch — одно поле, которое не сошлось при обратной сверке.
@@ -307,6 +313,7 @@ func storedPostFromMembers(members map[string]any) StoredPost {
 		Link:        stringFromValue(members["link"]),
 		TermIDs:     make(map[string][]int64),
 		Fields:      make(map[string]string),
+		FieldIDs:    make(map[string]string),
 	}
 	// Термины раскладываются по всем таксономиям, какие вернул WordPress, а не по двум
 	// известным: какая из них рубрика этой записи, знает отправленная нагрузка, а не ответ.
@@ -343,6 +350,9 @@ func storedPostFromMembers(members map[string]any) StoredPost {
 				continue
 			}
 			post.Fields[key] = stringFromValue(field["value"])
+			if id := stringFromValue(field["id"]); id != "" {
+				post.FieldIDs[key] = id
+			}
 		}
 	}
 	return post
