@@ -35,6 +35,9 @@ type Request struct {
 	// Mode — подпись режима ответа в интерфейсе провайдера. Пустое значение означает
 	// «не переключать»; провайдеры без выбора режима поле игнорируют.
 	Mode string
+	// Search просит включить поиск в интернете, если провайдер это умеет. Пустое значение —
+	// прежнее поведение: модель отвечает из своих знаний.
+	Search bool
 	// Stage — имя стадии, ради которой сделан запрос. Боевые провайдеры его игнорируют:
 	// им достаточно модели. Значимо оно там, где запрос надо отличить по стадии, а модель
 	// этого больше не даёт — в чате второе и последующие сообщения идут к target, который
@@ -380,7 +383,8 @@ func (r *Router) generateTarget(ctx context.Context, call Call, prompt string, s
 	request := Request{
 		Prompt: prompt, Model: target.Model, Temperature: *stage.Temperature, MaxTokens: stage.MaxTokens,
 		ArticleID: call.ArticleID, SingleChat: r.config.Providers[target.Provider].SingleChatPerArticle,
-		NewChat: call.NewChat, Attachments: attachments, Mode: stage.Mode, Stage: call.Stage,
+		NewChat: call.NewChat, Attachments: attachments, Mode: stage.Mode, Search: stage.Search,
+		Stage: call.Stage,
 	}
 	// Самоограничение провайдера выдерживается до наложения таймаута стадии: пауза между
 	// запросами — не работа модели, и вычитать её из бюджета генерации нельзя.

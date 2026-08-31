@@ -1,4 +1,4 @@
-package pproffix1
+package articlefix
 
 import (
 	"context"
@@ -117,9 +117,9 @@ func newTestFlow(t *testing.T, articles Articles, blog Blog, chat *fakeChat) (*F
 	if err := os.WriteFile(templatePath, []byte("{{.Title}}\n{{.URL}}"), 0o644); err != nil {
 		t.Fatalf("подготовить шаблон: %v", err)
 	}
-	rule, err := NewTitleRule("Курс с внесением в ФИС ФРДО", "Курс с практикой и внесением в ФИС ФРДО")
+	rule, err := NewPairRule("Курс с внесением в ФИС ФРДО", "Курс с практикой и внесением в ФИС ФРДО")
 	if err != nil {
-		t.Fatalf("NewTitleRule: %v", err)
+		t.Fatalf("NewPairRule: %v", err)
 	}
 	flow, err := NewFlow(articles, blog, fakeChats{chat: chat}, NewArtifacts(root), rule,
 		promptPath, templatePath, nil)
@@ -293,5 +293,157 @@ func TestFlowStopsWhenVisibleHeaderDoesNotMatchRule(t *testing.T) {
 	}
 	if blog.writes != 0 {
 		t.Fatalf("в блог ушло %d правок, ожидалось 0", blog.writes)
+	}
+}
+
+// Незаполненный промпт останавливает прогон, а заполненный — нет. Проверка живёт отдельно от
+// сборки потока намеренно: `run plan` промпт не отправляет и обязан работать на задаче, у
+// которой регламент правок ещё пишется.
+func TestEnsurePromptFilled(t *testing.T) {
+	root := t.TempDir()
+	unfilled := filepath.Join(root, "unfilled.txt")
+	if err := os.WriteFile(unfilled, []byte("ЧТО ИЗМЕНИТЬ\n"+PromptPlaceholder+"\n{{.OriginalHTML}}"), 0o644); err != nil {
+		t.Fatalf("подготовить промпт: %v", err)
+	}
+	if err := EnsurePromptFilled(unfilled); err == nil {
+		t.Fatal("прогон разрешён по промпту с меткой незаполненности")
+	}
+	filled := filepath.Join(root, "filled.txt")
+	if err := os.WriteFile(filled, []byte("Замени X на Y.\n{{.OriginalHTML}}"), 0o644); err != nil {
+		t.Fatalf("подготовить промпт: %v", err)
+	}
+	if err := EnsurePromptFilled(filled); err != nil {
+		t.Fatalf("заполненный промпт отвергнут: %v", err)
+	}
+	if err := EnsurePromptFilled(filepath.Join(root, "нет-такого.txt")); err == nil {
+		t.Fatal("отсутствующий промпт принят за заполненный")
+	}
+}
+
+// constantRule — правило переименования, не выведенное из пары «было — стало».
+//
+// Смысл теста не в самом правиле, а в границе: поток обязан принимать любое переименование,
+// потому что у второй задачи правки оно своё. Если TitleRule снова станет структурой, этот
+// тест перестанет собираться — раньше, чем задача упрётся в чужое правило.
+type constantRule struct{ title string }
+
+func (r constantRule) Apply(string) (string, error) { return r.title, nil }
+
+func TestFlowAcceptsAnyTitleRule(t *testing.T) {
+	articles := &fakeArticles{article: testArticle()}
+	blog := &fakeBlog{post: Post{ID: 777, Title: "Старое название", ContentHTML: originalArticle}}
+	root := t.TempDir()
+	promptPath := filepath.Join(root, "rewrite.txt")
+	if err := os.WriteFile(promptPath, []byte("Правь статью {{.URL}}\n{{.OriginalHTML}}"), 0o644); err != nil {
+		t.Fatalf("подготовить промпт: %v", err)
+	}
+	templatePath := filepath.Join(root, "result.md.tmpl")
+	if err := os.WriteFile(templatePath, []byte("{{.Title}}\n{{.URL}}"), 0o644); err != nil {
+		t.Fatalf("подготовить шаблон: %v", err)
+	}
+	flow, err := NewFlow(articles, blog, fakeChats{chat: &fakeChat{answers: []string{originalArticle}}},
+		NewArtifacts(root), constantRule{title: "Новое название"}, promptPath, templatePath, nil)
+	if err != nil {
+		t.Fatalf("NewFlow: %v", err)
+	}
+	if err := flow.Run(context.Background(), "12"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if blog.post.Title != "Новое название" {
+		t.Fatalf("в блоге заголовок %q, ожидалось «Новое название»", blog.post.Title)
+	}
+}
+
+// Кнопка заявки записана в блоге многострочным тегом, и строка её атрибута style выглядит
+// абзацем для проверки покрытия по строкам. Сверка после записи обязана этого не замечать:
+// иначе полностью записанная статья объявляется обрезанной, а прогон — остановленным
+// предохранителем. Проверено на живой пачке: три статьи подряд упали именно так.
+func TestFlowAcceptsMultilineButtonAfterWrite(t *testing.T) {
+	button := "\n<div class=\"service\" style=\"\ncursor:pointer;\n\nbox-shadow:0 10px 24px rgba(0,0,0,.10);\n\">\nЗАЯВКА НА ОБУЧЕНИЕ\n</div>"
+	original := originalArticle + button
+	rewritten := strings.Replace(original, "Удостоверение о повышении квалификации",
+		"Диплом об обучении", 1)
+	articles := &fakeArticles{article: testArticle()}
+	blog := &fakeBlog{post: Post{
+		ID: 777, Title: "Медсестра - обучение Курс с внесением в ФИС ФРДО",
+		ContentHTML: original, Link: "https://dpo-prof.ru/blog/medsestra/",
+	}}
+	flow, _ := newTestFlow(t, articles, blog, &fakeChat{answers: []string{rewritten}})
+
+	if err := flow.Run(context.Background(), "12"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !strings.Contains(strings.Join(articles.calls, " "), "updated:") {
+		t.Fatalf("статья не отмечена переписанной, шаги: %v", articles.calls)
+	}
+	if !strings.Contains(blog.post.ContentHTML, "ЗАЯВКА НА ОБУЧЕНИЕ") {
+		t.Fatal("кнопка заявки не дошла до блога")
+	}
+}
+
+// H1 в теле записи — дубль заголовка страницы: его рисует тема, и второй такой же в тексте
+// виден читателю. Приходит он из самой статьи, поэтому промптом не снимается — правка обязана
+// убирать его кодом, одинаково у всех задач правки.
+func TestFlowDropsHeading1FromRewrite(t *testing.T) {
+	original := "<h1>Медсестра — обучение</h1>\n" + originalArticle
+	articles := &fakeArticles{article: testArticle()}
+	blog := &fakeBlog{post: Post{
+		ID: 777, Title: "Медсестра - обучение Курс с внесением в ФИС ФРДО",
+		ContentHTML: original, Link: "https://dpo-prof.ru/blog/medsestra/",
+	}}
+	// Модель возвращает статью как была, вместе с H1: он ей не мешал и трогать его она
+	// не обязана.
+	flow, _ := newTestFlow(t, articles, blog, &fakeChat{answers: []string{original}})
+
+	if err := flow.Run(context.Background(), "12"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if strings.Contains(strings.ToLower(blog.post.ContentHTML), "<h1") {
+		t.Fatalf("H1 ушёл в блог: %s", blog.post.ContentHTML)
+	}
+	if !strings.Contains(blog.post.ContentHTML, "Кому подходит программа") {
+		t.Fatal("вместе с H1 потерян текст статьи")
+	}
+}
+
+// Задача, которая правит только заголовок, к модели не ходит: в блог уходит прочитанный текст
+// как есть, а чат не открывается вовсе. Промпт при этом не сохраняется — сохранять нечего.
+func TestFlowKeepTextChangesTitleOnly(t *testing.T) {
+	articles := &fakeArticles{article: testArticle()}
+	blog := &fakeBlog{post: Post{
+		ID: 777, Title: "Медсестра - обучение Курс с внесением в ФИС ФРДО",
+		ContentHTML: originalArticle, Link: "https://dpo-prof.ru/blog/medsestra/",
+	}}
+	root := t.TempDir()
+	promptPath := filepath.Join(root, "rewrite.txt")
+	if err := os.WriteFile(promptPath, []byte("Черновик правок {{.OriginalHTML}}"), 0o644); err != nil {
+		t.Fatalf("подготовить промпт: %v", err)
+	}
+	templatePath := filepath.Join(root, "result.md.tmpl")
+	if err := os.WriteFile(templatePath, []byte("{{.Title}}\n{{.URL}}"), 0o644); err != nil {
+		t.Fatalf("подготовить шаблон: %v", err)
+	}
+	rule, err := NewPairRule("Курс с внесением в ФИС ФРДО", "Курс с практикой и внесением в ФИС ФРДО")
+	if err != nil {
+		t.Fatalf("NewPairRule: %v", err)
+	}
+	// Чат без ответов: любое обращение к модели уронило бы тест — этого и добиваемся.
+	flow, err := NewFlow(articles, blog, fakeChats{chat: &fakeChat{}}, NewArtifacts(root), rule,
+		promptPath, templatePath, nil, KeepText())
+	if err != nil {
+		t.Fatalf("NewFlow: %v", err)
+	}
+
+	if err := flow.Run(context.Background(), "12"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if blog.post.Title != "Медсестра - обучение Курс с практикой и внесением в ФИС ФРДО" {
+		t.Fatalf("в блоге заголовок %q", blog.post.Title)
+	}
+	if blog.post.ContentHTML != originalArticle {
+		t.Fatal("текст статьи изменился, а задача обещала трогать только заголовок")
+	}
+	if _, err := os.Stat(filepath.Join(root, "12-medsestra", PromptsFolder, PromptFile)); !os.IsNotExist(err) {
+		t.Fatalf("промпт сохранён, хотя модель не спрашивалась: %v", err)
 	}
 }

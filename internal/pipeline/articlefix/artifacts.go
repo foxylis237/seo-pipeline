@@ -1,4 +1,4 @@
-package pproffix1
+package articlefix
 
 import (
 	"fmt"

@@ -116,6 +116,7 @@ func (c *Client) generate(ctx context.Context, request llm.Request) (llm.Respons
 	// Режим и документы задаются до снимка треда: и то, и другое меняет страницу, но
 	// сообщением не является, а сообщение должно уйти уже в готовый чат.
 	c.applyMode(page, request, newChat)
+	c.applySearch(page, request, newChat)
 	if err := c.attachDocuments(ctx, page, request); err != nil {
 		return llm.Response{}, err
 	}
@@ -129,13 +130,7 @@ func (c *Client) generate(ctx context.Context, request llm.Request) (llm.Respons
 		return llm.Response{}, err
 	}
 
-	if err := c.waitForAnswer(ctx, page, mark); err != nil {
-		c.saveDiagnostics(page, "wait_answer", request.ArticleID)
-		// Проверка Cloudflare приходит и в ответ на уже отправленное сообщение: оно уходит,
-		// а вместо ответа появляется заглушка. Статья 47 стояла так по пять минут.
-		if reason, blocked := c.detectBlocked(page); blocked {
-			return llm.Response{}, c.handleUnavailable(ctx, reason)
-		}
+	if err := c.waitForAnswer(ctx, page, mark, request.ArticleID); err != nil {
 		return llm.Response{}, err
 	}
 	sources, err := c.readAnswerSources(page)
@@ -162,7 +157,7 @@ func (c *Client) generate(ctx context.Context, request llm.Request) (llm.Respons
 // waitForAnswer waits for the generation to finish, reporting progress every heartbeat.
 // Ожидание разбито на короткие интервалы вместо одного длинного, чтобы состояние попадало
 // в лог без второй горутины возле страницы Playwright.
-func (c *Client) waitForAnswer(ctx context.Context, page playwright.Page, mark answerMark) error {
+func (c *Client) waitForAnswer(ctx context.Context, page playwright.Page, mark answerMark, articleID int64) error {
 	started := time.Now()
 	deadline := started.Add(time.Duration(operationTimeout(ctx, defaultResponseTimeout)) * time.Millisecond)
 	state := "waiting"
@@ -174,6 +169,20 @@ func (c *Client) waitForAnswer(ctx context.Context, page playwright.Page, mark a
 			}
 			if expired, checkErr := isSessionExpired(page); checkErr == nil && expired {
 				return sessionExpiredError()
+			}
+			// Диагностика и проверка на челлендж — здесь, пока страница ещё жива.
+			//
+			// Раньше обе стояли у вызывающего, после waitForAnswer, и обе были слепы:
+			// browserError ниже сбрасывает сессию вместе со страницей, поэтому скриншот и
+			// разметка возвращались с "target closed", а detectBlocked на закрытой странице
+			// молча отвечал «не заблокировано». То есть ровно в тот момент, когда надо
+			// отличить занятый сервер от антибота, посмотреть было нечем — проверено на
+			// пачке pprof_fix_2, где три попытки подряд не оставили ни одного снимка.
+			c.saveDiagnostics(page, "wait_answer", articleID)
+			// Проверка Cloudflare приходит и в ответ на уже отправленное сообщение: оно
+			// уходит, а вместо ответа появляется заглушка. Статья 47 стояла так по пять минут.
+			if reason, blocked := c.detectBlocked(page); blocked {
+				return c.handleUnavailable(ctx, reason)
 			}
 			return c.browserError(ctx, "wait for complete DeepSeek answer", fmt.Errorf(
 				"ответ не завершился за %s, последнее состояние %s", time.Since(started).Round(time.Second), state,

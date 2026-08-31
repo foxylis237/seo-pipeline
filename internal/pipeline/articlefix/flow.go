@@ -1,4 +1,14 @@
-package pproffix1
+// Package articlefix — общий поток правки уже опубликованных статей.
+//
+// Задачи правки отличаются от остальных не промптами, а направлением: они не пишут статью, а
+// изменяют существующую запись блога. Отсюда и всё остальное — свой вход (ссылки, а не книга
+// Excel), своя таблица на задачу, свой короткий поток fetch → rewrite → update и полное
+// отсутствие research, структуры, метаданных и обложек.
+//
+// Пакет task-agnostic: имена задач, пути к промптам и правило переименования приходят снаружи
+// готовыми значениями. Своими у задачи правки остаются ровно три вещи — текст промпта,
+// правило переименования и её каталоги; всё остальное живёт здесь и правится один раз.
+package articlefix
 
 import (
 	"context"
@@ -12,6 +22,12 @@ import (
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/generation"
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/taskflow"
 )
+
+// StageRewrite — единственная стадия задач правки: правка опубликованного текста.
+//
+// Она же единственный запрос к модели за прогон. Заголовок моделью не спрашивается: его
+// меняет TitleRule задачи.
+const StageRewrite = "rewrite"
 
 // Post — запись блога в том объёме, который нужен правке.
 //
@@ -80,11 +96,48 @@ type Flow struct {
 	prompt     *template.Template
 	result     *template.Template
 	logger     *slog.Logger
+	// keepText — «текст не трогать»: задача меняет только заголовок. См. KeepText.
+	keepText bool
+	// headingsRewritten — промпт задачи переписывает заголовки разделов. См. RewriteHeadings.
+	headingsRewritten bool
+}
+
+// Option — необязательная настройка потока правки.
+//
+// Вариативные опции, а не новые параметры конструктора: задачи правки отличаются друг от
+// друга по одной черте за раз, и та, что о новой чертe не знает, не должна её называть.
+type Option func(*Flow)
+
+// KeepText оставляет текст статьи нетронутым: в блог уходит тот же HTML, что был прочитан,
+// меняются только заголовок и его поля.
+//
+// Модель при этом не спрашивается вовсе — не «просится вернуть статью как есть». Дословный
+// возврат длинной страницы упирается в тот же предел длины ответа, что и обычная правка, и
+// стоил бы денег ради риска потерять половину текста; а промпт, которому нечего менять,
+// модель всё равно как-то исполнит.
+//
+// Режим переходный: он нужен задаче, у которой регламент правок ещё пишется, а
+// переименование заголовков уже согласовано. Артефакт generated/article.html при этом
+// повторяет original/article.html — это и есть то, что записано в блог.
+func KeepText() Option {
+	return func(f *Flow) { f.keepText = true }
+}
+
+// RewriteHeadings объявляет, что промпт задачи переписывает заголовки разделов, и меняет
+// признак обрыва на структурный без сверки последнего заголовка.
+//
+// Умолчание — сверка дословная (ValidateRewriteCovers): промпт правки обычно запрещает
+// трогать структуру, и пропавший последний заголовок надёжно означает обрыв ответа. Задаче,
+// которая переводит страницу на другую услугу (pprof_fix_5 — на НМО), заголовки менять
+// обязано само задание, и дословная сверка объявляла бы обрывом каждую статью.
+func RewriteHeadings() Option {
+	return func(f *Flow) { f.headingsRewritten = true }
 }
 
 // NewFlow собирает поток. Все зависимости обязательные: необязательных у него нет.
 func NewFlow(repository Articles, blog Blog, chats taskflow.ChatFactory, artifacts Artifacts,
-	rule TitleRule, promptPath, resultTemplatePath string, logger *slog.Logger) (*Flow, error) {
+	rule TitleRule, promptPath, resultTemplatePath string, logger *slog.Logger,
+	options ...Option) (*Flow, error) {
 	if logger == nil {
 		logger = slog.New(slog.DiscardHandler)
 	}
@@ -96,10 +149,40 @@ func NewFlow(repository Articles, blog Blog, chats taskflow.ChatFactory, artifac
 	if err != nil {
 		return nil, err
 	}
-	return &Flow{
+	flow := &Flow{
 		repository: repository, blog: blog, chats: chats, artifacts: artifacts,
 		rule: rule, prompt: prompt, result: result, logger: logger,
-	}, nil
+	}
+	for _, option := range options {
+		option(flow)
+	}
+	return flow, nil
+}
+
+// PromptPlaceholder — метка незаполненного промпта правки.
+//
+// Новая задача правки заводится раньше, чем известен её регламент: каталоги, схема и вход
+// нужны сразу, а текст правок приходит отдельно. Метка отмечает это состояние явно, и
+// EnsurePromptFilled останавливает прогон, пока она на месте: правка идёт в живые статьи и
+// откатывающей команды у неё нет, а промпт без регламента модель всё равно как-то исполнит.
+const PromptPlaceholder = "<!-- ЗАПОЛНИТЬ -->"
+
+// EnsurePromptFilled отвечает, готов ли промпт задачи к прогону.
+//
+// Спрашивается перед первым запросом к модели, а не при сборке потока: `run plan` промпт не
+// отправляет и обязан работать на незаполненной задаче — он затем и нужен, чтобы проверить
+// правило переименования на всей пачке, пока регламент правок ещё пишется.
+func EnsurePromptFilled(path string) error {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("прочитать промпт правки %q: %w", path, err)
+	}
+	if strings.Contains(string(content), PromptPlaceholder) {
+		return fmt.Errorf("промпт правки %q не заполнен: в нём осталась метка %s. "+
+			"Прогон переписывает живые статьи, и по пустому регламенту запускать его нельзя",
+			path, PromptPlaceholder)
+	}
+	return nil
 }
 
 func parseFile(name, path string) (*template.Template, error) {
@@ -173,9 +256,13 @@ func (f *Flow) run(ctx context.Context, article Article) error {
 	if err != nil {
 		return err
 	}
-	promptPath, err := f.artifacts.Save(article.ExternalID, article.Slug, PromptsFolder, PromptFile, prompt)
-	if err != nil {
-		return err
+	// Промпта нет только у режима KeepText: сохранять пустой файл незачем, а слот в базе
+	// пустой строкой честно говорит, что модель не спрашивалась.
+	var promptPath string
+	if prompt != "" {
+		if promptPath, err = f.artifacts.Save(article.ExternalID, article.Slug, PromptsFolder, PromptFile, prompt); err != nil {
+			return err
+		}
 	}
 	rewrittenPath, err := f.artifacts.Save(article.ExternalID, article.Slug, GeneratedFolder, RewrittenHTMLFile, rewritten)
 	if err != nil {
@@ -184,7 +271,8 @@ func (f *Flow) run(ctx context.Context, article Article) error {
 	if err := f.repository.SaveRewritten(ctx, article.ExternalID, promptPath, rewrittenPath); err != nil {
 		return err
 	}
-	logger.Info("правка получена", "stage", "rewrite", "html_runes", len([]rune(rewritten)))
+	logger.Info("правка получена", "stage", "rewrite",
+		"html_runes", len([]rune(rewritten)), "text_unchanged", f.keepText)
 
 	fields, err := f.renamedFields(current)
 	if err != nil {
@@ -200,6 +288,14 @@ func (f *Flow) run(ctx context.Context, article Article) error {
 		return err
 	}
 	return f.repository.MarkUpdated(ctx, article.ExternalID, resultPath)
+}
+
+// covers — признак обрыва этой задачи: дословный или структурный. См. RewriteHeadings.
+func (f *Flow) covers(original, rewritten string) error {
+	if f.headingsRewritten {
+		return ValidateRewriteStructure(original, rewritten)
+	}
+	return ValidateRewriteCovers(original, rewritten)
 }
 
 // fetch читает статью из блога, считает новый заголовок и сохраняет оригинал на диск.
@@ -243,6 +339,12 @@ func (f *Flow) fetch(ctx context.Context, article Article) (Post, string, error)
 
 // rewrite отдаёт статью модели и возвращает отрендеренный промпт и исправленный текст.
 func (f *Flow) rewrite(ctx context.Context, article Article, current Post, logger *slog.Logger) (string, string, error) {
+	// Текст не трогаем — значит, и модель не поднимаем. Возвращается прочитанный HTML как
+	// есть, включая H1: DropHeading1 тоже правка текста, а обещано «только заголовок».
+	if f.keepText {
+		logger.Info("текст статьи не меняется, модель не спрашивается", "stage", StageRewrite)
+		return "", current.ContentHTML, nil
+	}
 	prompt, err := render(f.prompt, PromptData{
 		Title: current.Title, URL: article.SourceURL, OriginalHTML: current.ContentHTML,
 	})
@@ -266,12 +368,17 @@ func (f *Flow) rewrite(ctx context.Context, article Article, current Post, logge
 		Send:     chat.Send,
 		Continue: chat.Continue,
 		Logger:   logger,
-		Complete: func(markup string) error { return ValidateRewriteCovers(current.ContentHTML, markup) },
+		Complete: func(markup string) error { return f.covers(current.ContentHTML, markup) },
 	})
 	if err != nil {
 		return prompt, "", fmt.Errorf("правка статьи: %w", err)
 	}
-	return prompt, rewritten, nil
+	// Заголовок первого уровня из тела записи снимается всегда, у всех задач правки: H1
+	// страницы рисует тема из поля prof_title, и оставшийся в тексте даёт два одинаковых
+	// заголовка подряд. Промптом это не держится — H1 приходит из самой статьи, а промпт
+	// правки её остальной текст трогать запрещает, и модель честно оставляет как было.
+	// Заголовок при этом не теряется: он и так живёт в названии записи и в prof_title.
+	return prompt, generation.DropHeading1(rewritten), nil
 }
 
 // publish записывает правку в блог и сверяет записанное чтением.
@@ -297,7 +404,13 @@ func (f *Flow) publish(ctx context.Context, current Post, title, rewritten strin
 				field.Key, stored.Fields[field.Key], field.Value)
 		}
 	}
-	if err := generation.ValidateHTMLCoversPage(rewritten, stored.ContentHTML); err != nil {
+	// Сверяется структурным правилом правки, а не generation.ValidateHTMLCoversPage: та ждёт
+	// первым аргументом текст страницы и режет пробу по строкам, а здесь обе стороны —
+	// разметка. У кнопки заявки атрибут style записан в несколько строк, и строка
+	// «box-shadow: …» выглядит для неё абзацем, которого в прочитанной записи нет вовсе:
+	// там тег снят целиком. Ловилось это как «в блоге лёг не весь текст» на статье,
+	// записанной полностью.
+	if err := ValidateRewriteCovers(rewritten, stored.ContentHTML); err != nil {
 		return fmt.Errorf("в блоге лёг не весь текст: %w", err)
 	}
 	return nil
@@ -366,6 +479,7 @@ func (f *Flow) Plan(ctx context.Context, article Article) (PlannedChange, error)
 	// Видимый заголовок показывается отдельно от названия записи: это разные значения, и
 	// человек проверяет именно первое — его читают на странице, второе видно только в админке.
 	planned.OldHeader = strings.TrimSpace(current.Fields[HeaderField])
+	planned.OldSEOTitle = strings.TrimSpace(current.Fields[SEOTitleField])
 	// Заголовок, к которому правило не подходит, — не отказ плана, а его содержание: план
 	// затем и нужен, чтобы такие статьи стали видны все сразу, а не по одной на прогоне.
 	newTitle, err := f.rule.Apply(current.Title)
@@ -380,11 +494,23 @@ func (f *Flow) Plan(ctx context.Context, article Article) (PlannedChange, error)
 		return planned, nil //nolint:nilerr // то же: план показывает вопросы, а не падает на них
 	}
 	for _, field := range fields {
-		if field.Key == HeaderField {
+		switch field.Key {
+		case HeaderField:
 			planned.NewHeader = field.Value
+		case SEOTitleField:
+			planned.NewSEOTitle = field.Value
 		}
 	}
 	return planned, nil
+}
+
+// Changes отвечает, изменит ли правка хоть один из трёх заголовков записи.
+//
+// Вопрос не праздный: заголовки живут в трёх разных местах, переименовать могли уже какой-то
+// один, и «название записи не меняется» само по себе не значит «на странице ничего не
+// изменится» — H1 читают со страницы, а не из админки.
+func (p PlannedChange) Changes() bool {
+	return (p.NewTitle != "" && p.NewTitle != p.OldTitle) || p.NewHeader != "" || p.NewSEOTitle != ""
 }
 
 // PlannedChange — то, что покажет `run plan` по одной статье.
@@ -396,8 +522,13 @@ type PlannedChange struct {
 	NewTitle   string
 	// OldHeader и NewHeader — видимый заголовок страницы (поле HeaderField), тот самый H1.
 	// Пустой NewHeader при непустом OldHeader означает, что правило его не меняет.
-	OldHeader    string
-	NewHeader    string
+	OldHeader string
+	NewHeader string
+	// OldSEOTitle и NewSEOTitle — заголовок для поисковой выдачи (SEOTitleField). Правило
+	// меняет и его, значит план обязан его показывать: у записи три заголовка, и совпадать
+	// они не обязаны — переименовать могли уже какой-то один.
+	OldSEOTitle  string
+	NewSEOTitle  string
 	TitleProblem string
 	HTMLRunes    int
 	Headings     int

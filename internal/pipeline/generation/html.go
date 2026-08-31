@@ -91,6 +91,22 @@ func cleanHTMLAnswer(value string) (string, htmlCleanup, error) {
 	return html, cleanup, nil
 }
 
+// StripCodeFence снимает с текста Markdown-обёртку кодового блока.
+//
+// Нужен там, где ответ модели — не разметка, а обычный текст: структуру промпт просит выдать
+// «готовой для копирования одним кликом в кодовом блоке», и модель оборачивает её в ```html.
+// В артефакте это мусор: следующая стадия получает заголовки вперемешку с маркерами.
+func StripCodeFence(value string) string {
+	text := strings.TrimSpace(value)
+	if !strings.Contains(text, "```") {
+		return text
+	}
+	if block := htmlFenceRE.FindStringSubmatch(text); block != nil {
+		return strings.TrimSpace(block[2])
+	}
+	return strings.TrimSpace(dropFenceMarkers(text))
+}
+
 // stripMarkdownFence снимает Markdown-обёртку и возвращает вид того, что было снято.
 //
 // Цельный блок берём только тогда, когда после него не осталось разметки: тогда за ним стоит

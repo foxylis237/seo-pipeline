@@ -43,6 +43,11 @@ type CustomField struct {
 type PostPayload struct {
 	// Title — заголовок записи.
 	Title string
+	// Slug — адрес записи (post_name). Пустое значение означает «пусть площадка соберёт
+	// сама»: WordPress выводит слаг из заголовка, а заголовки у нас русские и длинные,
+	// поэтому адрес получается на всю строку. Задача передаёт сюда короткий латинский слаг
+	// из книги импорта.
+	Slug string
 	// ContentHTML — тело записи. Уходит как есть, без обработки: у пользователя есть право
 	// unfiltered_html, и WordPress сохраняет разметку побайтово.
 	ContentHTML string
@@ -93,7 +98,10 @@ type StoredPost struct {
 	// подставленное площадкой «post», и сравнение с пустым ожиданием было бы ложной
 	// тревогой. Поле нужно тому, кто читает чужую запись, — например, чтобы узнать, каким
 	// типом заведены уже существующие страницы.
-	PostType    string
+	PostType string
+	// Slug — адрес, который у записи в итоге получился. Может отличаться от отправленного:
+	// занятый слаг WordPress дополняет числом.
+	Slug        string
 	ContentHTML string
 	Link        string
 	// TermIDs — термины записи по таксономиям, как их вернул WordPress.
@@ -164,8 +172,8 @@ func (c *Client) GetPost(ctx context.Context, postID int64) (StoredPost, error) 
 		c.cfg.Username,
 		c.cfg.AppPassword,
 		postID,
-		xmlrpcArray{"post_id", "post_title", "post_status", "post_type", "post_content", "link",
-			"terms", "custom_fields", "post_thumbnail"},
+		xmlrpcArray{"post_id", "post_title", "post_name", "post_status", "post_type", "post_content",
+			"link", "terms", "custom_fields", "post_thumbnail"},
 	}
 	if err := c.call(ctx, "wp.getPost", params, &response); err != nil {
 		return StoredPost{}, err
@@ -190,6 +198,13 @@ func (p PostPayload) Verify(stored StoredPost) []Mismatch {
 		}
 	}
 	add("post_title", p.Title, stored.Title)
+	// Слаг сверяется началом, а не равенством: занятый адрес WordPress дополняет числом
+	// («-2»), и это его законное решение, а не потерянное поле. Расхождением считается
+	// только слаг, в котором отправленного не осталось вовсе, — там площадка собрала адрес
+	// сама, и об этом надо знать.
+	if slug := strings.TrimSpace(p.Slug); slug != "" && !strings.HasPrefix(stored.Slug, slug) {
+		mismatches = append(mismatches, Mismatch{Field: "post_name", Expected: slug, Actual: stored.Slug})
+	}
 	add("post_status", p.Status, stored.Status)
 	add("post_content", p.ContentHTML, stored.ContentHTML)
 	category := p.categoryTaxonomy()
@@ -295,6 +310,10 @@ func (p PostPayload) content() xmlrpcStruct {
 		{Name: "terms", Value: terms},
 		{Name: "custom_fields", Value: fields},
 	}
+	// Пустой слаг не отправляется: адрес тогда соберёт сама площадка из заголовка.
+	if slug := strings.TrimSpace(p.Slug); slug != "" {
+		content = append(content, xmlrpcMember{Name: "post_name", Value: slug})
+	}
 	// Ноль не отправляется вовсе: пустой post_thumbnail WordPress понимает как «снять
 	// обложку», и у новой записи это лишнее поле в запросе с несуществующим смыслом.
 	if p.ThumbnailID > 0 {
@@ -307,6 +326,7 @@ func storedPostFromMembers(members map[string]any) StoredPost {
 	post := StoredPost{
 		ID:          int64(intFromValue(members["post_id"])),
 		Title:       stringFromValue(members["post_title"]),
+		Slug:        stringFromValue(members["post_name"]),
 		Status:      stringFromValue(members["post_status"]),
 		PostType:    stringFromValue(members["post_type"]),
 		ContentHTML: stringFromValue(members["post_content"]),

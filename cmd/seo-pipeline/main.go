@@ -27,7 +27,6 @@ import (
 	resultassembly "github.com/foxylis237/seo-pipeline/internal/pipeline/result"
 	"github.com/foxylis237/seo-pipeline/internal/storage"
 	"github.com/foxylis237/seo-pipeline/internal/tasks"
-	"github.com/foxylis237/seo-pipeline/internal/tasks/pproffix1"
 	"github.com/foxylis237/seo-pipeline/internal/tasks/task1"
 )
 
@@ -129,13 +128,15 @@ func main() {
 
 	logger.Info("подключение к PostgreSQL успешно установлено")
 
-	// Задача правки опубликованных статей идёт своей веткой, до общей обвязки: таблицы у неё
-	// свои, и проверка схемы движка искала бы в её схеме article_inputs и article_metadata,
+	// Задачи правки опубликованных статей идут своей веткой, до общей обвязки: таблицы у них
+	// свои, и проверка схемы движка искала бы в их схемах article_inputs и article_metadata,
 	// которых там нет по замыслу. Ветка одна на весь файл и стоит ровно здесь, потому что
-	// пул уже есть, а writer, роутер логов и репозиторий движка этой задаче не нужны.
-	if profile.Name == pproffix1.Name {
+	// пул уже есть, а writer, роутер логов и репозиторий движка этим задачам не нужны.
+	// Условие — признак из профиля, а не имя задачи: следующая задача правки добавляется
+	// своим пакетом и строкой реестра, не трогая этот файл.
+	if profile.ArticleFix != nil {
 		fixLogger := logger.With("task", profile.Name, "operation", command.Name)
-		if fixErr := runPProfFix1(ctx, pprofFix1Deps{
+		if fixErr := runArticleFix(ctx, articleFixDeps{
 			profile: profile, command: command, cfg: cfg, pool: pool, logger: fixLogger, output: os.Stdout,
 		}); fixErr != nil {
 			if isGracefulCancellation(ctx, fixErr) {
@@ -198,6 +199,10 @@ func main() {
 
 	taskStarted := time.Now()
 	taskLogger.Info("task started", "stage", "start")
+	// waitBackground дожидается фоновых задач перед выходом. Отдельно от defer потому, что
+	// команда завершается через os.Exit, который defer не выполняет.
+	waitBackground := func() {}
+
 	switch command.Name {
 	case "errors":
 		err = runErrors(ctx, articleRepository, command.ExternalID, os.Stdout)
@@ -363,6 +368,10 @@ func main() {
 			taskLogger.Info("выгрузка промпта в Google Docs выключена конфигом задачи", "stage", "start")
 		}
 		defer promptPublisher.Wait()
+		// Тот же Wait, но доступный аварийному выходу: упавшая статья заканчивает команду
+		// через os.Exit, а он не выполняет ни одного defer — и документ, за который уже
+		// заплачено генерацией, обрывался на полпути вместе с браузером.
+		waitBackground = promptPublisher.Wait
 		mode, closeLLM, buildErr := buildLLM(ctx, stages, availability, generationDeps{
 			repository: articleRepository, writer: writer, result: resultService, logger: taskLogger,
 			promptPublisher: promptPublisher, profile: profile, debugDirs: debugDirs,
@@ -587,6 +596,7 @@ func main() {
 	}
 
 	if err != nil {
+		waitBackground()
 		if isGracefulCancellation(ctx, err) {
 			taskLogger.Info("завершение приложения по сигналу", "stage", "shutdown")
 			return

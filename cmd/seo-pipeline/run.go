@@ -488,6 +488,25 @@ func collectCleanedKeywords(
 			newKeyssoRunError(selected.ID, "validate_result", stageStarted, "", collected.CollectedCount, 0, fmt.Errorf("Keys.so вернул пустой список очищенных запросов")),
 		)
 	}
+	// Бедная выдача — это не выдача. У свежей или узкой темы страница конкурента отдаёт
+	// один-два запроса, и строить на них семантику статьи нечем: проверка соответствия
+	// такой список всё равно отвергнет, а решать по нему «браузер показал чужой поиск»
+	// недостоверно. Поэтому источник меняется так же, как при пустом ответе, — запросы
+	// подбирает модель, а очистка остаётся той же формой Keys.so.
+	if fallback != nil && len(collected.CleanedKeywords) < minKeysSOKeywords {
+		stageLogger.Warn("Keys.so вернул слишком мало запросов, подбираем их моделью",
+			"stage", "keysso_collect", "cleaned_count", len(collected.CleanedKeywords),
+			"minimum", minKeysSOKeywords)
+		report.Pass("keysso_collect", map[string]any{
+			"source":          diagnostics.KeywordSourceKeysSO,
+			"collected_count": collected.CollectedCount,
+			"cleaned_count":   len(collected.CleanedKeywords),
+			"below_minimum":   true,
+		})
+		return collectFallbackKeywords(ctx, articleRepository, logger, stageLogger, artifacts,
+			selected, trace, keyssoService, fallback, report, stageStarted,
+			fmt.Errorf("Keys.so вернул %d запросов при минимуме %d", len(collected.CleanedKeywords), minKeysSOKeywords))
+	}
 	report.Pass("keysso_collect", map[string]any{
 		"source":          diagnostics.KeywordSourceKeysSO,
 		"collected_count": collected.CollectedCount,
@@ -620,6 +639,11 @@ func saveArsenkinDiagnostics(
 	savePrepareDiagnostics(logger, artifacts, selected, diagnostics.ArsenkinFile,
 		diagnostics.NewArsenkinSnapshot(trace, submitted, result, duration))
 }
+
+// minKeysSOKeywords — сколько очищенных запросов должно принести Keys.so, чтобы считать сбор
+// состоявшимся. Меньше трёх — тема узкая или свежая, у страницы конкурента семантики нет, и
+// строить на таком списке нечего: запросы подбирает модель.
+const minKeysSOKeywords = 3
 
 // checkKeywordRelevance verifies that collected queries are about the article at hand.
 // Keys.so returns the queries of the competitor page named in reference_url, so with no

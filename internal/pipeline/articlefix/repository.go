@@ -1,4 +1,4 @@
-package pproffix1
+package articlefix
 
 import (
 	"context"
@@ -11,7 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Статусы статьи. Их четыре, и они те же, что у остальных задач: перевод слов на другой
+// Статусы статьи. Их четыре, и они те же, что у задач генерации: перевод слов на другой
 // язык ради «правки вместо генерации» сделал бы логи двух задач несравнимыми.
 const (
 	StatusPending    = "pending"
@@ -44,13 +44,22 @@ type Article struct {
 // блоге отменить нельзя, и второй проход отправил бы модели её же собственный вывод.
 func (a Article) Rewritten() bool { return a.UpdatedPostAt != nil }
 
-// Repository — доступ к таблице articles схемы pprof_fix_1.
+// Repository — доступ к таблице articles схемы задачи правки.
 //
 // Свой, а не общий repository.ArticleRepository: у той таблицы полтора десятка колонок про
-// research, структуру и метаданные, которых у этой задачи нет вовсе.
-type Repository struct{ pool *pgxpool.Pool }
+// research, структуру и метаданные, которых у задач правки нет вовсе. Таблица у каждой задачи
+// своя — разводит их search_path, — а запросы к ней общие, поэтому имя задачи нужно только
+// сообщениям: подсказка «примени миграцию» обязана называть ту схему, в которой человек сейчас.
+type Repository struct {
+	pool *pgxpool.Pool
+	task string
+}
 
-func NewRepository(pool *pgxpool.Pool) *Repository { return &Repository{pool: pool} }
+// NewRepository собирает доступ к таблице задачи. task — подчёркнутое имя задачи
+// (pprof_fix_1): оно же имя схемы PostgreSQL и имя каталога миграций.
+func NewRepository(pool *pgxpool.Pool, task string) *Repository {
+	return &Repository{pool: pool, task: task}
+}
 
 // expectedColumns — колонки, которые обязаны быть в схеме задачи.
 //
@@ -94,7 +103,7 @@ func (r *Repository) EnsureSchema(ctx context.Context) error {
 		return fmt.Errorf("схема PostgreSQL задачи %s не готова (нет: %s). Применить:\n"+
 			"  docker exec -i seo-postgres psql -U seo -d seo -c 'CREATE SCHEMA IF NOT EXISTS %s'\n"+
 			"  docker exec -i seo-postgres psql -U seo -d seo -v ON_ERROR_STOP=1 -c 'SET search_path TO %s' -f - < migrations/%s/000001_schema.up.sql",
-			Name, strings.Join(missing, ", "), Name, Name, Name)
+			r.task, strings.Join(missing, ", "), r.task, r.task, r.task)
 	}
 	return nil
 }
@@ -218,6 +227,29 @@ func (r *Repository) MarkFailed(ctx context.Context, externalID string, cause er
 	return r.exec(ctx, externalID, `UPDATE articles
 		SET status = $2, error_message = $3, updated_at = NOW() WHERE external_id = $1`,
 		externalID, StatusFailed, cause.Error())
+}
+
+// Count возвращает число статей задачи. Нужен reset: масштаб удаления человек должен
+// увидеть до подтверждения, а не после.
+func (r *Repository) Count(ctx context.Context) (int, error) {
+	var count int
+	if err := r.pool.QueryRow(ctx, `SELECT count(*) FROM articles`).Scan(&count); err != nil {
+		return 0, fmt.Errorf("посчитать статьи задачи: %w", err)
+	}
+	return count, nil
+}
+
+// Reset очищает таблицу задачи и обнуляет счётчик идентификаторов.
+//
+// TRUNCATE с RESTART IDENTITY, а не DELETE: после сброса задача начинается с нуля, и
+// внутренние идентификаторы должны начинаться с единицы — иначе номера в логах продолжают
+// прошлую жизнь и сравнивать прогоны становится не с чем. Блог этим не затрагивается:
+// правки уже опубликованы, и вернуть их приложение не умеет.
+func (r *Repository) Reset(ctx context.Context) error {
+	if _, err := r.pool.Exec(ctx, `TRUNCATE TABLE articles RESTART IDENTITY`); err != nil {
+		return fmt.Errorf("очистить таблицу задачи: %w", err)
+	}
+	return nil
 }
 
 func (r *Repository) exec(ctx context.Context, externalID, query string, args ...any) error {

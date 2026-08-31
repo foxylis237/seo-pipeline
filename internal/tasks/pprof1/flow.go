@@ -64,6 +64,7 @@ type Flow struct {
 	*taskflow.Base
 	repository Repository
 	writer     Writer
+	names      LinkNames
 }
 
 // NewFlow собирает поток. publisher необязателен и может быть nil.
@@ -71,12 +72,47 @@ type Flow struct {
 // Репозиторий и writer уходят в общий каркас и остаются здесь: каркасу от них нужны чтение
 // структуры и запись ошибки, а слоты артефактов — дело самого потока.
 func NewFlow(repository Repository, writer Writer, chats taskflow.ChatFactory,
-	prompts taskflow.PromptRenderer, logger *slog.Logger, publisher taskflow.PromptPublisher) *Flow {
+	prompts taskflow.PromptRenderer, logger *slog.Logger, publisher taskflow.PromptPublisher,
+	names LinkNames) *Flow {
 	return &Flow{
 		Base:       taskflow.NewBase(repository, writer, chats, prompts, logger, publisher),
 		repository: repository,
 		writer:     writer,
+		names:      names,
 	}
+}
+
+// LinkNames отдаёт название программы по адресу её страницы.
+//
+// Интерфейс объявлен здесь, у потребителя: потоку нужно ровно название, а откуда оно взято —
+// со страницы сайта или из подмены в тесте — его не касается. nil означает прежнее поведение:
+// в промпт уходят одни адреса.
+type LinkNames interface {
+	Name(ctx context.Context, url string) (string, error)
+}
+
+// namedLinks дополняет список перелинковки названиями программ с сайта.
+//
+// Отказ страницы стадию не роняет: за генерацию уже заплачено, а без названия модель всё ещё
+// может восстановить его из адреса — хуже, но не фатально. Поэтому ошибка идёт в лог, а ссылка
+// уходит в промпт голой.
+func (f *Flow) namedLinks(ctx context.Context, logger *slog.Logger, links string) string {
+	urls := generation.LinkURLs(links)
+	if f.names == nil || len(urls) == 0 {
+		return links
+	}
+	lines := make([]string, 0, len(urls))
+	for _, url := range urls {
+		name, err := f.names.Name(ctx, url)
+		if err != nil || strings.TrimSpace(name) == "" {
+			logger.Warn("название программы не получено, ссылка уходит без него",
+				"stage", "html_generation", "url", url, "error", err)
+			lines = append(lines, url)
+			continue
+		}
+		lines = append(lines, strings.TrimSpace(name)+" — "+url)
+	}
+	return strings.Join(lines, "\n")
 }
 
 // RunStructure выполняет чат 1. Отдельный чат нужен потому, что структура — вход для всей
@@ -109,6 +145,9 @@ func (f *Flow) RunStructure(ctx context.Context, externalID string) error {
 	if err != nil {
 		return f.Fail(ctx, logger, input.Article, "structure_generation", err)
 	}
+	// Промпт просит структуру «готовой для копирования одним кликом в кодовом блоке», и модель
+	// оборачивает её в ```html. Для артефакта и для следующей стадии это мусор.
+	structure = generation.StripCodeFence(structure)
 	pending, err := f.writer.StageStructure(input.Article.ExternalID, input.Article.Slug, prompt, structure)
 	if err != nil {
 		return f.Fail(ctx, logger, input.Article, "save_structure", err)
@@ -193,12 +232,14 @@ func (f *Flow) runArticleChat(ctx context.Context, logger *slog.Logger, input ar
 		StageExpert, expertData(input, structure)); err != nil {
 		return out, f.Fail(ctx, logger, input.Article, "article_generation", err)
 	}
+	out.expertArticle = generation.NormalizeHeadings(out.expertArticle)
 	logger.Info("expert article generated", "stage", "article_generation", "prompt_size", len([]rune(out.expertPrompt)))
 
 	if out.editorPrompt, out.editedArticle, err = f.Message(ctx, chat.Continue,
 		StageSEOEditor, editorData(input)); err != nil {
 		return out, f.Fail(ctx, logger, input.Article, "seo_editing", err)
 	}
+	out.editedArticle = generation.NormalizeHeadings(out.editedArticle)
 	logger.Info("seo editing completed", "stage", "seo_editing")
 
 	if out.infoPrompt, out.infoText, err = f.Message(ctx, chat.Continue,
@@ -218,6 +259,9 @@ func (f *Flow) runArticleChat(ctx context.Context, logger *slog.Logger, input ar
 		StageReview, struct{}{}); err != nil {
 		return out, f.Fail(ctx, logger, input.Article, "article_review", err)
 	}
+	// Запись заголовков приводится к одному виду до сохранения: стадия html расставляет теги
+	// по ней, а модель за один прогон свободно переходит с «H2 - » на «H2:» и на Markdown.
+	out.finalArticle = generation.NormalizeHeadings(out.finalArticle)
 	logger.Info("article review completed", "stage", "article_review")
 	return out, nil
 }
@@ -315,14 +359,17 @@ func (f *Flow) RunHTML(ctx context.Context, externalID string) error {
 		return f.Fail(ctx, logger, input.Article, "html_generation", err)
 	}
 
-	prompt, err := f.Render(StageHTML, htmlData(input, finalText))
+	prompt, err := f.Render(StageHTML, htmlData(input, finalText, f.namedLinks(ctx, logger, input.Links)))
 	if err != nil {
 		return f.Fail(ctx, logger, input.Article, "html_generation", err)
 	}
 	// Чат разметки принимает больше одного сообщения: оборванный ответ дописывается
 	// продолжением той же стадии, а чат роутера принимает ровно столько сообщений, сколько
 	// стадий ему названо при создании.
-	chat, err := f.NewChat(ctx, input.Article.ID, generation.HTMLChatStages(StageHTML)...)
+	// Чат открывается на два полных набора сообщений: первый ответ со своими продолжениями и
+	// ремонт перелинковки со своими. Ремонт — такой же ответ модели и обрывается так же.
+	htmlStages := append(generation.HTMLChatStages(StageHTML), generation.HTMLChatStages(StageHTML)...)
+	chat, err := f.NewChat(ctx, input.Article.ID, htmlStages...)
 	if err != nil {
 		return f.Fail(ctx, logger, input.Article, "html_generation", err)
 	}
@@ -333,6 +380,9 @@ func (f *Flow) RunHTML(ctx context.Context, externalID string) error {
 	html, err := generation.BuildHTMLPage(ctx, generation.HTMLPageRequest{
 		Page:   finalText,
 		Prompt: prompt,
+		// Неполная разметка стадию не роняет: пересобирать её целиком дороже, чем дописать
+		// хвост руками, а предупреждение в логе показывает, что дописывать.
+		AcceptIncomplete: true,
 		Send: func(ctx context.Context, message string) (string, error) {
 			return f.Answer(ctx, chat.Send, message, StageHTML)
 		},
@@ -344,6 +394,7 @@ func (f *Flow) RunHTML(ctx context.Context, externalID string) error {
 	if err != nil {
 		return f.Fail(ctx, logger, input.Article, "html_generation", err)
 	}
+	html = f.completeHTMLPage(ctx, logger, chat, finalText, input.Links, html)
 	pending, err := f.writer.StageHTML(input.Article.ExternalID, input.Article.Slug, prompt, html)
 	if err != nil {
 		return f.Fail(ctx, logger, input.Article, "save_html", err)
@@ -357,4 +408,65 @@ func (f *Flow) RunHTML(ctx context.Context, externalID string) error {
 	logger.Info("html generation completed", "stage", "html_generation",
 		"duration_ms", time.Since(started).Milliseconds(), "result_path", pending.Paths.HTMLPath)
 	return nil
+}
+
+// completeHTMLPage доводит разметку до требований страницы блога.
+//
+// Правило здесь одно: чинить, но не отказывать. Ни одна из проверок не имеет права уронить
+// стадию — за генерацию уже заплачено, и статья с неидеальной разметкой полезнее, чем
+// отсутствие статьи.
+//
+// Лид возвращается кодом, без запроса к модели: у длинной статьи разметка не помещается в
+// один ответ, и просьба «верни страницу заново» обрывалась бы ровно так же, как первый ответ.
+// Ссылки перелинковки код вставить не может — анкор придумывать некому, — поэтому недостающие
+// просят у модели одним заходом, и он идёт через то же дописывание, что и первый ответ. Не
+// вставленные и после этого ссылки остаются предупреждением в логе.
+func (f *Flow) completeHTMLPage(ctx context.Context, logger *slog.Logger, chat taskflow.Chat,
+	page, links, markup string) string {
+	markup = generation.CleanBlogMarkup(generation.DropHeading1(markup))
+	if !generation.LeadKept(page, markup) {
+		markup = generation.RestoreLead(page, markup)
+		logger.Warn("вводный абзац возвращён в разметку кодом", "stage", "html_generation")
+	}
+	if left := generation.LeftoverBlockMarkers(markup); len(left) > 0 {
+		logger.Warn("вёрстка не узнала метки визуальных блоков, они остались в разметке текстом",
+			"stage", "html_generation", "markers", strings.Join(left, ", "))
+	}
+	missing := generation.MissingInternalLinks(markup, links)
+	if len(missing) == 0 {
+		return markup
+	}
+	logger.Warn("в разметке нет части ссылок перелинковки, просим модель их добавить",
+		"stage", "html_generation", "missing_links", len(missing))
+	repaired, err := generation.BuildHTMLPage(ctx, generation.HTMLPageRequest{
+		Page:   page,
+		Prompt: generation.RepairHTMLPrompt(missing),
+		Send: func(ctx context.Context, message string) (string, error) {
+			return f.Answer(ctx, chat.Continue, message, StageHTML)
+		},
+		Continue: func(ctx context.Context, message string) (string, error) {
+			return f.Answer(ctx, chat.Continue, message, StageHTML)
+		},
+		Logger: logger,
+	})
+	if err != nil {
+		logger.Warn("исправленная разметка не получена, остаётся прежняя",
+			"stage", "html_generation", "error", err)
+		return markup
+	}
+	repaired = generation.CleanBlogMarkup(generation.DropHeading1(repaired))
+	repaired = generation.RestoreLead(page, repaired)
+	// Исправленную разметку берём, только если она и правда лучше: ремонт вправе выйти
+	// короче или потерять хвост, и менять целую страницу на половину смысла нет.
+	if len(generation.MissingInternalLinks(repaired, links)) >= len(missing) ||
+		len([]rune(repaired)) < len([]rune(markup))/2 {
+		logger.Warn("исправленная разметка не лучше прежней, остаётся прежняя",
+			"stage", "html_generation")
+		return markup
+	}
+	if left := generation.MissingInternalLinks(repaired, links); len(left) > 0 {
+		logger.Warn("часть ссылок перелинковки в разметку так и не попала",
+			"stage", "html_generation", "missing_links", len(left))
+	}
+	return repaired
 }

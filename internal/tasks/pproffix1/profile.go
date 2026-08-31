@@ -1,14 +1,16 @@
-// Package pproffix1 задаёт конфигурацию задачи pprof_fix_1 и её поток правки.
+// Package pproffix1 задаёт конфигурацию задачи pprof_fix_1.
 //
-// Задача отличается от остальных не промптами, а направлением: она не пишет статью, а
-// изменяет уже опубликованную. Отсюда и всё остальное — свой вход (ссылки, а не книга
-// Excel), свои таблицы, свой короткий поток fetch → rewrite → update и полное отсутствие
-// research, структуры, метаданных и обложек.
+// Кода потока здесь нет: правку опубликованных статей целиком делает общий движок
+// internal/pipeline/articlefix. Своими у задачи остаются каталоги, схема PostgreSQL, текст
+// промпта и правило переименования заголовков — всё это данные, а не логика.
 //
-// От pprof_1 и pprof_2 пакет не зависит и зависеть не должен.
+// От остальных задач пакет не зависит и зависеть не должен.
 package pproffix1
 
-import "github.com/foxylis237/seo-pipeline/internal/tasks"
+import (
+	"github.com/foxylis237/seo-pipeline/internal/pipeline/articlefix"
+	"github.com/foxylis237/seo-pipeline/internal/tasks"
+)
 
 // Имя задачи в двух формах: подчёркнутая идёт в логи, каталоги и схему PostgreSQL,
 // дефисная — то, что человек пишет в CLI и в make.
@@ -17,14 +19,8 @@ const (
 	Command = "pprof-fix-1"
 )
 
-// StageRewrite — единственная стадия задачи: правка опубликованного текста.
-//
-// Она же единственный запрос к модели за прогон. Заголовок моделью не спрашивается: его
-// меняет правило переименования (TitleRule), выведенное из одной пары «было — стало».
-const StageRewrite = "rewrite"
-
-// Stages — стадии, без которых схема задачи неполна.
-var Stages = []string{StageRewrite}
+// Stages — стадии, без которых схема задачи неполна. Стадия одна: правка.
+var Stages = []string{articlefix.StageRewrite}
 
 // Пути задачи. Собраны здесь, а не разбросаны по вызовам: правило раскладки одно.
 const (
@@ -60,5 +56,11 @@ func Profile() tasks.Profile {
 		EnvPrefix:            "PPROF_FIX_1_",
 		WithoutMetadataStage: true,
 		LLMStages:            Stages,
+		// Непустое поле и есть признак задачи правки: по нему composition root уводит её на
+		// поток articlefix, минуя таблицы и проверки движка генерации.
+		ArticleFix: &tasks.ArticleFix{
+			RewritePromptPath: RewritePromptPath,
+			TitleRulePath:     TitleRulePath,
+		},
 	}
 }

@@ -181,6 +181,9 @@ func (c *fakeWPClient) CreatePost(_ context.Context, payload wordpress.PostPaylo
 	}
 	stored := wordpress.StoredPost{
 		ID: 21602, Title: payload.Title, Status: payload.Status, ContentHTML: payload.ContentHTML,
+		// Слаг подставная площадка возвращает тем же, каким его отправили: занятый адрес
+		// WordPress дополнил бы числом, и это отдельный случай — он проверен у сверки.
+		Slug: payload.Slug,
 		Link: "https://example.test/blog/razryady/",
 		// Таксономия берётся та же, что уйдёт в запросе: пустая означает встроенную
 		// category — ровно так её подставляет интеграция, и сверка ищет термины по ней же.
@@ -1078,5 +1081,21 @@ func TestPublishPlanOnEmptySelection(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "нечего") {
 		t.Fatalf("отчёт: %q", out.String())
+	}
+}
+
+// Слаг записи берётся из книги импорта и приводится к тому виду, который WordPress не станет
+// переписывать: адрес из русского заголовка получается на всю строку, ради этого поле и есть.
+func TestWordPressSlug(t *testing.T) {
+	for value, want := range map[string]string{
+		"obyazannosti-gornorabochego":      "obyazannosti-gornorabochego",
+		"  Obuchenie_Na Gazosvarshchika  ": "obuchenie-na-gazosvarshchika",
+		"perepodgotovka//gornorabochij/":   "perepodgotovka-gornorabochij",
+		"обязанности":                      "",
+		"":                                 "",
+	} {
+		if got := wordPressSlug(value); got != want {
+			t.Errorf("wordPressSlug(%q) = %q, ожидалось %q", value, got, want)
+		}
 	}
 }

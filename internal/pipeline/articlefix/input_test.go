@@ -1,6 +1,7 @@
-package pproffix1
+package articlefix
 
 import (
+	"os"
 	"path/filepath"
 	"strconv"
 	"testing"
@@ -109,5 +110,28 @@ func TestParseWorkbookReadsHyperlinkBehindText(t *testing.T) {
 	}
 	if len(sources) != 1 || sources[0].Slug != "medsestra-v-shkole" {
 		t.Fatalf("книга с гиперссылкой разобрана как %+v", sources)
+	}
+}
+
+// README лежит в каталоге входа у всех задач правки и объясняет, что сюда класть.
+// Входным файлом он не считается: иначе каталог с README и книгой выглядит неоднозначным
+// и импорт не начинается вовсе.
+func TestResolveInputFileSkipsREADME(t *testing.T) {
+	directory := t.TempDir()
+	book := filepath.Join(directory, "input-fix-3.xlsx")
+	for _, name := range []string{"README.md", "readme.txt"} {
+		if err := os.WriteFile(filepath.Join(directory, name), []byte("описание каталога"), 0o600); err != nil {
+			t.Fatalf("подготовить %s: %v", name, err)
+		}
+	}
+	if err := os.WriteFile(book, []byte("книга"), 0o600); err != nil {
+		t.Fatalf("подготовить книгу: %v", err)
+	}
+	resolved, err := ResolveInputFile("", directory)
+	if err != nil {
+		t.Fatalf("ResolveInputFile: %v", err)
+	}
+	if resolved != book {
+		t.Fatalf("выбран %q, ожидалась книга %q", resolved, book)
 	}
 }

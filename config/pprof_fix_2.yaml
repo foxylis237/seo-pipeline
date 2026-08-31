@@ -1,0 +1,35 @@
+# Схема стадий pprof_fix_2.
+#
+# Стадия одна: rewrite. Она же единственный запрос к модели за прогон — задача не пишет
+# статью, а правит уже опубликованную, и всё остальное в прогоне делает код: статью он
+# читает из блога, заголовок меняет правилом переименования (tasks/pprof_fix_2/title_rule.txt),
+# результат возвращает в ту же запись.
+#
+# Провайдер один, наложения нет: выбирать между схемами не из чего.
+llm:
+  providers:
+    deepseek_web:
+      type: deepseek_web
+      chat_url: https://chat.deepseek.com/
+      login_url: https://chat.deepseek.com/sign_in
+      profile_dir: data/browser/deepseek
+      headless: true
+      # Один диалог на статью: продолжение оборванного ответа обязано идти в той же беседе,
+      # иначе модель не помнит, где остановилась.
+      single_chat_per_article: true
+
+  stages:
+    # Правка опубликованной статьи. Ответ — исправленная разметка целиком.
+    #
+    # Сроки заметно больше, чем у стадий генерации: в промпт уходит вся статья, а ответ
+    # длиннее промпта. Оборванный ответ дописывается продолжением того же чата — до двух раз,
+    # поэтому бюджет стадии рассчитан на три сообщения.
+    rewrite:
+      targets:
+        - { provider: deepseek_web, model: deepseek-web }
+      prompt: tasks/pprof_fix_2/prompts/rewrite.txt
+      mode: default
+      temperature: 0.1
+      max_tokens: 16000
+      timeout: 1200s
+      attempt_timeout: 420s

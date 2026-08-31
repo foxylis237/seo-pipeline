@@ -421,3 +421,67 @@ func TestVerifyCatchesChangedTermsAndStatus(t *testing.T) {
 		t.Fatalf("расхождений %d, ожидалось 3 (status, category, post_tag): %v", len(mismatches), mismatches)
 	}
 }
+
+// payloadRequestBody отправляет нагрузку в подставной WordPress и возвращает тело запроса.
+func payloadRequestBody(t *testing.T, payload PostPayload) string {
+	t.Helper()
+	var body string
+	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		body = string(raw)
+		w.Header().Set("Content-Type", "text/xml")
+		fmt.Fprint(w, methodResponse(`<value><string>21602</string></value>`))
+	})
+	if _, err := client.CreatePost(context.Background(), payload); err != nil {
+		t.Fatalf("создать запись: %v", err)
+	}
+	return body
+}
+
+// Слаг уходит отдельным полем: заголовки у статей русские и длинные, и адрес, собранный
+// площадкой из заголовка, получается на всю строку.
+func TestPostPayloadSendsSlug(t *testing.T) {
+	body := payloadRequestBody(t, PostPayload{
+		Title: "Обязанности горнорабочего", ContentHTML: articleHTML,
+		Status: PostStatusPublish, CategoryID: 5, Slug: "obyazannosti-gornorabochego",
+	})
+	if !strings.Contains(body, "post_name") || !strings.Contains(body, "obyazannosti-gornorabochego") {
+		t.Fatalf("слаг не ушёл в запрос: %s", body)
+	}
+}
+
+// Пустой слаг не отправляется вовсе — адрес тогда собирает WordPress, как и раньше.
+func TestPostPayloadSkipsEmptySlug(t *testing.T) {
+	body := payloadRequestBody(t, PostPayload{
+		Title: "Обязанности горнорабочего", ContentHTML: articleHTML,
+		Status: PostStatusPublish, CategoryID: 5,
+	})
+	if strings.Contains(body, "post_name") {
+		t.Fatalf("пустой слаг ушёл в запрос: %s", body)
+	}
+}
+
+// Занятый слаг WordPress дополняет числом — это его решение, а не потерянное поле.
+func TestVerifyAcceptsSuffixedSlug(t *testing.T) {
+	payload := PostPayload{Title: "Заголовок", Status: PostStatusPublish, Slug: "obyazannosti-gornorabochego"}
+	stored := StoredPost{Title: "Заголовок", Status: PostStatusPublish, Slug: "obyazannosti-gornorabochego-2"}
+	for _, mismatch := range payload.Verify(stored) {
+		if mismatch.Field == "post_name" {
+			t.Fatalf("слаг с числовым хвостом сочтён расхождением: %s", mismatch)
+		}
+	}
+}
+
+// А вот адрес, в котором отправленного не осталось вовсе, — расхождение: площадка собрала
+// его сама, и об этом надо знать.
+func TestVerifyReportsReplacedSlug(t *testing.T) {
+	payload := PostPayload{Title: "Заголовок", Status: PostStatusPublish, Slug: "obyazannosti-gornorabochego"}
+	stored := StoredPost{Title: "Заголовок", Status: PostStatusPublish, Slug: "dolzhnostnaya-instrukciya"}
+	var found bool
+	for _, mismatch := range payload.Verify(stored) {
+		found = found || mismatch.Field == "post_name"
+	}
+	if !found {
+		t.Fatal("подменённый площадкой слаг не попал в расхождения")
+	}
+}

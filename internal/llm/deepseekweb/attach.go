@@ -56,6 +56,31 @@ func (c *Client) applyMode(page playwright.Page, request llm.Request, newChat bo
 	}
 }
 
+// applySearch включает поиск в интернете, если стадия его просит.
+//
+// Переключатель, как и режим, относится к чату целиком, поэтому трогается только на новом
+// чате. Ненайденная кнопка стадию не роняет по той же причине, что и ненайденный режим: за
+// прогон уже заплачено, а ответ без поиска лучше отказа. Но в лог это идёт предупреждением —
+// промпт в таком прогоне просит источники, которых модель не открывала.
+func (c *Client) applySearch(page playwright.Page, request llm.Request, newChat bool) {
+	if !request.Search || !newChat {
+		return
+	}
+	value, err := page.Evaluate(toggleSearchJS, map[string]any{"selector": searchToggleSelector})
+	if err != nil {
+		c.logger.Warn("DeepSeek search was not switched on", "error", err)
+		return
+	}
+	result, _ := value.(string)
+	switch result {
+	case "clicked", "already":
+		c.stage("enable_search", "result", result)
+	default:
+		c.saveDiagnostics(page, "enable_search", request.ArticleID)
+		c.logger.Warn("DeepSeek search toggle was not found on the page", "result", result)
+	}
+}
+
 // attachDocuments прикрепляет документы стадии к сообщению, которое сейчас будет отправлено.
 //
 // Отсутствие документа — отказ, а не предупреждение: промпт написан в расчёте на регламент,

@@ -1,4 +1,4 @@
-package pproffix1
+package articlefix
 
 import (
 	"fmt"
@@ -179,6 +179,16 @@ func ParseWorkbook(path string) ([]Source, error) {
 	return sourcesFromLines(lines)
 }
 
+// documentationFile отвечает, описывает ли файл сам каталог, а не пачку статей.
+//
+// README лежит рядом со входом у всех задач правки и объясняет, что сюда класть. Входным
+// файлом он не является ни при каком расширении, поэтому в выбор не попадает: иначе каталог
+// с README и книгой считается неоднозначным, и импорт не начинается вовсе.
+func documentationFile(name string) bool {
+	base := strings.TrimSuffix(name, filepath.Ext(name))
+	return strings.EqualFold(base, "README")
+}
+
 // ResolveInputFile выбирает единственный входной файл задачи.
 //
 // Правило то же, что у книги Excel у остальных задач: каталог задаёт профиль, имя файла не
@@ -197,7 +207,7 @@ func ResolveInputFile(explicitPath, directory string) (string, error) {
 	}
 	var candidates []string
 	for _, entry := range entries {
-		if entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+		if entry.IsDir() || strings.HasPrefix(entry.Name(), ".") || documentationFile(entry.Name()) {
 			continue
 		}
 		switch strings.ToLower(filepath.Ext(entry.Name())) {

@@ -361,6 +361,7 @@ func buildWordPressPayload(
 	}
 	return wordpress.PostPayload{
 		Title:            collapseSpaces(input.Article.Title),
+		Slug:             wordPressSlug(input.Article.Slug),
 		ContentHTML:      contentHTML,
 		Status:           wordpress.PostStatusPublish,
 		PostType:         mapped.PostType,
@@ -755,6 +756,7 @@ func runWordPressPublishPlan(ctx context.Context, deps wordPressPublishDeps, ext
 
 	fmt.Fprintln(out, "Запись:")
 	fmt.Fprintf(out, "  %-22s %s\n", "post_title", payload.Title)
+	fmt.Fprintf(out, "  %-22s %s\n", "post_name", wordPressPlanSlug(payload.Slug))
 	fmt.Fprintf(out, "  %-22s %s\n", "post_status", payload.Status)
 	fmt.Fprintf(out, "  %-22s %s\n", "post_type", wordPressPlanPostType(plan.PostType))
 	fmt.Fprintf(out, "  %-22s %d символов из %s\n", "post_content", plan.ContentRunes, plan.HTMLPath)
@@ -902,4 +904,52 @@ func truncateForPlan(value string, limit int) string {
 		return value
 	}
 	return string(runes[:limit]) + "…"
+}
+
+// wordPressSlug готовит адрес записи из слага книги импорта.
+//
+// Слаг там уже латинский и короткий («obyazannosti-gornorabochego») — тот же, по которому
+// названы каталоги артефактов. Приводится он на всякий случай: регистр, пробелы и лишние
+// дефисы адрес не улучшают, а всё, что WordPress всё равно перекодировал бы, отбрасывается.
+// Пустой результат — законное состояние: тогда адрес соберёт площадка из заголовка, как и
+// было до появления этого поля.
+func wordPressSlug(value string) string {
+	lowered := strings.ToLower(strings.TrimSpace(value))
+	var slug strings.Builder
+	for _, symbol := range lowered {
+		switch {
+		case symbol >= 'a' && symbol <= 'z', symbol >= '0' && symbol <= '9':
+			slug.WriteRune(symbol)
+		case symbol == '-', symbol == '_', symbol == ' ', symbol == '/':
+			slug.WriteRune('-')
+		}
+	}
+	return strings.Trim(collapseDashes(slug.String()), "-")
+}
+
+// collapseDashes схлопывает подряд идущие дефисы: «обязанности — оператора» дала бы «---».
+func collapseDashes(value string) string {
+	var out strings.Builder
+	previousDash := false
+	for _, symbol := range value {
+		if symbol == '-' {
+			if previousDash {
+				continue
+			}
+			previousDash = true
+		} else {
+			previousDash = false
+		}
+		out.WriteRune(symbol)
+	}
+	return out.String()
+}
+
+// wordPressPlanSlug объясняет пустой слаг в сухом прогоне: пустая строка в отчёте читалась бы
+// как потерянные данные, а это законный случай.
+func wordPressPlanSlug(slug string) string {
+	if slug == "" {
+		return "— не задан, адрес соберёт WordPress из заголовка"
+	}
+	return slug
 }

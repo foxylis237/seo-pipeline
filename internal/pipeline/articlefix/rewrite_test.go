@@ -1,4 +1,4 @@
-package pproffix1
+package articlefix
 
 import (
 	"errors"
@@ -42,5 +42,32 @@ func TestValidateRewriteCoversDetectsShortAnswerWithoutHeadings(t *testing.T) {
 	err := ValidateRewriteCovers(original, "<p>длинный текст статьи</p>")
 	if err == nil || !errors.Is(err, generation.ErrHTMLIncomplete) {
 		t.Fatalf("короткий ответ не опознан как обрыв: %v", err)
+	}
+}
+
+// Задача, переводящая страницу на другую услугу, переписывает и заголовки: дословная сверка
+// последнего объявила бы обрывом каждую статью, структурная — принимает.
+func TestValidateRewriteStructureAcceptsRewrittenHeadings(t *testing.T) {
+	rewritten := strings.NewReplacer(
+		"Кому подходит программа", "Кому подходит обучение в рамках НМО",
+		"Какой документ выдаётся", "Пройдите НМО и актуализируйте компетенции",
+	).Replace(originalArticle)
+	if err := ValidateRewriteStructure(originalArticle, rewritten); err != nil {
+		t.Fatalf("ValidateRewriteStructure вернул обрыв на переписанных заголовках: %v", err)
+	}
+	if err := ValidateRewriteCovers(originalArticle, rewritten); err == nil {
+		t.Fatal("дословная сверка переписанный заголовок пропустила — правила перестали отличаться")
+	}
+}
+
+// Обрыв ловится и без последнего заголовка: вместе с хвостом теряются и разделы.
+func TestValidateRewriteStructureDetectsTruncation(t *testing.T) {
+	truncated := originalArticle[:strings.Index(originalArticle, "<h2>Какой документ")]
+	err := ValidateRewriteStructure(originalArticle, truncated)
+	if err == nil {
+		t.Fatal("обрыв не замечен")
+	}
+	if !errors.Is(err, generation.ErrHTMLIncomplete) {
+		t.Fatalf("ошибка %v не оборачивает ErrHTMLIncomplete — продолжение чата не начнётся", err)
 	}
 }

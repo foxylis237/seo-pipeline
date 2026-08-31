@@ -12,7 +12,7 @@ DRY_RUN_DATABASE_URL ?= postgres://seo:seo@localhost:5433/seo_dry_run?sslmode=di
 #
 # Задачи различаются только именем: набор операций, разбор аргументов и рецепт у них общие,
 # а пути, схему стадий и схему PostgreSQL выбирает профиль внутри CLI.
-TASK_NAMES := task-1 pprof-1 pprof-2 pprof-fix-1
+TASK_NAMES := task-1 pprof-1 pprof-2 pprof-fix-1 pprof-fix-2 pprof-fix-3 pprof-fix-4 pprof-fix-5
 TASK_NAME := $(firstword $(MAKECMDGOALS))
 CLI = $(GO) run ./cmd/seo-pipeline $(TASK_NAME)
 
@@ -25,7 +25,7 @@ TASK_EXTRA_ARGS := $(wordlist 4,$(words $(MAKECMDGOALS)),$(MAKECMDGOALS))
 TASK_OPERATIONS := import import-check errors keywords retry run regenerate dry-run prepare generate demo-generate article info review fix html result clear reset google-login google-publish deepseek-login wordpress-check publish mark-published
 OPTIONAL_ARGUMENT_OPERATIONS := import-check errors keywords retry run regenerate clear reset google-publish prepare generate demo-generate article info review fix html result publish mark-published
 
-.PHONY: help task-1 pprof-1 pprof-2 pprof-fix-1 login docker-up docker-start docker-stop docker-down docker-restart docker-logs docker-ps
+.PHONY: help task-1 pprof-1 pprof-2 pprof-fix-1 pprof-fix-2 pprof-fix-3 pprof-fix-4 pprof-fix-5 login docker-up docker-start docker-stop docker-down docker-restart docker-logs docker-ps
 .PHONY: test test-race fmt vet lint lint-fix build
 
 # ----------------------------------------------------
@@ -99,10 +99,22 @@ help: ## этот список
 		'make pprof-2 clear ID'            'страницу к состоянию импорта' \
 		'make pprof-2 reset [ID]'          'страницу или всю pprof_2 к нулю' \
 		'' '' \
-		'pprof-fix-1 — правка уже опубликованных статей:' '' \
+		'pprof-fix-1…5 — правка уже опубликованных статей:' '' \
 		'make pprof-fix-1 import'          'индексы и ссылки из файла в input/pprof_fix_1' \
 		'make pprof-fix-1 run plan [ID]'   'что изменится в блоге, без правки' \
-		'make pprof-fix-1 run [ID]'        'править статьи и записать их в блог'
+		'make pprof-fix-1 run [ID]'        'править статьи и записать их в блог' \
+		'make pprof-fix-2 import'          'индексы и ссылки из файла в input/pprof_fix_2' \
+		'make pprof-fix-2 run plan [ID]'   'что изменится в блоге, без правки' \
+		'make pprof-fix-2 run [ID]'        'править статьи и записать их в блог' \
+		'make pprof-fix-3 import'          'индексы и ссылки из файла в input/pprof_fix_3' \
+		'make pprof-fix-3 run plan [ID]'   'что изменится в блоге, без правки' \
+		'make pprof-fix-3 run [ID]'        'править статьи, не трогая заголовок' \
+		'make pprof-fix-4 import'          'индексы и ссылки из файла в input/pprof_fix_4' \
+		'make pprof-fix-4 run plan [ID]'   'что изменится в блоге, без правки' \
+		'make pprof-fix-4 run [ID]'        'править статьи и записать их в блог' \
+		'make pprof-fix-5 import'          'индексы и ссылки из файла в input/pprof_fix_5' \
+		'make pprof-fix-5 run plan [ID]'   'что изменится в блоге, без правки' \
+		'make pprof-fix-5 run [ID]'        'править статьи и записать их в блог'
 	@printf '\nВход в сервисы — общий для задач\n'
 	@printf '  %-34s%s\n' \
 		'make login deepseek'              'ручной вход в DeepSeek' \
@@ -200,6 +212,18 @@ pprof-2: ## Run a pprof_2 operation
 	$(run_task_operation)
 
 pprof-fix-1: ## Run a pprof_fix_1 operation
+	$(run_task_operation)
+
+pprof-fix-2: ## Run a pprof_fix_2 operation
+	$(run_task_operation)
+
+pprof-fix-3: ## Run a pprof_fix_3 operation
+	$(run_task_operation)
+
+pprof-fix-4: ## Run a pprof_fix_4 operation
+	$(run_task_operation)
+
+pprof-fix-5: ## Run a pprof_fix_5 operation
 	$(run_task_operation)
 
 # ----------------------------------------------------

@@ -17,6 +17,9 @@ import (
 type fakeChats struct {
 	chats   [][]string
 	answers map[string]string
+	// queue отдаёт ответы стадии по порядку: у стадии html их два, когда первая разметка
+	// пришла без обязательной перелинковки и её просят вернуть исправленной.
+	queue map[string][]string
 }
 
 func (c *fakeChats) NewChat(_ context.Context, _ int64, stages ...string) (taskflow.Chat, error) {
@@ -43,6 +46,10 @@ func (c *fakeChat) record(prompt string) (string, error) {
 	stage := c.stages[c.sent]
 	c.sent++
 	c.owner.chats[c.index] = append(c.owner.chats[c.index], stage)
+	if pending := c.owner.queue[stage]; len(pending) > 0 {
+		c.owner.queue[stage] = pending[1:]
+		return pending[0], nil
+	}
 	if answer, found := c.owner.answers[stage]; found {
 		return answer, nil
 	}
@@ -149,12 +156,15 @@ func newFlowFixture(t *testing.T) (*Flow, *fakeChats, *fakeRepository, *recordin
 	}
 	chats := &fakeChats{answers: map[string]string{
 		StageInfo: "TLDR: коротко\nFAQ:\nВопрос: Где?\nОтвет: Тут.",
-		StageHTML: "<h2>Заголовок</h2><p>текст</p>",
+		StageHTML: htmlWithLink,
 	}}
 	publisher := &recordingPublisher{}
-	flow := NewFlow(repository, writer, chats, &fakeRenderer{}, nil, publisher)
+	flow := NewFlow(repository, writer, chats, &fakeRenderer{}, nil, publisher, nil)
 	return flow, chats, repository, publisher, writer
 }
+
+// htmlWithLink — разметка с обязательной ссылкой перелинковки из входных данных фикстуры.
+const htmlWithLink = `<h2>Заголовок</h2><p>текст со ссылкой на <a href="https://example.test/logoped">логопеда</a></p>`
 
 // Границы чатов — главный контракт потока: три чата, и сообщения распределены по ним так,
 // как описан порядок стадий pprof_1.
@@ -309,4 +319,208 @@ func TestFlowMovesArticleThroughKnownSteps(t *testing.T) {
 	if got := strings.Join(repository.stages, ","); got != "article,html" {
 		t.Fatalf("переходы этапов: %q, ожидалось \"article,html\"", got)
 	}
+}
+
+// Ссылки перелинковки задаёт человек, и обязательны все: разметку без них поток не принимает,
+// а просит модель вернуть её исправленной тем же чатом.
+func TestHTMLStageAsksModelToAddMissingLinks(t *testing.T) {
+	flow, chats, repository, _, writer := newFlowFixture(t)
+	chats.queue = map[string][]string{StageHTML: {
+		"<h2>Заголовок</h2><p>текст без перелинковки</p>",
+		htmlWithLink,
+	}}
+	ctx := context.Background()
+
+	if err := flow.RunStructure(ctx, "7"); err != nil {
+		t.Fatal(err)
+	}
+	if err := flow.RunArticle(ctx, "7"); err != nil {
+		t.Fatal(err)
+	}
+	repository.saved.FixedArticlePath = repository.finalArticlePath
+	if err := flow.RunHTML(ctx, "7"); err != nil {
+		t.Fatalf("html: %v", err)
+	}
+
+	if got := len(chats.chats[2]); got != 2 {
+		t.Fatalf("чат разметки: %d сообщений, ожидалось 2 — первое и починка", got)
+	}
+	saved, err := writer.Read(repository.htmlPath)
+	if err != nil {
+		t.Fatalf("разметка не читается: %v", err)
+	}
+	if !strings.Contains(saved, "https://example.test/logoped") {
+		t.Fatalf("в сохранённой разметке нет обязательной ссылки: %q", saved)
+	}
+}
+
+// Проверка чинит, но не запрещает: разметка без части ссылок сохраняется с предупреждением.
+// Пересобирать статью целиком дороже, чем дописать ссылку руками.
+func TestHTMLStageKeepsMarkupWhenLinksStillMissing(t *testing.T) {
+	flow, chats, repository, _, writer := newFlowFixture(t)
+	chats.answers[StageHTML] = "<h2>Заголовок</h2><p>текст без перелинковки</p>"
+	ctx := context.Background()
+
+	if err := flow.RunStructure(ctx, "7"); err != nil {
+		t.Fatal(err)
+	}
+	if err := flow.RunArticle(ctx, "7"); err != nil {
+		t.Fatal(err)
+	}
+	repository.saved.FixedArticlePath = repository.finalArticlePath
+	if err := flow.RunHTML(ctx, "7"); err != nil {
+		t.Fatalf("разметка без части ссылок уронила стадию: %v", err)
+	}
+	if repository.htmlPath == "" {
+		t.Fatal("разметка не сохранена")
+	}
+	saved, err := writer.Read(repository.htmlPath)
+	if err != nil {
+		t.Fatalf("разметка не читается: %v", err)
+	}
+	if !strings.Contains(saved, "текст без перелинковки") {
+		t.Fatalf("сохранена не та разметка: %q", saved)
+	}
+}
+
+// H1 снимает код: название записи блог рисует сам, и второй заголовок первого уровня на
+// странице не нужен.
+func TestHTMLStageDropsHeading1(t *testing.T) {
+	flow, chats, repository, _, writer := newFlowFixture(t)
+	chats.answers[StageHTML] = "<h1>Как стать логопедом</h1>\n" + htmlWithLink
+	ctx := context.Background()
+
+	if err := flow.RunStructure(ctx, "7"); err != nil {
+		t.Fatal(err)
+	}
+	if err := flow.RunArticle(ctx, "7"); err != nil {
+		t.Fatal(err)
+	}
+	repository.saved.FixedArticlePath = repository.finalArticlePath
+	if err := flow.RunHTML(ctx, "7"); err != nil {
+		t.Fatalf("html: %v", err)
+	}
+
+	saved, err := writer.Read(repository.htmlPath)
+	if err != nil {
+		t.Fatalf("разметка не читается: %v", err)
+	}
+	if strings.Contains(strings.ToLower(saved), "<h1") {
+		t.Fatalf("H1 остался в разметке: %q", saved)
+	}
+}
+
+// Запись заголовков в артефакте одна и та же, какой бы формой их ни выдала модель.
+func TestSavedArticleKeepsOneHeadingForm(t *testing.T) {
+	flow, chats, repository, _, writer := newFlowFixture(t)
+	chats.answers[StageReview] = "H1 - Как стать логопедом\n\nЛид статьи.\n\nH2: Обязанности\n\n## Разряды\n\n**H3 — Документы**"
+	ctx := context.Background()
+
+	if err := flow.RunStructure(ctx, "7"); err != nil {
+		t.Fatal(err)
+	}
+	if err := flow.RunArticle(ctx, "7"); err != nil {
+		t.Fatal(err)
+	}
+
+	saved, err := writer.Read(repository.finalArticlePath)
+	if err != nil {
+		t.Fatalf("статья не читается: %v", err)
+	}
+	for _, want := range []string{"H1 - Как стать логопедом", "H2 - Обязанности", "H2 - Разряды", "H3 - Документы"} {
+		if !strings.Contains(saved, want) {
+			t.Fatalf("в статье нет заголовка %q:\n%s", want, saved)
+		}
+	}
+	for _, forbidden := range []string{"H2:", "## ", "**H3"} {
+		if strings.Contains(saved, forbidden) {
+			t.Fatalf("в статье осталась чужая форма заголовка %q:\n%s", forbidden, saved)
+		}
+	}
+}
+
+// fakeNames подменяет поход на сайт за названием программы.
+type fakeNames struct {
+	names map[string]string
+	err   error
+	asked []string
+}
+
+func (n *fakeNames) Name(_ context.Context, url string) (string, error) {
+	n.asked = append(n.asked, url)
+	if n.err != nil {
+		return "", n.err
+	}
+	return n.names[url], nil
+}
+
+// Анкор перелинковки обязан совпадать с названием программы на сайте, поэтому оно уходит в
+// промпт рядом с адресом: из адреса модель восстанавливает его транслитом наугад.
+func TestHTMLPromptCarriesProgramNames(t *testing.T) {
+	writer := articleoutput.NewWriter(t.TempDir())
+	repository := &fakeRepository{input: article.GenerationInput{
+		Article: article.Article{ID: 7, ExternalID: "7", Title: "Как стать логопедом", Slug: "kak-stat-logopedom"},
+		Links:   "https://example.test/logoped",
+	}}
+	renderer := &recordingRenderer{}
+	names := &fakeNames{names: map[string]string{"https://example.test/logoped": "Дистанционное обучение на логопеда"}}
+	flow := NewFlow(repository, writer, &fakeChats{answers: map[string]string{StageHTML: htmlWithLink}},
+		renderer, nil, nil, names)
+	repository.saved.FixedArticlePath = "" // текст читается ниже из подготовленного артефакта
+
+	pending, err := writer.StageFixedArticle("7", "kak-stat-logopedom", "промпт", "H1 - Как стать логопедом\n\nТекст статьи.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := articleoutput.Commit(func() error { return nil }, pending); err != nil {
+		t.Fatal(err)
+	}
+	repository.saved.FixedArticlePath = pending.Paths.FixedArticlePath
+
+	if err := flow.RunHTML(context.Background(), "7"); err != nil {
+		t.Fatalf("html: %v", err)
+	}
+	if len(names.asked) != 1 || names.asked[0] != "https://example.test/logoped" {
+		t.Fatalf("название спрошено не по тому адресу: %v", names.asked)
+	}
+	if !strings.Contains(renderer.data, "Дистанционное обучение на логопеда — https://example.test/logoped") {
+		t.Fatalf("в промпт не ушло название программы: %q", renderer.data)
+	}
+}
+
+// Отказ сайта стадию не роняет: за генерацию уже заплачено, ссылка уходит без названия.
+func TestHTMLPromptKeepsLinkWhenSiteFails(t *testing.T) {
+	writer := articleoutput.NewWriter(t.TempDir())
+	repository := &fakeRepository{input: article.GenerationInput{
+		Article: article.Article{ID: 7, ExternalID: "7", Title: "Как стать логопедом", Slug: "kak-stat-logopedom"},
+		Links:   "https://example.test/logoped",
+	}}
+	renderer := &recordingRenderer{}
+	names := &fakeNames{err: fmt.Errorf("страница ответила 503")}
+	flow := NewFlow(repository, writer, &fakeChats{answers: map[string]string{StageHTML: htmlWithLink}},
+		renderer, nil, nil, names)
+
+	pending, err := writer.StageFixedArticle("7", "kak-stat-logopedom", "промпт", "H1 - Как стать логопедом\n\nТекст статьи.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := articleoutput.Commit(func() error { return nil }, pending); err != nil {
+		t.Fatal(err)
+	}
+	repository.saved.FixedArticlePath = pending.Paths.FixedArticlePath
+
+	if err := flow.RunHTML(context.Background(), "7"); err != nil {
+		t.Fatalf("отказ сайта уронил стадию: %v", err)
+	}
+	if !strings.Contains(renderer.data, "https://example.test/logoped") {
+		t.Fatalf("ссылка не дошла до промпта: %q", renderer.data)
+	}
+}
+
+// recordingRenderer запоминает данные промпта: тест проверяет, что именно ушло в шаблон.
+type recordingRenderer struct{ data string }
+
+func (r *recordingRenderer) Prepare(call llm.Call) (llm.PreparedCall, error) {
+	r.data = fmt.Sprintf("%+v", call.Data)
+	return llm.PreparedCall{Prompt: "промпт " + call.Stage}, nil
 }

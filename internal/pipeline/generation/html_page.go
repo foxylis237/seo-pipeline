@@ -49,6 +49,8 @@ var (
 	textNoiseRE = regexp.MustCompile(`[^\p{L}\p{N}\s]+`)
 	textSpaceRE = regexp.MustCompile(`\s+`)
 	textTagRE   = regexp.MustCompile(`(?is)<[^>]*>`)
+	// headingLineRE узнаёт строку-заголовок текста статьи: «H2 - Название» и её варианты.
+	headingLineRE = regexp.MustCompile(`(?i)^\**\s*h[1-4]\s*[-:\x{2013}\x{2014}]\s`)
 )
 
 // HTMLMessage — одно сообщение чата разметки: первое или продолжение.
@@ -77,6 +79,14 @@ type HTMLPageRequest struct {
 	// статьи, а не совпадение хвоста. Ошибка обязана оборачивать ErrHTMLIncomplete, иначе
 	// продолжение чата не начнётся.
 	Complete func(markup string) error
+	// AcceptIncomplete снимает отказ: не дописанная и после продолжений страница возвращается
+	// с предупреждением в логе, а не ошибкой.
+	//
+	// Признак нужен задаче, где важнее довести прогон до конца, чем получить безупречную
+	// разметку: неполную страницу человек увидит по предупреждению и допишет сам, а отказ
+	// стоит ему всей стадии заново. Нулевое значение — прежнее поведение: обрыв остаётся
+	// отказом.
+	AcceptIncomplete bool
 }
 
 // BuildHTMLPage получает разметку страницы и дописывает её, если ответ модели оборвался.
@@ -131,7 +141,13 @@ func BuildHTMLPage(ctx context.Context, request HTMLPageRequest) (string, error)
 		}
 	}
 	if coverErr != nil {
-		return "", coverErr
+		if !request.AcceptIncomplete {
+			return "", coverErr
+		}
+		// Страницу отдаём как есть: прогон дороже безупречной разметки, а неполнота видна
+		// человеку по этому предупреждению.
+		logger.Warn("разметка так и не покрыла страницу целиком, принимаем как есть",
+			"stage", "html_generation", "html_runes", len([]rune(page)), "error", coverErr)
 	}
 	return page, nil
 }
@@ -258,6 +274,13 @@ func pageOpeningProbe(page string) string {
 // Короткие строки — заголовки, подписи и разделители — приметой конца страницы служить не
 // могут: заголовок вёрстка вправе унести в карточку и оставить без своего тега.
 func lineProbe(line string) string {
+	// Заголовок абзацем не считается, даже длинный. Иначе «H1 - Что дает повышение
+	// квалификации по рабочей профессии в 2026 году» сходит за первый абзац страницы: по нему
+	// проверяли бы наличие лида, а восстановление лида вставляло бы в разметку заголовок —
+	// ровно это и уехало в блог у двух статей.
+	if headingLineRE.MatchString(strings.TrimSpace(line)) {
+		return ""
+	}
 	words := strings.Fields(normalizedText(line))
 	if len(words) < coverageProbeWords {
 		return ""

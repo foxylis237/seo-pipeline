@@ -112,3 +112,18 @@ func TestNormalizeAndValidateHTMLKeepsRealFailures(t *testing.T) {
 		})
 	}
 }
+
+// Структура приходит обёрнутой в кодовый блок — промпт сам просит «готовую для копирования».
+// В артефакте маркеры лишние: по ним следующая стадия читает заголовки.
+func TestStripCodeFence(t *testing.T) {
+	for value, want := range map[string]string{
+		"```html\n- H1: Тема\n- H2: Раздел\n```": "- H1: Тема\n- H2: Раздел",
+		"```\n- H1: Тема\n```":                   "- H1: Тема",
+		"- H1: Тема\n- H2: Раздел":               "- H1: Тема\n- H2: Раздел",
+		"  \n```html\n- H1: Тема\n":              "- H1: Тема",
+	} {
+		if got := StripCodeFence(value); got != want {
+			t.Errorf("StripCodeFence(%q) = %q, ожидалось %q", value, got, want)
+		}
+	}
+}

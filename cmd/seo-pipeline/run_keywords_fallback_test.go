@@ -48,7 +48,9 @@ func TestPrepareSkipsFallbackWhenKeysSOReturnedQueries(t *testing.T) {
 
 	err := prepareArticleWithCollectors(
 		context.Background(), repository, config.Config{}, testPrepareLogger(), newFakePrepareArtifacts(), testPreparedArticle(),
-		fakeKeysSOCollector{result: keysso.CollectResult{CollectedCount: 2, CleanedKeywords: []string{"собранный запрос"}}},
+		fakeKeysSOCollector{result: keysso.CollectResult{CollectedCount: 4, CleanedKeywords: []string{
+			"собранный запрос", "второй запрос", "третий запрос",
+		}}},
 		fakeArsenkinCollector{submitted: &submitted, result: arsenkin.Result{
 			WordstatKeywords:    []arsenkin.KeywordFrequency{{Query: "собранный запрос", Frequency: 20}},
 			LSIWords:            []string{"новый lsi"},
@@ -62,7 +64,7 @@ func TestPrepareSkipsFallbackWhenKeysSOReturnedQueries(t *testing.T) {
 	if fallback.calls != 0 {
 		t.Fatalf("резервный источник вызван %d раз при непустом результате Keys.so", fallback.calls)
 	}
-	if !reflect.DeepEqual(submitted, []string{"собранный запрос"}) {
+	if !reflect.DeepEqual(submitted, []string{"собранный запрос", "второй запрос", "третий запрос"}) {
 		t.Fatalf("в Arsenkin ушло %v", submitted)
 	}
 }
@@ -316,4 +318,33 @@ func TestPrepareWithoutFallbackKeepsEmptyKeysSOResultAsFailure(t *testing.T) {
 		t.Fatalf("Arsenkin вызван %d раз без запросов", arsenkinCalls)
 	}
 	assertOldPrepareResultsPreserved(t, repository, want)
+}
+
+// Бедная выдача Keys.so — не выдача: у свежей или узкой темы страница конкурента отдаёт
+// один-два запроса, и семантику статьи на них не построить. Источник меняется так же, как
+// при пустом ответе.
+func TestPrepareUsesFallbackWhenKeysSOReturnedTooFewQueries(t *testing.T) {
+	repository := oldPrepareRepositoryState()
+	fallback := &fakeKeywordsFallback{queries: []string{"подобранный моделью запрос"}}
+	var submitted []string
+
+	err := prepareArticleWithCollectors(
+		context.Background(), repository, config.Config{}, testPrepareLogger(), newFakePrepareArtifacts(), testPreparedArticle(),
+		fakeKeysSOCollector{
+			result:      keysso.CollectResult{CollectedCount: 1, CleanedKeywords: []string{"закон о нок"}},
+			cleanResult: keysso.CollectResult{CollectedCount: 1, CleanedKeywords: []string{"подобранный моделью запрос"}},
+		},
+		fakeArsenkinCollector{submitted: &submitted, result: arsenkin.Result{
+			WordstatKeywords:    []arsenkin.KeywordFrequency{{Query: "подобранный моделью запрос", Frequency: 30}},
+			LSIWords:            []string{"новый lsi"},
+			CompetitorStructure: "новая структура",
+		}},
+		fallback,
+	)
+	if err != nil {
+		t.Fatalf("бедная выдача уронила подготовку: %v", err)
+	}
+	if fallback.calls != 1 {
+		t.Fatalf("резервный источник вызван %d раз, ожидался один", fallback.calls)
+	}
 }

@@ -58,9 +58,9 @@ func editorData(input article.GenerationInput) any {
 // Перелинковка идёт из Links, а не из Professions: в Professions лежит список слов-меток
 // («профессии, карьера, зарплата»), адресов там нет вообще, и стадия получала задание
 // расставить ссылки без единой ссылки.
-func htmlData(input article.GenerationInput, finalText string) any {
+func htmlData(input article.GenerationInput, finalText, links string) any {
 	return struct {
 		Article string
 		Links   string
-	}{finalText, input.Links}
+	}{finalText, links}
 }

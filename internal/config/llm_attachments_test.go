@@ -7,13 +7,13 @@ import (
 	"testing"
 )
 
-func TestResolveStageAttachmentsTakesSinglePDF(t *testing.T) {
+func TestResolveStageAttachmentsTakesSingleDocument(t *testing.T) {
 	directory := t.TempDir()
 	// Имя файла не фиксировано, поэтому оно намеренно произвольное. Посторонние файлы
 	// каталога выбор не ломают: значимо расширение.
 	document := filepath.Join(directory, "Регламент вёрстки 2026.pdf")
 	writeFile(t, document)
-	writeFile(t, filepath.Join(directory, "заметки.txt"))
+	writeFile(t, filepath.Join(directory, "обложка.png"))
 	writeFile(t, filepath.Join(directory, ".DS_Store"))
 
 	attachments, err := ResolveStageAttachments("html", directory)
@@ -46,8 +46,8 @@ func TestResolveStageAttachmentsRejectsAmbiguousDirectory(t *testing.T) {
 		directory string
 		expect    string
 	}{
-		{name: "нет документов", directory: empty, expect: "нет ни одного файла"},
-		{name: "несколько документов", directory: crowded, expect: "несколько файлов"},
+		{name: "нет документов", directory: empty, expect: "нет ни одного документа"},
+		{name: "несколько документов", directory: crowded, expect: "несколько документов"},
 		{name: "каталога нет", directory: filepath.Join(empty, "нет-такого"), expect: "не найден"},
 	}
 	for _, test := range tests {
@@ -70,5 +70,22 @@ func writeFile(t *testing.T, path string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte("x"), 0o600); err != nil {
 		t.Fatalf("подготовить файл %s: %v", path, err)
+	}
+}
+
+// Регламент лежит у человека, а не в репозитории, и формат его меняется: тот же документ
+// сегодня PDF, завтра простой текст. Стадия обязана принять и такой.
+func TestResolveStageAttachmentsTakesPlainText(t *testing.T) {
+	directory := t.TempDir()
+	document := filepath.Join(directory, "reglament-statey-dpoprof.txt")
+	writeFile(t, document)
+	writeFile(t, filepath.Join(directory, ".gitkeep"))
+
+	attachments, err := ResolveStageAttachments("html", directory)
+	if err != nil {
+		t.Fatalf("текстовый регламент не принят: %v", err)
+	}
+	if len(attachments) != 1 || attachments[0] != document {
+		t.Fatalf("выбран не тот документ: %v", attachments)
 	}
 }

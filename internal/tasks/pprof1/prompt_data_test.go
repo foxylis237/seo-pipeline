@@ -37,7 +37,7 @@ func TestHTMLPromptCarriesInternalLinks(t *testing.T) {
 	)
 	input := article.GenerationInput{Professions: professions, Links: link}
 
-	prepared, err := router.Prepare(llm.Call{Stage: StageHTML, Data: htmlData(input, finalText)})
+	prepared, err := router.Prepare(llm.Call{Stage: StageHTML, Data: htmlData(input, finalText, input.Links)})
 	if err != nil {
 		t.Fatal(err)
 	}

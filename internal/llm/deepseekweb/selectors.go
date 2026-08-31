@@ -312,6 +312,33 @@ const selectModeJS = `(options) => {
   return "clicked";
 }`
 
+// searchToggleSelector — кнопки-переключатели рядом с полем ввода: «DeepThink» и «Search».
+// Это не та группа, что у режима ответа: у режима свой data-model-type и своё состояние,
+// а здесь обычные тумблеры с aria-pressed, и включаются они независимо друг от друга.
+const searchToggleSelector = `.ds-toggle-button, [class*="toggle-button"]`
+
+// toggleSearchJS включает поиск, если он ещё не включён.
+//
+// Кнопка опознаётся по подписи: собственного атрибута у неё нет, классы генерируются
+// сборкой. Подпись локализована, поэтому сверяются обе — в профиле стоит английский.
+// Уже включённый поиск повторно не нажимается: второе нажатие его выключит.
+const toggleSearchJS = `(options) => {
+  const visible = (element) => {
+    const style = window.getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
+  };
+  const normalize = (value) => (value || "").replace(/\s+/g, " ").trim().toLowerCase();
+  const labels = ["search", "поиск"];
+  const match = Array.from(document.querySelectorAll(options.selector))
+    .filter(visible)
+    .find((control) => labels.includes(normalize(control.innerText)));
+  if (!match) return "not_found";
+  if (match.getAttribute("aria-pressed") === "true") return "already";
+  match.click();
+  return "clicked";
+}`
+
 // attachmentsReadyJS сообщает, что карточки всех прикреплённых документов появились над
 // полем ввода. Имена сверяются началом: длинное имя интерфейс обрезает многоточием.
 const attachmentsReadyJS = `(options) => {

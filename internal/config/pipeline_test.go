@@ -64,8 +64,9 @@ func TestLoadPipelineConfigReadsBothSwitches(t *testing.T) {
 // право только осознанно — незамеченная правка YAML падает здесь.
 func TestTaskConfigsDeclarePipelineSection(t *testing.T) {
 	cases := map[string]bool{
-		filepath.Join("..", "..", "config", "config.yaml"):  false,
-		filepath.Join("..", "..", "config", "pprof_1.yaml"): false,
+		filepath.Join("..", "..", "config", "config.yaml"): false,
+		// pprof_1 тоже публикует сразу после прогона — включено по просьбе владельца задачи.
+		filepath.Join("..", "..", "config", "pprof_1.yaml"): true,
 		// pprof_2 публикует страницу сразу после прогона — включено по просьбе владельца задачи.
 		filepath.Join("..", "..", "config", "pprof_2.yaml"): true,
 	}

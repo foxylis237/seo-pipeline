@@ -70,6 +70,12 @@ type LLMStageConfig struct {
 	// тексту, и держать здесь второе имя значило бы заводить таблицу соответствий,
 	// которая устареет вместе с интерфейсом.
 	Mode string `yaml:"mode"`
+	// Search включает у стадии поиск в интернете. У браузерного провайдера это отдельный
+	// переключатель рядом с полем ввода, независимый от Mode: режим отвечает за то, как
+	// модель думает, поиск — за то, откуда она берёт данные. Стадия, которой нужны
+	// проверяемые цифры и источники, включает его сама; умолчание — выключен, потому что
+	// поиск замедляет ответ и уводит модель на посторонние сайты.
+	Search bool `yaml:"search"`
 
 	Timeout        time.Duration `yaml:"-"`
 	AttemptTimeout time.Duration `yaml:"-"`
@@ -211,6 +217,9 @@ func mergeLLMConfig(base *LLMConfig, overlay LLMConfig) {
 		}
 		if strings.TrimSpace(stage.Mode) != "" {
 			merged.Mode = stage.Mode
+		}
+		if stage.Search {
+			merged.Search = true
 		}
 		base.Stages[name] = merged
 	}
@@ -357,9 +366,27 @@ func validateStageTargets(cfg *LLMConfig, stageName string, targets []LLMTargetC
 	return nil
 }
 
-// AttachmentExtension — расширение документа, прикрепляемого к стадии. Имя файла смысла
-// не несёт, значимо только оно: регламент переименовывают, а стадия обязана работать.
-const AttachmentExtension = ".pdf"
+// AttachmentExtensions — расширения документа, прикрепляемого к стадии. Имя файла смысла не
+// несёт, значимо только расширение: регламент переименовывают, а стадия обязана работать.
+//
+// Форматов несколько потому, что документ живёт у человека, а не в репозитории: тот же
+// регламент вёрстки лежит то PDF-ом, то простым текстом, и замена формата не повод ронять
+// стадию на пороге. Все перечисленные веб-интерфейс модели принимает вложением.
+var AttachmentExtensions = []string{".pdf", ".txt", ".md", ".docx"}
+
+// attachmentExtensionList перечисляет расширения для сообщения человеку.
+func attachmentExtensionList() string { return strings.Join(AttachmentExtensions, ", ") }
+
+// isAttachmentFile сообщает, годится ли файл документом стадии.
+func isAttachmentFile(name string) bool {
+	extension := filepath.Ext(name)
+	for _, allowed := range AttachmentExtensions {
+		if strings.EqualFold(extension, allowed) {
+			return true
+		}
+	}
+	return false
+}
 
 // ResolveStageAttachments возвращает документы стадии из её каталога.
 //
@@ -381,7 +408,7 @@ func ResolveStageAttachments(stageName, directory string) ([]string, error) {
 		if os.IsNotExist(err) {
 			return nil, fmt.Errorf(
 				"LLM stage %q: каталог документов %s не найден — создайте его и положите туда %s",
-				stageName, directory, AttachmentExtension)
+				stageName, directory, attachmentExtensionList())
 		}
 		return nil, fmt.Errorf("LLM stage %q: прочитать каталог документов %s: %w", stageName, directory, err)
 	}
@@ -391,7 +418,7 @@ func ResolveStageAttachments(stageName, directory string) ([]string, error) {
 		if entry.IsDir() || strings.HasPrefix(name, ".") {
 			continue
 		}
-		if !strings.EqualFold(filepath.Ext(name), AttachmentExtension) {
+		if !isAttachmentFile(name) {
 			continue
 		}
 		documents = append(documents, name)
@@ -402,12 +429,12 @@ func ResolveStageAttachments(stageName, directory string) ([]string, error) {
 		return []string{filepath.Join(directory, documents[0])}, nil
 	case 0:
 		return nil, fmt.Errorf(
-			"LLM stage %q: в каталоге %s нет ни одного файла %s — положите туда документ стадии",
-			stageName, directory, AttachmentExtension)
+			"LLM stage %q: в каталоге %s нет ни одного документа (%s) — положите туда документ стадии",
+			stageName, directory, attachmentExtensionList())
 	default:
 		return nil, fmt.Errorf(
-			"LLM stage %q: в каталоге %s несколько файлов %s (%s) — оставьте один",
-			stageName, directory, AttachmentExtension, strings.Join(documents, ", "))
+			"LLM stage %q: в каталоге %s несколько документов (%s) — оставьте один",
+			stageName, directory, strings.Join(documents, ", "))
 	}
 }
 

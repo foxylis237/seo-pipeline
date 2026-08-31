@@ -104,3 +104,32 @@ func TestRouterStopsStageWhenDocumentIsMissing(t *testing.T) {
 		t.Fatalf("ошибка не называет каталог документа: %v", err)
 	}
 }
+
+// Поиск — свойство стадии, и до провайдера он обязан дойти: промпт этой стадии просит назвать
+// сайт, который модель открыла, и без включённого поиска такой источник был бы выдуман.
+func TestRouterPassesStageSearchFlag(t *testing.T) {
+	client := &fakeClient{}
+	temperature := 0.1
+	router := NewRouter(config.LLMConfig{
+		Providers: map[string]config.LLMProviderConfig{"selected": {Type: "deepseek_web"}},
+		Stages: map[string]config.LLMStageConfig{"expert": {
+			Targets:        []config.LLMTargetConfig{{Provider: "selected", Model: "deepseek-web"}},
+			PromptTemplate: "Напиши статью {{.Title}}",
+			Temperature:    &temperature, MaxTokens: 100, Timeout: time.Second,
+			Mode: "expert", Search: true,
+		}},
+	}, map[string]Client{"selected": client}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	router.sleep = func(context.Context, time.Duration) error { return nil }
+
+	if _, err := router.Generate(context.Background(), Call{
+		Stage: "expert", Data: struct{ Title string }{"Тема"},
+	}); err != nil {
+		t.Fatalf("стадия с поиском: %v", err)
+	}
+	if !client.request.Search {
+		t.Fatal("признак поиска до провайдера не дошёл")
+	}
+	if client.request.Mode != "expert" {
+		t.Fatalf("режим ответа подменён поиском: %q", client.request.Mode)
+	}
+}
