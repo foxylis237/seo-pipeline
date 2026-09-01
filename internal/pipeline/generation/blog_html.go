@@ -153,7 +153,20 @@ func RestoreLead(page, markup string) string {
 	if lead == "" || LeadKept(page, markup) {
 		return markup
 	}
-	return "<p>" + html.EscapeString(lead) + "</p>\n" + strings.TrimSpace(markup)
+	return "<p>" + inlineMarkup(lead) + "</p>\n" + strings.TrimSpace(markup)
+}
+
+// boldRE — жирное начертание в тексте статьи. Формат «**текст**» — договорённость стадий, по
+// ней же расставляет теги разметка.
+var boldRE = regexp.MustCompile(`\*\*([^*]+)\*\*`)
+
+// inlineMarkup переводит строку статьи в безопасный HTML вместе с жирным начертанием.
+//
+// Экранирование идёт первым, замена — вторым: иначе «<» из текста попал бы в разметку тегом.
+// Без этого лид уходил в блог со звёздочками — «<p>**Сантехник** — это специалист…», —
+// потому что код вставлял абзац как есть, а преобразовать разметку было уже некому.
+func inlineMarkup(text string) string {
+	return boldRE.ReplaceAllString(html.EscapeString(text), "<strong>$1</strong>")
 }
 
 // pageLead возвращает первый содержательный абзац текста: заголовок и пустые строки в лид не
@@ -189,7 +202,20 @@ var (
 	dsScrollAreaRE = regexp.MustCompile(`(?i)<div class="ds-scroll-area[^"]*"[^>]*>`)
 	dsClassAttrRE  = regexp.MustCompile(`(?i)\s*class="ds-[^"]*"`)
 	emptyClassRE   = regexp.MustCompile(`(?i)\s*class=""`)
-	tagSpacingRE   = regexp.MustCompile(`<([a-z][a-z0-9]*)\s+>`)
+	// htmlCommentRE — служебные пометки модели вида «<!-- Блок D. Таблица -->». В блог они
+	// уходят как есть и живут в записи навсегда: редактор WordPress их не показывает, а в
+	// исходном коде страницы они видны всем. Промпт их запрещает, но запрет держится не
+	// всегда — в статье 17 их пришло пятнадцать штук.
+	htmlCommentRE = regexp.MustCompile(`(?s)<!--.*?-->`)
+	// emptyTagREs — теги без содержимого, по одному выражению на тег. Обратных ссылок в Go
+	// нет, поэтому «<(p|div)…</\1>» одним выражением не написать, и каждый тег получает своё.
+	//
+	// Перечень закрытый. Пустой абзац рисует на странице лишний отступ, пустой заголовок
+	// ломает оглавление, пустая врезка — пустую плашку. Ячейки таблицы (td, th) сюда не
+	// входят намеренно: удаление пустой ячейки сдвинуло бы столбцы у соседних строк.
+	emptyTagREs = emptyTagPatterns("p", "span", "strong", "em", "b", "i", "div",
+		"h1", "h2", "h3", "h4", "h5", "h6", "li", "ul", "ol", "blockquote")
+	tagSpacingRE = regexp.MustCompile(`<([a-z][a-z0-9]*)\s+>`)
 )
 
 const (
@@ -200,17 +226,51 @@ const (
 	scrollStyle = `<div style="overflow-x:auto;">`
 )
 
+// emptyTagPatterns собирает выражение «тег без содержимого» для каждого имени.
+func emptyTagPatterns(tags ...string) []*regexp.Regexp {
+	patterns := make([]*regexp.Regexp, 0, len(tags))
+	for _, tag := range tags {
+		patterns = append(patterns, regexp.MustCompile(
+			`(?is)<`+tag+`(\s[^>]*)?>(\s|&nbsp;)*</`+tag+`>`))
+	}
+	return patterns
+}
+
+// dropEmptyTags снимает пустые теги, пока они не кончатся.
+//
+// Один проход не годится: «<div><p></p></div>» после снятия абзаца сам становится пустым,
+// и остановка на первом проходе оставила бы в записи пустую обёртку. Пять кругов с запасом
+// покрывают любую реальную вложенность, а цикл без предела на испорченной разметке завис бы.
+func dropEmptyTags(markup string) string {
+	for range 5 {
+		cleaned := markup
+		for _, pattern := range emptyTagREs {
+			cleaned = pattern.ReplaceAllString(cleaned, "")
+		}
+		if cleaned == markup {
+			return markup
+		}
+		markup = cleaned
+	}
+	return markup
+}
+
 // CleanBlogMarkup убирает из разметки вёрстку веб-интерфейса модели.
 //
 // Оформление, которое эти классы несли, сохраняется инлайновыми стилями: врезка остаётся
 // врезкой, таблица — прокручиваемой. Пустые span-обёртки снимаются вместе с закрывающими
 // тегами, а не по одному открывающему: иначе разметка осталась бы с лишними «</span>».
+//
+// Здесь же снимаются HTML-комментарии: своих мы не ставим, а чужие — это служебные пометки
+// модели, которым в опубликованной записи не место.
 func CleanBlogMarkup(markup string) string {
+	markup = htmlCommentRE.ReplaceAllString(markup, "")
 	markup = dsNoticeRE.ReplaceAllString(markup, noticeStyle)
 	markup = dsScrollAreaRE.ReplaceAllString(markup, scrollStyle)
 	markup = cleanSpans(markup)
 	markup = dsClassAttrRE.ReplaceAllString(markup, "")
 	markup = emptyClassRE.ReplaceAllString(markup, "")
+	markup = dropEmptyTags(markup)
 	return strings.TrimSpace(tagSpacingRE.ReplaceAllString(markup, "<$1>"))
 }
 
@@ -280,4 +340,140 @@ func spanTagKind(tag string) spanKind {
 	default:
 		return spanKeep
 	}
+}
+
+// sourceDomains — домены, которые разрешено ставить источником. Список закрытый: ссылка из
+// статьи уходит наружу навсегда, и решать, куда она ведёт, промпту нельзя.
+var sourceDomains = []string{
+	"publication.pravo.gov.ru", "rosstat.gov.ru", "mintrud.gov.ru",
+	"superjob.ru", "consultant.ru", "garant.ru", "hh.ru",
+}
+
+// sourceTailRE — хвост строки после слова «Источник:». Ограничен строкой и тегом: источник
+// живёт в одном абзаце, и захватывать половину статьи выражению незачем.
+var sourceTailRE = regexp.MustCompile(`(?i)Источник:\s*[^<\n]{0,160}`)
+
+// LinkSources превращает домены после слова «Источник:» в ссылки с rel="nofollow".
+//
+// Стадия разметки должна делать это сама, но правило держится не всегда: в статье 17 модель
+// приписала «Источник: hh.ru» хвостом к абзацу «Вывод:», шаблон вёрстки такую строку не
+// узнал, и в записи не осталось ни одной внешней ссылки. Подтверждение цифр — то, ради чего
+// источник и ставится, поэтому ссылку доделывает код.
+//
+// Уже готовые ссылки не трогаются: хвост, в котором есть «<a», пропускается целиком.
+func LinkSources(markup string) string {
+	return sourceTailRE.ReplaceAllStringFunc(markup, func(tail string) string {
+		if strings.Contains(strings.ToLower(tail), "<a ") {
+			return tail
+		}
+		for _, domain := range sourceDomains {
+			index := strings.Index(strings.ToLower(tail), domain)
+			if index < 0 {
+				continue
+			}
+			// Домен внутри более длинного (hh.ru в publication.pravo.gov.ru) не ссылка.
+			if index+len(domain) < len(tail) && isDomainChar(tail[index+len(domain)]) {
+				continue
+			}
+			link := `<a href="https://` + domain + `/" rel="nofollow noindex noopener" target="_blank">` +
+				tail[index:index+len(domain)] + `</a>`
+			tail = tail[:index] + link + tail[index+len(domain):]
+		}
+		return tail
+	})
+}
+
+// isDomainChar сообщает, продолжается ли доменное имя этим байтом.
+func isDomainChar(char byte) bool {
+	return char == '.' || char == '-' ||
+		(char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') || (char >= '0' && char <= '9')
+}
+
+// statsLineRE — строка плашек в тексте статьи.
+var statsLineRE = regexp.MustCompile(`(?m)^ПЛАШКИ:\s*(.+)$`)
+
+// statsPresentRE — признак уже свёрстанного ряда плашек. Сравнивать стиль дословно нельзя:
+// код пишет «flex:1 1 150px», модель — «flex: 1 1 150px» с пробелами, и дословная проверка
+// пропустила бы её блок мимо. В статье 17 из-за этого ряд плашек встал дважды.
+var statsPresentRE = regexp.MustCompile(`(?i)flex:\s*1\s+1\s+150px`)
+
+const (
+	// statsRowStyle и statsCardStyle — ряд цифровых плашек. Копия шаблона из промпта стадии
+	// html: разметка одна и та же, но собрать её должен уметь и код — модель эту строку
+	// теряет молча, и в статье 17 она пропала целиком.
+	statsRowStyle   = `<div style="display:flex;flex-wrap:wrap;gap:12px;margin:24px 0;">`
+	statsCardStyle  = `<div style="flex:1 1 150px;background:#f5f7fa;border-radius:8px;padding:14px 16px;">`
+	statsValueStyle = `<span style="display:block;font-size:20px;font-weight:bold;color:#1a3d6d;">`
+	statsLabelStyle = `<span style="font-size:14px;color:#555;">`
+)
+
+// RestoreStats возвращает в разметку потерянный ряд плашек.
+//
+// Строка «ПЛАШКИ: значение | подпись ;; …» стоит в тексте сразу после лида, но стадия разметки
+// её теряет: в статье 17 заметки и таблицы она сверстала, а плашки выбросила вместе со
+// строкой. Значения известны, место известно — после первого абзаца, — поэтому блок собирает
+// код. Просить страницу заново нечем: длинная разметка не помещается в один ответ.
+//
+// Уже свёрстанный ряд не трогается: признак — наши же стили карточки в разметке.
+func RestoreStats(page, markup string) string {
+	match := statsLineRE.FindStringSubmatch(page)
+	if match == nil || statsPresentRE.MatchString(markup) {
+		return markup
+	}
+	cards := make([]string, 0, 3)
+	for _, item := range strings.Split(match[1], ";;") {
+		value, label, found := strings.Cut(item, "|")
+		value, label = strings.TrimSpace(value), strings.TrimSpace(label)
+		if !found || value == "" || label == "" {
+			continue
+		}
+		cards = append(cards, statsCardStyle+statsValueStyle+html.EscapeString(value)+"</span>\n"+
+			statsLabelStyle+html.EscapeString(label)+"</span></div>")
+	}
+	if len(cards) == 0 {
+		return markup
+	}
+	block := statsRowStyle + "\n" + strings.Join(cards, "\n") + "\n</div>"
+	// Место блока — сразу после вводного абзаца и перед первым заголовком.
+	if index := strings.Index(markup, "</p>"); index >= 0 {
+		cut := index + len("</p>")
+		return markup[:cut] + "\n" + block + markup[cut:]
+	}
+	return block + "\n" + markup
+}
+
+// headingOpenRE — начало заголовка второго уровня в готовой разметке.
+var headingOpenRE = regexp.MustCompile(`(?i)<h2[\s>]`)
+
+// InsertBeforeMiddleHeading вставляет блок перед заголовком, ближайшим к середине страницы.
+//
+// Место выбирается так, чтобы блок стоял после текстового абзаца и перед разделом: в середине
+// длинной статьи это единственная точка, где картинка не разрывает мысль и не прилипает к
+// лиду. Заголовок ищется ближайший к середине по длине разметки, а не по счёту разделов:
+// разделы у нас неравные, и третий из девяти может оказаться в первой четверти страницы.
+//
+// Если заголовков нет вовсе, блок уходит в конец: потерять его хуже, чем поставить не там.
+func InsertBeforeMiddleHeading(markup, block string) string {
+	if strings.TrimSpace(block) == "" {
+		return markup
+	}
+	positions := headingOpenRE.FindAllStringIndex(markup, -1)
+	if len(positions) == 0 {
+		return strings.TrimSpace(markup) + "\n" + block
+	}
+	middle := len(markup) / 2
+	best := positions[0][0]
+	for _, position := range positions {
+		if abs(position[0]-middle) < abs(best-middle) {
+			best = position[0]
+		}
+	}
+	return strings.TrimSpace(markup[:best]) + "\n" + block + "\n" + markup[best:]
+}
+
+func abs(value int) int {
+	if value < 0 {
+		return -value
+	}
+	return value
 }

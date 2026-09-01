@@ -261,3 +261,126 @@ func TestLeadKeptIgnoresHeading(t *testing.T) {
 		t.Fatal("заголовок засчитан за лид")
 	}
 }
+
+// Служебные пометки модели и пустые теги в записи блога не нужны: комментарии видны в коде
+// страницы, пустой абзац рисует лишний отступ. Промпт это запрещает, но в статье 17 пришло
+// пятнадцать комментариев — значит держать обязан код.
+func TestCleanBlogMarkupDropsCommentsAndEmptyTags(t *testing.T) {
+	markup := `<!-- Блок D. Таблица --><p>текст</p><p></p><div><p>  </p></div><h2></h2>` +
+		`<table><tr><td></td><td>значение</td></tr></table>`
+	cleaned := CleanBlogMarkup(markup)
+
+	for _, unwanted := range []string{"<!--", "<p></p>", "<h2></h2>"} {
+		if strings.Contains(cleaned, unwanted) {
+			t.Fatalf("в разметке остался %q: %s", unwanted, cleaned)
+		}
+	}
+	if strings.Contains(cleaned, "<div>") {
+		t.Fatalf("обёртка, опустевшая после снятия абзаца, осталась: %s", cleaned)
+	}
+	// Пустая ячейка таблицы остаётся: без неё у соседних строк разъедутся столбцы.
+	if !strings.Contains(cleaned, "<td></td>") {
+		t.Fatalf("пустая ячейка таблицы удалена, столбцы разъедутся: %s", cleaned)
+	}
+	if !strings.Contains(cleaned, "<p>текст</p>") {
+		t.Fatalf("текст статьи пострадал: %s", cleaned)
+	}
+}
+
+// Источник — единственная внешняя ссылка статьи, и без неё цифрам нечем подтвердиться.
+// Стадия разметки узнаёт только строку, начинающуюся с «Источник:», а модель приписывает его
+// хвостом к абзацу — так в статье 17 не осталось ни одной ссылки.
+func TestLinkSourcesBuildsNofollowLinks(t *testing.T) {
+	markup := `<p>Вывод: Москва платит выше. Источник: hh.ru, SuperJob, 2026 г.</p>` +
+		`<p>Источник: <a href="https://rosstat.gov.ru/" rel="nofollow noopener">rosstat.gov.ru</a></p>`
+	linked := LinkSources(markup)
+
+	if !strings.Contains(linked, `<a href="https://hh.ru/" rel="nofollow noindex noopener" target="_blank">hh.ru</a>`) {
+		t.Fatalf("домен в хвосте абзаца не стал ссылкой: %s", linked)
+	}
+	if strings.Count(linked, "rosstat.gov.ru</a>") != 1 {
+		t.Fatalf("готовая ссылка обёрнута повторно: %s", linked)
+	}
+	if strings.Contains(linked, "SuperJob</a>") {
+		t.Fatalf("название без домена принято за адрес: %s", linked)
+	}
+}
+
+// Строку плашек стадия разметки теряет молча: в статье 17 заметки и таблицы она сверстала,
+// а ряд плашек выбросила вместе со строкой. Значения известны — блок собирает код.
+func TestRestoreStatsRebuildsLostRow(t *testing.T) {
+	page := "H1 - Заголовок\n\nЛид статьи.\n\nПЛАШКИ: от 320 ч | объём обучения ;; 2–4 мес. | срок ;; 2–6 разряд | уровень\n\nH2 - Раздел"
+	markup := "<p>Лид статьи.</p>\n<h2>Раздел</h2>"
+
+	restored := RestoreStats(page, markup)
+	if strings.Count(restored, "flex:1 1 150px") != 3 {
+		t.Fatalf("собрано не три плашки: %s", restored)
+	}
+	if !strings.Contains(restored, "от 320 ч") || !strings.Contains(restored, "объём обучения") {
+		t.Fatalf("значение или подпись потеряны: %s", restored)
+	}
+	if strings.Index(restored, "flex:1 1 150px") < strings.Index(restored, "<h2>") {
+		return
+	}
+	t.Fatalf("ряд плашек стоит после первого заголовка, а не сразу за лидом: %s", restored)
+}
+
+// Лид вставляет код, и жирное начертание из текста статьи он обязан перевести в теги: без
+// этого в блог уходит «<p>**Сантехник** — это специалист…» со звёздочками.
+func TestRestoreLeadConvertsBold(t *testing.T) {
+	page := "H1 - Заголовок\n\n**Сантехник** — это специалист, который отвечает за монтаж и ремонт систем <водоснабжения> и отопления в зданиях.\n\nH2 - Раздел"
+	restored := RestoreLead(page, "<h2>Раздел</h2>")
+
+	if !strings.Contains(restored, "<strong>Сантехник</strong>") {
+		t.Fatalf("жирное не переведено в тег: %s", restored)
+	}
+	if strings.Contains(restored, "**") {
+		t.Fatalf("звёздочки ушли в разметку: %s", restored)
+	}
+	if !strings.Contains(restored, "&lt;водоснабжения&gt;") {
+		t.Fatalf("угловые скобки из текста не экранированы: %s", restored)
+	}
+}
+
+// Ряд плашек, свёрстанный моделью, повторно не собирается. Признак ищется по стилю с любыми
+// пробелами: код пишет «flex:1 1 150px», модель — «flex: 1 1 150px», и дословное сравнение
+// пропустило её блок мимо — в статье 17 плашки встали дважды.
+func TestRestoreStatsSkipsExistingRow(t *testing.T) {
+	page := "H1 - Заголовок\n\nЛид.\n\nПЛАШКИ: от 320 ч | объём ;; 2–4 мес. | срок ;; 2–6 разряд | уровень"
+	markup := `<p>Лид.</p><div style="display: flex;"><div style="flex: 1 1 150px; background: #f5f7fa;">` +
+		`<span>от 320 ч</span><span>объём</span></div></div>`
+
+	if got := RestoreStats(page, markup); got != markup {
+		t.Fatalf("ряд плашек собран поверх готового: %s", got)
+	}
+}
+
+// Картинка ставится в середину статьи и перед заголовком, а не внутри раздела: так она не
+// разрывает мысль и не прилипает к лиду. Заголовок выбирается ближайший к середине по длине
+// разметки — разделы у нас неравные, и третий из девяти может оказаться в первой четверти.
+func TestInsertBeforeMiddleHeadingPicksMiddleSection(t *testing.T) {
+	markup := "<h2>Первый</h2><p>" + strings.Repeat("текст ", 40) + "</p>" +
+		"<h2>Второй</h2><p>" + strings.Repeat("текст ", 40) + "</p>" +
+		"<h2>Третий</h2><p>конец</p>"
+	block := `<img src="a.webp" />`
+
+	got := InsertBeforeMiddleHeading(markup, block)
+	if strings.Count(got, block) != 1 {
+		t.Fatalf("блок вставлен не один раз: %s", got)
+	}
+	before, _, _ := strings.Cut(got, block)
+	if !strings.Contains(before, "<h2>Первый</h2>") || strings.Contains(before, "<h2>Третий</h2>") {
+		t.Fatalf("блок встал не в середине: %s", before)
+	}
+	if !strings.HasSuffix(strings.TrimSpace(before), "</p>") {
+		t.Fatalf("блок встал не после абзаца: %s", before)
+	}
+}
+
+// Разметка без заголовков — законный случай: блок уходит в конец, потерять его хуже.
+func TestInsertBeforeMiddleHeadingWithoutHeadings(t *testing.T) {
+	got := InsertBeforeMiddleHeading("<p>только абзац</p>", `<img src="a.webp" />`)
+	if !strings.HasSuffix(got, `<img src="a.webp" />`) {
+		t.Fatalf("блок потерян или встал не в конец: %s", got)
+	}
+}
