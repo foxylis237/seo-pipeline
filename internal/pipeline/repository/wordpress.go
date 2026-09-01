@@ -26,7 +26,7 @@ func (r *ArticleRepository) GetPublicationInput(ctx context.Context, externalID 
 			COALESCE(i.meta_description, ''), COALESCE(i.header, ''),
 			` + r.metadataTLDR() + `, COALESCE(m.faq, ''),
 			` + r.inputColumn("seo_title") + `, ` + r.inputColumn("teachers") + `,
-			` + r.inputColumn("profession") + `,
+			` + r.inputColumn("profession") + `, ` + r.inputColumn("author") + `,
 			COALESCE(o.html_path, '')
 		FROM articles AS a
 		LEFT JOIN article_inputs AS i ON i.article_id = a.id
@@ -44,7 +44,7 @@ func (r *ArticleRepository) GetPublicationInput(ctx context.Context, externalID 
 		&input.Category, &input.Tags, &input.Keyword,
 		&input.MetaDescription, &input.Header,
 		&input.TLDR, &input.FAQ,
-		&input.SEOTitle, &input.Teachers, &input.Profession,
+		&input.SEOTitle, &input.Teachers, &input.Profession, &input.Author,
 		&input.HTMLPath,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {

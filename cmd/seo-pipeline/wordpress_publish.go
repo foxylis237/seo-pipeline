@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"log/slog"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/foxylis237/seo-pipeline/internal/config"
 	"github.com/foxylis237/seo-pipeline/internal/integrations/wordpress"
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/article"
+	"github.com/foxylis237/seo-pipeline/internal/pipeline/generation"
 	articleoutput "github.com/foxylis237/seo-pipeline/internal/pipeline/output"
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/repository"
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/result"
@@ -143,11 +145,17 @@ func runWordPressPublish(ctx context.Context, deps wordPressPublishDeps, externa
 	// принимает у картинки только идентификатор вложения, а дописать её к готовой записи
 	// нельзя — редактирование записей запрещено. Отказ на этом шаге оставляет блог без
 	// записи вовсе, то есть в состоянии, из которого повтор безопасен.
-	attachmentID, err := uploadWordPressCover(ctx, deps, externalID, plan)
+	media, err := uploadWordPressCover(ctx, deps, externalID, plan)
 	if err != nil {
 		return err
 	}
-	payload.ThumbnailID = attachmentID
+	payload.ThumbnailID = media.AttachmentID
+	// Картинка в тело статьи ставится здесь, а не на стадии вёрстки: её адрес известен только
+	// после загрузки в медиабиблиотеку. Сохранённый article.html остаётся без неё намеренно —
+	// он описывает работу модели, а не то, что собрала публикация.
+	if block := bodyImageBlock(media, plan.ImageAlt); block != "" {
+		payload.ContentHTML = generation.InsertBeforeMiddleHeading(payload.ContentHTML, block)
+	}
 
 	postID, err := deps.client.CreatePost(ctx, payload)
 	if err != nil {
@@ -231,11 +239,11 @@ func runWordPressPublish(ctx context.Context, deps wordPressPublishDeps, externa
 // хранится в articles.wordpress_post_id.
 func uploadWordPressCover(
 	ctx context.Context, deps wordPressPublishDeps, externalID string, plan wordPressPayloadContext,
-) (int64, error) {
+) (wordpress.UploadedMedia, error) {
 	image := plan.Image
 	file, err := deps.images.Load(image)
 	if err != nil {
-		return 0, err
+		return wordpress.UploadedMedia{}, err
 	}
 	// Подписи берутся из PostgreSQL и уходят тем же запросом, что и файл. Ни alt, ни title
 	// не выводятся из имени файла и не дописываются после загрузки: вложение с пустым alt —
@@ -248,7 +256,7 @@ func uploadWordPressCover(
 	if err != nil {
 		deps.logger.Error("обложка не загружена",
 			"external_id", externalID, "stage", "wordpress_publish", "image", image.Path, "error", err)
-		return 0, fmt.Errorf("загрузить обложку %s статьи %s: %w\n"+
+		return wordpress.UploadedMedia{}, fmt.Errorf("загрузить обложку %s статьи %s: %w\n"+
 			"Запись не создавалась, состояние статьи не изменилось — публикацию можно повторить.\n"+
 			"Если обрыв случился после отправки, файл мог уже лечь в медиабиблиотеку: повтор\n"+
 			"оставит там его копию, лишнюю удалите в админке",
@@ -259,8 +267,36 @@ func uploadWordPressCover(
 		"attachment_id", media.AttachmentID, "url", media.URL,
 		"bytes", len(file.Bits), "media_name", file.Name,
 		"alt", media.AltText, "title", media.Title)
-	return media.AttachmentID, nil
+	return media, nil
 }
+
+// bodyImageBlock — обложка внутри текста статьи и подпись с источником под ней.
+//
+// Картинка ставится той же, что и обложка записи: второй у статьи нет, а страница без единого
+// изображения проигрывает по вовлечению заметно. Классы — те же, что проставляет редактор
+// WordPress при вставке из медиабиблиотеки, чтобы блок не отличался от вставленного руками.
+//
+// Источник указывается всегда: сток требует атрибуции, и ссылка идёт с rel="nofollow", чтобы
+// не отдавать вес чужому сайту. Название стока здесь константа — все изображения у задачи
+// берутся с Pexels; сменится сток, менять надо тут.
+func bodyImageBlock(media wordpress.UploadedMedia, alt string) string {
+	if strings.TrimSpace(media.URL) == "" {
+		return ""
+	}
+	return fmt.Sprintf(
+		`<img class="alignnone size-full wp-image-%d" src="%s" alt="%s" />`+"\n"+
+			`<p>Источник изображения: <a href="%s" target="_blank" rel="nofollow noindex noopener">%s</a>.</p>`,
+		media.AttachmentID, html.EscapeString(media.URL), html.EscapeString(alt),
+		bodyImageStockURL, bodyImageStockName)
+}
+
+const (
+	// bodyImageStockURL и bodyImageStockName — сток, с которого берутся изображения статей.
+	// Ссылка ведёт на главную страницу: конкретный адрес фотографии нам неизвестен, а
+	// выдуманный был бы хуже отсутствующего.
+	bodyImageStockURL  = "https://www.pexels.com/ru-ru/"
+	bodyImageStockName = "Pexels"
+)
 
 // buildWordPressPayload собирает нагрузку и проверяет всё, что можно проверить локально.
 //

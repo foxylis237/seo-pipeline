@@ -82,6 +82,9 @@ type PublicationInput struct {
 	SEOTitle   string
 	Teachers   string
 	Profession string
+	// Author — авторы статьи из книги импорта, через запятую. Публикация ищет по ним карточку
+	// на сайте и связывает с ней запись.
+	Author string
 	// HTMLPath — путь к article.html относительно OUTPUT_DIR. Пуст, если стадия html не
 	// доходила до конца: тогда публиковать нечего.
 	HTMLPath string

@@ -107,6 +107,12 @@ func (m blogWordPressMapping) Build(
 	if err != nil {
 		return wordPressMappedPost{}, err
 	}
+	fields := blogCustomFields(input, faqItems, readingTime, tagNames, !deps.withoutArticleMetadata)
+	if authorID := resolveBlogAuthor(ctx, deps, externalID, input.Author); authorID != 0 {
+		fields = append(fields, wordpress.CustomField{
+			Key: blogFieldAuthor, Value: strconv.FormatInt(authorID, 10),
+		})
+	}
 	return wordPressMappedPost{
 		CategoryID:   categoryID,
 		CategoryName: strings.TrimSpace(input.Category),
@@ -115,8 +121,64 @@ func (m blogWordPressMapping) Build(
 		// PostgreSQL как есть и из загруженного файла не выводятся.
 		ImageAlt:   strings.TrimSpace(input.Header),
 		ImageTitle: strings.TrimSpace(input.Article.Slug),
-		Fields:     blogCustomFields(input, faqItems, readingTime, tagNames, !deps.withoutArticleMetadata),
+		Fields:     fields,
 	}, nil
+}
+
+// blogFieldAuthor — связь записи блога с карточкой автора (ACF, значение — идентификатор
+// записи типа author). Скаляр, а не сериализованный массив: WordPress пропускает значение
+// через maybe_serialize, и уже сериализованная строка сериализуется повторно, а скаляр ACF
+// разворачивает сама. Ровно так же устроена связь с преподавателем у pprof_2.
+const blogFieldAuthor = "author_link"
+
+// blogAuthorPostType — тип записей, которыми заведены авторы блога.
+//
+// Это НЕ teacher: карточки преподавателей курсов лежат отдельным типом, и у блога свой.
+// Проверено на записи 21607 — её author_link ведёт на запись 18279 типа author.
+const blogAuthorPostType = "author"
+
+// resolveBlogAuthor выбирает первого автора статьи, у которого есть карточка на сайте.
+//
+// В книге импорта колонка перечисляет нескольких человек через запятую, и карточка есть не у
+// каждого: из трёх авторов статьи 17 на сайте заведены двое. Поэтому берётся первый
+// найденный, а не первый в списке.
+//
+// Порядок слов в книге и на сайте разный: в Excel «Вячеслав Борисович Воинов», на сайте
+// «Воинов Вячеслав Борисович». Поэтому имя ищется в обоих видах.
+//
+// Отсутствие карточки публикацию не роняет: связь автора — украшение записи, а не условие её
+// существования, и статья без него уходит в блог как раньше. Причина остаётся в логе.
+func resolveBlogAuthor(
+	ctx context.Context, deps wordPressPublishDeps, externalID, authors string,
+) int64 {
+	for _, name := range wordpress.SplitTermNames(authors) {
+		for _, variant := range authorNameVariants(name) {
+			id, err := deps.client.FindPostIDByTitle(ctx, blogAuthorPostType, variant)
+			if err == nil && id != 0 {
+				deps.logger.Info("автор статьи найден", "external_id", externalID,
+					"stage", "wordpress_publish", "author", variant, "author_post_id", id)
+				return id
+			}
+		}
+	}
+	if strings.TrimSpace(authors) != "" {
+		deps.logger.Warn("карточка автора не найдена, связь не заполняется",
+			"external_id", externalID, "stage", "wordpress_publish", "authors", authors)
+	}
+	return 0
+}
+
+// authorNameVariants возвращает написания ФИО, под которыми карточка может быть заведена.
+//
+// Первым идёт «Фамилия Имя Отчество» — так названы карточки на сайте; вторым исходное
+// написание из книги, на случай если порядок там уже правильный.
+func authorNameVariants(name string) []string {
+	name = strings.TrimSpace(name)
+	parts := strings.Fields(name)
+	if len(parts) != 3 {
+		return []string{name}
+	}
+	return []string{parts[2] + " " + parts[0] + " " + parts[1], name}
 }
 
 // blogCustomFields раскладывает данные статьи по полям темы dpoprof.

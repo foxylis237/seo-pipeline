@@ -84,6 +84,7 @@ type fakeWPClient struct {
 	// Поля страницы услуги: рубрика своей таксономии и связь с записью преподавателя.
 	termLookups   []string
 	postLookups   []string
+	postIDs       map[string]int64
 	teacherID     int64
 	teacherErr    error
 	dropField     string
@@ -102,11 +103,20 @@ func (c *fakeWPClient) FindTermIDInTaxonomy(_ context.Context, taxonomy, name st
 	return c.categoryID, c.categoryErr
 }
 
-// FindPostIDByTitle обслуживает связь с преподавателем: ACF хранит идентификатор записи.
+// FindPostIDByTitle обслуживает связь с преподавателем и с автором блога: ACF хранит
+// идентификатор записи. postIDs задаёт, какие карточки на площадке есть; пустая карта —
+// прежнее поведение, когда любой заголовок отвечает teacherID.
 func (c *fakeWPClient) FindPostIDByTitle(_ context.Context, postType, title string) (int64, error) {
 	c.postLookups = append(c.postLookups, postType+"/"+title)
 	if c.teacherErr != nil {
 		return 0, c.teacherErr
+	}
+	if c.postIDs != nil {
+		id, ok := c.postIDs[postType+"/"+title]
+		if !ok {
+			return 0, &wordpress.ErrPostNotFound{PostType: postType, Title: title}
+		}
+		return id, nil
 	}
 	return c.teacherID, nil
 }
@@ -338,9 +348,22 @@ func TestPublishSendsCompletePayload(t *testing.T) {
 	if payload.Title != "Разряды газосварщиков: категории и зарплата" {
 		t.Fatalf("заголовок = %q", payload.Title)
 	}
-	// Тело статьи уходит как есть: ни обрезки, ни переупаковки.
-	if payload.ContentHTML != testWPArticleHTML {
-		t.Fatalf("тело записи изменено: %q", payload.ContentHTML)
+	// Текст статьи уходит как есть: ни обрезки, ни переупаковки. Сверх него публикация
+	// дописывает ровно один блок — загруженную обложку внутрь текста и подпись с источником.
+	// Адрес картинки известен только после загрузки в медиабиблиотеку, поэтому собрать блок
+	// на стадии вёрстки нельзя, и сохранённый article.html остаётся без него.
+	if !strings.HasPrefix(payload.ContentHTML, testWPArticleHTML) {
+		t.Fatalf("текст статьи изменён: %q", payload.ContentHTML)
+	}
+	for _, want := range []string{
+		`<img class="alignnone size-full wp-image-21610"`,
+		`src="https://example.test/wp-content/uploads/2026/08/razryady-gazosvarshchikov.webp"`,
+		`alt="Разряды газосварщиков: какие бывают"`,
+		`Источник изображения: <a href="https://www.pexels.com/ru-ru/" target="_blank" rel="nofollow noindex noopener">Pexels</a>.`,
+	} {
+		if !strings.Contains(payload.ContentHTML, want) {
+			t.Fatalf("в теле записи нет %q: %q", want, payload.ContentHTML)
+		}
 	}
 	if payload.CategoryID != 2575 {
 		t.Fatalf("рубрика = %d", payload.CategoryID)
@@ -1097,5 +1120,36 @@ func TestWordPressSlug(t *testing.T) {
 		if got := wordPressSlug(value); got != want {
 			t.Errorf("wordPressSlug(%q) = %q, ожидалось %q", value, got, want)
 		}
+	}
+}
+
+// Автор записи блога — связь с карточкой типа author, а не teacher: карточки преподавателей
+// курсов лежат отдельным типом. В книге импорта авторов несколько через запятую, и карточка
+// есть не у каждого — из трёх авторов статьи 17 на площадке заведены двое. Берётся первый
+// найденный, а не первый в списке.
+func TestBlogAuthorResolvedByExistingCard(t *testing.T) {
+	deps, _, client, _, _ := newWPPublishDeps()
+	// Порядок слов на сайте обратный тому, что в книге: «Фамилия Имя Отчество».
+	client.postIDs = map[string]int64{"author/Попов Станислав Николаевич": 18279}
+
+	id := resolveBlogAuthor(context.Background(), deps, "17",
+		"Вячеслав Борисович Воинов, Станислав Николаевич Попов, Артём Ильич Афанасьев")
+
+	if id != 18279 {
+		t.Fatalf("автор не найден или найден не тот: %d", id)
+	}
+	if len(client.postLookups) == 0 || client.postLookups[0] != "author/Воинов Вячеслав Борисович" {
+		t.Fatalf("первым искали не «Фамилия Имя Отчество»: %v", client.postLookups)
+	}
+}
+
+// Ни одной карточки — публикация продолжается без связи: автор украшает запись, а не является
+// условием её существования.
+func TestBlogAuthorMissingDoesNotFail(t *testing.T) {
+	deps, _, client, _, _ := newWPPublishDeps()
+	client.postIDs = map[string]int64{}
+
+	if id := resolveBlogAuthor(context.Background(), deps, "17", "Иван Иванович Иванов"); id != 0 {
+		t.Fatalf("найден несуществующий автор: %d", id)
 	}
 }
