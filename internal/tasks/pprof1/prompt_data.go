@@ -36,7 +36,7 @@ func articleData(input article.GenerationInput, structure string) any {
 }
 
 // expertData — поля deepseek/1_expert.txt. Ключей и LSI здесь нет намеренно: специалист
-// пишет текст по структуре, а SEO-требования применяет следующая стадия.
+// пишет текст по структуре, а SEO-требования применяет стадия редактуры.
 func expertData(input article.GenerationInput, structure string) any {
 	return struct {
 		Title              string
@@ -44,7 +44,8 @@ func expertData(input article.GenerationInput, structure string) any {
 	}{input.Article.Title, structure}
 }
 
-// editorData — поля deepseek/2_seo_editor.txt. Статью стадия не получает: она уже в чате.
+// editorData — поля 2_editor.txt. Статью стадия не получает: она уже в чате, как и
+// регламент, приложенный к первому сообщению.
 func editorData(input article.GenerationInput) any {
 	return struct {
 		Keywords string

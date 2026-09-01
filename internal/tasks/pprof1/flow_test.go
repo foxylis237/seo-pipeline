@@ -188,7 +188,7 @@ func TestFlowUsesThreeChats(t *testing.T) {
 	}
 	want := [][]string{
 		{StageStructure},
-		{StageExpert, StageSEOEditor, StageInfo, StageReview},
+		{StageExpert, StageReview, StageInfo},
 		{StageHTML},
 	}
 	for index, expected := range want {
@@ -238,10 +238,12 @@ func TestArticleChatSavesEveryArtifact(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// review_path указывает на тот же финальный файл, что и fixed_article_path: отдельного
+	// текста после SEO-редактуры больше нет, а пустой слот раннер считает невыполненным этапом.
 	for name, path := range map[string]string{
-		"article":        repository.saved.ArticlePath,
-		"edited article": repository.editedArticlePath,
-		"final article":  repository.finalArticlePath,
+		"article":       repository.saved.ArticlePath,
+		"review path":   repository.editedArticlePath,
+		"final article": repository.finalArticlePath,
 	} {
 		if strings.TrimSpace(path) == "" {
 			t.Fatalf("артефакт %s не сохранён", name)

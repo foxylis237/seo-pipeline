@@ -172,10 +172,9 @@ func dryRunStageResponses(reviewReturnsArticle bool) map[string]string {
 		"review":    "Структура и содержание подходят для локальной проверки. Критичных замечаний нет.",
 		"fix":       reviewedArticle,
 		"html":      dryRunHTML(),
-		// Стадии собственных потоков задач. expert и seo_editor возвращают текст статьи:
-		// в потоке pprof_1 они и есть автор и редактор.
-		"expert":     dryRunArticle,
-		"seo_editor": reviewedArticle,
+		// Стадии собственных потоков задач. expert возвращает текст статьи: в потоке
+		// pprof_1 это автор, а редактуру и ревью делает одна стадия review.
+		"expert": dryRunArticle,
 		// keywords — резервный подбор запросов в prepare. В офлайн-прогоне research
 		// подставляется напрямую, но ответ пусть будет: стадия объявлена в схеме задач.
 		"keywords": "тестовый запрос\nпроверка dry-run",

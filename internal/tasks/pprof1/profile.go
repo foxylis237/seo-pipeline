@@ -20,10 +20,12 @@ const (
 const (
 	StageStructure = "structure"
 	StageExpert    = "expert"
-	StageSEOEditor = "seo_editor"
 	StageInfo      = "info"
-	StageReview    = "review"
 	StageHTML      = "html"
+
+	// StageReview — SEO-редактура и ревью одним сообщением. Прежде их было два, seo_editor
+	// и review; они просили у модели одно и то же и вдвоём меняли около 1% слов статьи.
+	StageReview = "review"
 
 	// StageArticle — старый базовый промпт статьи. В LLM он не уходит: стадия существует
 	// только чтобы собрать промпт из входных данных и research, сохранить его артефактом и
@@ -38,7 +40,7 @@ const (
 // Stages — стадии, без которых схема pprof_1 неполна.
 var Stages = []string{
 	StageKeywords, StageStructure, StageArticle,
-	StageExpert, StageSEOEditor, StageInfo, StageReview, StageHTML,
+	StageExpert, StageReview, StageInfo, StageHTML,
 }
 
 // Profile возвращает конфигурацию pprof_1.

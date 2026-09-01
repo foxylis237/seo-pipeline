@@ -36,7 +36,6 @@ type Writer interface {
 	StageStructure(externalID, slug, prompt, structure string) (*articleoutput.PendingArtifact, error)
 	StageArticle(externalID, slug, prompt, text, model string) (*articleoutput.PendingArtifact, error)
 	StageArticleInfo(externalID, slug, prompt, info string) (*articleoutput.PendingArtifact, error)
-	StageReview(externalID, slug, prompt, review string) (*articleoutput.PendingArtifact, error)
 	StageFixedArticle(externalID, slug, prompt, article string) (*articleoutput.PendingArtifact, error)
 	StageHTML(externalID, slug, prompt, html string) (*articleoutput.PendingArtifact, error)
 	Read(relativePath string) (string, error)
@@ -55,7 +54,7 @@ const (
 // Три чата, и границы между ними значимы:
 //
 //	Чат 1: structure
-//	Чат 2: expert → seo_editor → info → review
+//	Чат 2: expert → review → info
 //	Чат 3: html
 //
 // Внутри чата 2 каждое следующее сообщение опирается на историю: промпты так и написаны
@@ -163,7 +162,7 @@ func (f *Flow) RunStructure(ctx context.Context, externalID string) error {
 	return nil
 }
 
-// RunArticle выполняет чат 2 целиком: expert → seo_editor → info → review.
+// RunArticle выполняет чат 2 целиком: expert → review → info.
 //
 // Чат неделим намеренно. Каждое сообщение опирается на историю предыдущих, а браузерная
 // беседа не переживает завершения процесса — значит и возобновлять её посередине нечем.
@@ -208,20 +207,21 @@ func (f *Flow) RunArticle(ctx context.Context, externalID string) error {
 type articleChatOutput struct {
 	expertPrompt  string
 	expertArticle string
-	editorPrompt  string
-	editedArticle string
+	reviewPrompt  string
+	finalArticle  string
 	infoPrompt    string
 	infoText      string
 	parsedInfo    article.ArticleInfo
-	reviewPrompt  string
-	finalArticle  string
 }
 
-// runArticleChat проводит четыре сообщения чата 2. Чат открывается и закрывается здесь же:
+// runArticleChat проводит три сообщения чата 2. Чат открывается и закрывается здесь же:
 // продолжать его снаружи нечем и незачем.
+//
+// Метаданные идут последними намеренно: TL;DR и FAQ обязаны описывать тот текст, который уйдёт
+// в блог, а не черновик до редактуры.
 func (f *Flow) runArticleChat(ctx context.Context, logger *slog.Logger, input article.GenerationInput, structure string) (articleChatOutput, error) {
 	var out articleChatOutput
-	chat, err := f.NewChat(ctx, input.Article.ID, StageExpert, StageSEOEditor, StageInfo, StageReview)
+	chat, err := f.NewChat(ctx, input.Article.ID, StageExpert, StageReview, StageInfo)
 	if err != nil {
 		return out, f.Fail(ctx, logger, input.Article, "article_generation", err)
 	}
@@ -235,12 +235,14 @@ func (f *Flow) runArticleChat(ctx context.Context, logger *slog.Logger, input ar
 	out.expertArticle = generation.NormalizeHeadings(out.expertArticle)
 	logger.Info("expert article generated", "stage", "article_generation", "prompt_size", len([]rune(out.expertPrompt)))
 
-	if out.editorPrompt, out.editedArticle, err = f.Message(ctx, chat.Continue,
-		StageSEOEditor, editorData(input)); err != nil {
-		return out, f.Fail(ctx, logger, input.Article, "seo_editing", err)
+	if out.reviewPrompt, out.finalArticle, err = f.Message(ctx, chat.Continue,
+		StageReview, editorData(input)); err != nil {
+		return out, f.Fail(ctx, logger, input.Article, "article_review", err)
 	}
-	out.editedArticle = generation.NormalizeHeadings(out.editedArticle)
-	logger.Info("seo editing completed", "stage", "seo_editing")
+	// Запись заголовков приводится к одному виду до сохранения: стадия html расставляет теги
+	// по ней, а модель за один прогон свободно переходит с «H2 - » на «H2:» и на Markdown.
+	out.finalArticle = generation.NormalizeHeadings(out.finalArticle)
+	logger.Info("article review completed", "stage", "article_review")
 
 	if out.infoPrompt, out.infoText, err = f.Message(ctx, chat.Continue,
 		StageInfo, struct{}{}); err != nil {
@@ -254,28 +256,21 @@ func (f *Flow) runArticleChat(ctx context.Context, logger *slog.Logger, input ar
 			"has_tldr", out.parsedInfo.TLDR != "", "has_faq", out.parsedInfo.FAQ != "")
 	}
 	logger.Info("article info generated", "stage", "metadata_generation")
-
-	if out.reviewPrompt, out.finalArticle, err = f.Message(ctx, chat.Continue,
-		StageReview, struct{}{}); err != nil {
-		return out, f.Fail(ctx, logger, input.Article, "article_review", err)
-	}
-	// Запись заголовков приводится к одному виду до сохранения: стадия html расставляет теги
-	// по ней, а модель за один прогон свободно переходит с «H2 - » на «H2:» и на Markdown.
-	out.finalArticle = generation.NormalizeHeadings(out.finalArticle)
-	logger.Info("article review completed", "stage", "article_review")
 	return out, nil
 }
 
 // saveArticleChat публикует артефакты чата 2 одним Commit и отдаёт базовый промпт в очередь
 // публикации.
 //
-// Результаты названы по смыслу, а хранятся в существующих слотах движка. Слот и смысл здесь
-// намеренно разведены: у pprof_1 текстов шесть, а слотов пять, и review.txt занят статьёй
-// после SEO-редактуры, а не списком замечаний. Соответствие:
+// Результаты названы по смыслу, а хранятся в существующих слотах движка:
 //
 //	expertArticle → article.txt        (текст практикующего специалиста)
-//	editedArticle → review.txt         (он же после SEO-редактуры)
-//	finalArticle  → fixed_article.txt  (финальный текст после ревью)
+//	finalArticle  → fixed_article.txt  (он же после редактуры — финальный текст)
+//
+// Отдельного файла review.txt больше нет: SEO-редактура и ревью слились в одну стадию, и
+// третьего текста статьи она не создаёт. Слот review_path при этом пустым оставлять нельзя —
+// раннер считает этап невыполненным по пустому пути, — поэтому он указывает на тот же
+// финальный файл, как это сделано у pprof_2.
 //
 // HTML и сборка result.md дальше читают именно finalArticle.
 func (f *Flow) saveArticleChat(ctx context.Context, logger *slog.Logger, input article.GenerationInput, externalID, basePrompt string, chat articleChatOutput) error {
@@ -285,11 +280,6 @@ func (f *Flow) saveArticleChat(ctx context.Context, logger *slog.Logger, input a
 		return f.Fail(ctx, logger, selected, "save_article", err)
 	}
 	defer expertPending.Abort()
-	editedPending, err := f.writer.StageReview(selected.ExternalID, selected.Slug, chat.editorPrompt, chat.editedArticle)
-	if err != nil {
-		return f.Fail(ctx, logger, selected, "save_seo_edited_article", err)
-	}
-	defer editedPending.Abort()
 	infoPending, err := f.writer.StageArticleInfo(selected.ExternalID, selected.Slug, chat.infoPrompt, chat.infoText)
 	if err != nil {
 		return f.Fail(ctx, logger, selected, "save_article_info", err)
@@ -312,11 +302,11 @@ func (f *Flow) saveArticleChat(ctx context.Context, logger *slog.Logger, input a
 		if err := f.repository.SaveArticleInfo(ctx, selected.ID, chat.infoText, chat.parsedInfo); err != nil {
 			return err
 		}
-		if err := f.repository.SaveReviewPath(ctx, selected.ID, editedPending.Paths.ReviewPath); err != nil {
+		if err := f.repository.SaveReviewPath(ctx, selected.ID, finalPending.Paths.FixedArticlePath); err != nil {
 			return err
 		}
 		return f.repository.SaveFixedArticlePath(ctx, selected.ID, finalPending.Paths.FixedArticlePath)
-	}, expertPending, editedPending, infoPending, finalPending)
+	}, expertPending, infoPending, finalPending)
 	if commitErr != nil {
 		return f.Fail(ctx, logger, selected, "save_article_state", commitErr)
 	}
@@ -416,14 +406,15 @@ func (f *Flow) RunHTML(ctx context.Context, externalID string) error {
 // стадию — за генерацию уже заплачено, и статья с неидеальной разметкой полезнее, чем
 // отсутствие статьи.
 //
-// Лид возвращается кодом, без запроса к модели: у длинной статьи разметка не помещается в
-// один ответ, и просьба «верни страницу заново» обрывалась бы ровно так же, как первый ответ.
+// Лид и ряд плашек возвращаются кодом, без запроса к модели: у длинной статьи разметка не
+// помещается в один ответ, и просьба «верни страницу заново» обрывалась бы ровно так же, как
+// первый ответ. Оба блока известны целиком и место их известно, придумывать нечего.
 // Ссылки перелинковки код вставить не может — анкор придумывать некому, — поэтому недостающие
 // просят у модели одним заходом, и он идёт через то же дописывание, что и первый ответ. Не
 // вставленные и после этого ссылки остаются предупреждением в логе.
 func (f *Flow) completeHTMLPage(ctx context.Context, logger *slog.Logger, chat taskflow.Chat,
 	page, links, markup string) string {
-	markup = generation.CleanBlogMarkup(generation.DropHeading1(markup))
+	markup = generation.LinkSources(generation.RestoreStats(page, generation.CleanBlogMarkup(generation.DropHeading1(markup))))
 	if !generation.LeadKept(page, markup) {
 		markup = generation.RestoreLead(page, markup)
 		logger.Warn("вводный абзац возвращён в разметку кодом", "stage", "html_generation")
@@ -454,7 +445,7 @@ func (f *Flow) completeHTMLPage(ctx context.Context, logger *slog.Logger, chat t
 			"stage", "html_generation", "error", err)
 		return markup
 	}
-	repaired = generation.CleanBlogMarkup(generation.DropHeading1(repaired))
+	repaired = generation.LinkSources(generation.RestoreStats(page, generation.CleanBlogMarkup(generation.DropHeading1(repaired))))
 	repaired = generation.RestoreLead(page, repaired)
 	// Исправленную разметку берём, только если она и правда лучше: ремонт вправе выйти
 	// короче или потерять хвост, и менять целую страницу на половину смысла нет.

@@ -339,7 +339,7 @@ func sortedKeys(set map[string]struct{}) []string {
 //
 // stageOrder задаёт, какие стадии печатать и в каком порядке: набор у задач разный, и общий
 // список превращал бы отчёт в ложь — у pprof_2 он показывал бы «не настроена» на стадиях
-// info и fix, которых у задачи нет вовсе, и молчал бы про seo_editor, которая есть.
+// info и fix, которых у задачи нет вовсе, и молчал бы про expert, которая есть у pprof_1.
 func writeRoutingReport(destination io.Writer, routing resolvedRouting, stageOrder []string) error {
 	var report strings.Builder
 	fmt.Fprintf(&report, "Режим: %s — %s\n\nПровайдеры:\n", routing.Scheme, routing.Reason)
