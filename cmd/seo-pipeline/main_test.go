@@ -77,7 +77,7 @@ func TestParseCommand(t *testing.T) {
 		// Глобальный вход: вне пространства задач, профиль у команды пуст.
 		{[]string{"seo-pipeline", "login", "deepseek"}, taskCommand{Name: "login", Service: "deepseek"}, ""},
 		{[]string{"seo-pipeline", "login", "google"}, taskCommand{Name: "login", Service: "google"}, ""},
-		{[]string{"seo-pipeline", "login", "keysso"}, taskCommand{}, "входит автоматически"},
+		{[]string{"seo-pipeline", "login", "keysso"}, taskCommand{Name: "login", Service: "keysso"}, ""},
 		{[]string{"seo-pipeline", "login", "arsenkin"}, taskCommand{}, "входит автоматически"},
 		{[]string{"seo-pipeline", "login", "unknown"}, taskCommand{}, "unknown login service"},
 		{[]string{"seo-pipeline", "login"}, taskCommand{}, "usage: seo-pipeline login"},

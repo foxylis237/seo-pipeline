@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/foxylis237/seo-pipeline/internal/config"
@@ -236,25 +237,116 @@ func TestPrepareDoesNotRunArsenkinWhenFallbackAnswerIsUnusable(t *testing.T) {
 	}
 }
 
-// TestPrepareKeepsTechnicalKeysSOFailureAsFailure: подмена источника лечит только отсутствие
-// данных. Таймаут остаётся отказом этапа, иначе поломка интеграции пряталась бы за моделью.
-func TestPrepareKeepsTechnicalKeysSOFailureAsFailure(t *testing.T) {
+// TestPrepareUsesFallbackWhenKeysSORefused: статья не встаёт из-за сервиса — при лимите или
+// таймауте запросы подбирает модель. Отказ при этом не прячется: отчёт prepare называет его
+// проблемой Keys.so, чем он и отличается от честного «у конкурента запросов нет».
+func TestPrepareUsesFallbackWhenKeysSORefused(t *testing.T) {
+	for name, test := range map[string]struct {
+		err     error
+		problem string
+	}{
+		"лимит": {
+			err:     &keysso.StageError{Stage: "collect_competitor_queries", Err: fmt.Errorf("wait: %w", keysso.ErrDailyLimit)},
+			problem: "исчерпан дневной лимит аккаунта",
+		},
+		"таймаут": {
+			err:     &keysso.StageError{Stage: "wait_search_results", Err: errors.New("Keys.so timed out")},
+			problem: "сервис не ответил на этапе wait_search_results",
+		},
+		"нет данных": {err: noRawKeywordsError(), problem: ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			repository := oldPrepareRepositoryState()
+			repository.trace = article.Trace{
+				ArticleID: 7, ExternalID: "37", Title: "Как стать бариста",
+				Keyword: "бариста", ReferenceURL: "https://example.test/barista",
+			}
+			fallback := &fakeKeywordsFallback{queries: []string{"обучение бариста", "работа бариста"}}
+			var submitted []string
+			artifacts := newFakePrepareArtifacts()
+
+			err := prepareArticleWithCollectors(
+				context.Background(), repository, config.Config{}, testPrepareLogger(), artifacts, testBaristaArticle(),
+				fakeKeysSOCollector{
+					err:         test.err,
+					cleanResult: keysso.CollectResult{CollectedCount: 2, CleanedKeywords: []string{"обучение бариста", "работа бариста"}},
+				},
+				fakeArsenkinCollector{submitted: &submitted, result: arsenkin.Result{
+					WordstatKeywords: []arsenkin.KeywordFrequency{{Query: "обучение бариста", Frequency: 900}},
+					LSIWords:         []string{"кофе"}, CompetitorStructure: "H1 Бариста",
+				}},
+				fallback,
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if fallback.calls != 1 {
+				t.Fatalf("резервный источник вызван %d раз", fallback.calls)
+			}
+			if !reflect.DeepEqual(submitted, []string{"обучение бариста", "работа бариста"}) {
+				t.Fatalf("в Arsenkin ушло %v", submitted)
+			}
+			check := prepareCheck(t, artifacts.report(t), "keywords_fallback")
+			if check.Details["keysso_problem"] != test.problem {
+				t.Fatalf("keysso_problem = %q, want %q", check.Details["keysso_problem"], test.problem)
+			}
+		})
+	}
+}
+
+// TestPrepareDoesNotUseFallbackWhenKeysSOLoginFailed: без входа не пройдёт и очистка от дублей,
+// поэтому модель не зовётся, а ошибка говорит, как войти вручную.
+func TestPrepareDoesNotUseFallbackWhenKeysSOLoginFailed(t *testing.T) {
 	repository := oldPrepareRepositoryState()
 	want := repository.research
 	fallback := &fakeKeywordsFallback{queries: []string{"подобранный моделью запрос"}}
-	wantErr := &keysso.StageError{Stage: "wait_search_results", Err: errors.New("Keys.so timed out")}
+	wantErr := &keysso.StageError{Stage: "check_authorization", Err: errors.New("wait for Keys.so authorization: timeout")}
 
 	err := prepareArticleWithCollectors(
 		context.Background(), repository, config.Config{}, testPrepareLogger(), newFakePrepareArtifacts(), testPreparedArticle(),
 		fakeKeysSOCollector{err: wantErr}, fakeArsenkinCollector{}, fallback,
 	)
-	if !errors.Is(err, wantErr) {
-		t.Fatalf("error = %v, want %v", err, wantErr)
+	if !errors.Is(err, wantErr) || !strings.Contains(err.Error(), "make login keysso") {
+		t.Fatalf("error = %v, want %v with login hint", err, wantErr)
 	}
 	if fallback.calls != 0 {
-		t.Fatalf("резервный источник вызван %d раз на техническом отказе Keys.so", fallback.calls)
+		t.Fatalf("резервный источник вызван %d раз при несостоявшемся входе", fallback.calls)
 	}
 	assertOldPrepareResultsPreserved(t, repository, want)
+}
+
+// TestPrepareWithoutKeysSOLetsModelCollectAndClean: при выключенном Keys.so запросы подбирает
+// модель, повторы снимает код, в Arsenkin уходит очищенный список, а отчёт prepare говорит, что
+// Keys.so не спрашивали.
+func TestPrepareWithoutKeysSOLetsModelCollectAndClean(t *testing.T) {
+	repository := oldPrepareRepositoryState()
+	repository.trace = article.Trace{
+		ArticleID: 7, ExternalID: "37", Title: "Как стать бариста",
+		Keyword: "бариста", ReferenceURL: "https://example.test/barista",
+	}
+	fallback := &fakeKeywordsFallback{queries: []string{"обучение бариста", "Обучение  бариста", "работа бариста"}}
+	var submitted []string
+	artifacts := newFakePrepareArtifacts()
+
+	err := prepareArticleWithCollectors(
+		context.Background(), repository, config.Config{}, testPrepareLogger(), artifacts, testBaristaArticle(),
+		modelOnlyKeywords{},
+		fakeArsenkinCollector{submitted: &submitted, result: arsenkin.Result{
+			WordstatKeywords: []arsenkin.KeywordFrequency{{Query: "обучение бариста", Frequency: 900}},
+			LSIWords:         []string{"кофе"}, CompetitorStructure: "H1 Бариста",
+		}},
+		fallback,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(submitted, []string{"обучение бариста", "работа бариста"}) {
+		t.Fatalf("в Arsenkin ушло %v", submitted)
+	}
+	check := prepareCheck(t, artifacts.report(t), "keywords_fallback")
+	if check.Details["keysso_problem"] != errKeysSODisabled.Error() {
+		t.Fatalf("keysso_problem = %q", check.Details["keysso_problem"])
+	}
 }
 
 // TestPrepareSkipsFallbackForManualKeywords: резервный подбор нужен там, где исходных

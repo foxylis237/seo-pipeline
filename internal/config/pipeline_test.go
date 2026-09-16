@@ -45,6 +45,9 @@ func TestLoadPipelineConfigKeepsDefaultForMissingKey(t *testing.T) {
 	if !cfg.GoogleDocs {
 		t.Fatal("необъявленный ключ потерял умолчание")
 	}
+	if !cfg.KeysSO {
+		t.Fatal("Keys.so выключился у задачи, которая о ключе не знает")
+	}
 }
 
 func TestLoadPipelineConfigReadsBothSwitches(t *testing.T) {

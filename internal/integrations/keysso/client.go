@@ -143,6 +143,7 @@ const (
 	resultNavigationError resultKind = "navigation_error"
 	resultTimeout         resultKind = "timeout"
 	resultUnexpectedPage  resultKind = "unexpected_page"
+	resultLimitExceeded   resultKind = "limit_exceeded"
 )
 
 type resultError struct {
@@ -272,6 +273,21 @@ var ErrNoRawKeywords = errors.New("Keys.so вернул пустой списо�
 // Таймауты, отказ авторизации и сломанная навигация сюда не попадают.
 func NoRawKeywords(err error) bool { return errors.Is(err, ErrNoRawKeywords) }
 
+// keywordsDailyLimitText is the heading Keys.so shows in place of the results once the quota is spent.
+const keywordsDailyLimitText = "Превышен лимит анализируемых доменов"
+
+// ErrDailyLimit — Keys.so refused the analysis: the account spent its daily quota of analyzed
+// domains. Retrying the same day only burns minutes per article, and the model fallback must
+// not start either: the competitor may well have queries, Keys.so just would not show them.
+var ErrDailyLimit = errors.New("Keys.so: превышен дневной лимит анализируемых доменов, повторить завтра или сменить тариф")
+
+// LoginFailed reports that Keys.so did not let the account in. Every later request needs the
+// session, the duplicate cleanup included, so no other source of queries can finish the stage.
+func LoginFailed(err error) bool {
+	var stageErr *StageError
+	return errors.As(err, &stageErr) && stageErr.Stage == "check_authorization"
+}
+
 // keywordsResultStateJS решает, что показала страница результатов Keys.so: успех, пустой
 // ответ, техработы, ошибку навигации — или ничего из этого, и тогда ждём дальше.
 //
@@ -279,6 +295,7 @@ func NoRawKeywords(err error) bool { return errors.Is(err, ErrNoRawKeywords) }
 // тестом по вызову WaitForFunction нечем.
 const keywordsResultStateJS = `selectors => {
 			if (location.protocol === 'chrome-error:') return 'navigation_error';
+			if ((document.body?.textContent || '').includes(selectors.dailyLimit)) return 'limit_exceeded';
 			if ((document.title || '').trim() === selectors.maintenance ||
 				(document.body?.innerText || '').trim() === selectors.maintenance) return 'maintenance';
 			const loaders = Array.from(document.querySelectorAll(selectors.loader));
@@ -637,6 +654,13 @@ func (s *Service) submitCompetitorSearch(ctx context.Context, referenceURL strin
 		if restrictionErr := s.detectAccessRestriction("wait_search_results_url"); restrictionErr != nil {
 			return restrictionErr
 		}
+		// Keys.so opens the domain report instead of the page results when it knows nothing
+		// about the page: the report of such a domain shows zero pages in search. Waiting for
+		// the results URL again cannot change that answer.
+		if isExpectedKeysSOPage(s.currentURL(), "/ru/report") {
+			return &resultError{Kind: resultNoData, Retryable: false,
+				Err: fmt.Errorf("%w: Keys.so открыл отчёт домена вместо запросов страницы %s", ErrNoRawKeywords, referenceURL)}
+		}
 		return &resultError{Kind: resultNavigationError, Retryable: true, Err: fmt.Errorf("Keys.so navigation failed: %w", err)}
 	}
 	if response != nil {
@@ -744,6 +768,7 @@ func (s *Service) waitKeywordsResultsOnce(ctx context.Context) error {
 			"emptyInfo": keywordsEmptyInfoSelector, "emptySettle": keywordsEmptySettleMilliseconds,
 			"pageSize": pageSizeSelector, "loader": keywordsLoaderSelector,
 			"noData": "Нет данных", "maintenance": "Технические работы на сайте",
+			"dailyLimit": keywordsDailyLimitText,
 		},
 		playwright.PageWaitForFunctionOptions{Timeout: playwright.Float(longOperationTimeoutMilliseconds)},
 	)
@@ -760,6 +785,8 @@ func (s *Service) waitKeywordsResultsOnce(ctx context.Context) error {
 		return nil
 	case resultNoData:
 		return &resultError{Kind: resultNoData, Retryable: false, Err: fmt.Errorf("%w: страница результатов для %s пуста", ErrNoRawKeywords, s.referenceURL)}
+	case resultLimitExceeded:
+		return &resultError{Kind: resultLimitExceeded, Retryable: false, Err: ErrDailyLimit}
 	case resultMaintenance:
 		return &resultError{Kind: resultMaintenance, Retryable: true, Err: fmt.Errorf("Keys.so is unavailable: maintenance page detected")}
 	case resultNavigationError:

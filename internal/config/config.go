@@ -27,6 +27,9 @@ type Config struct {
 	LogFormat    string
 	GeminiAPIKey string
 	GeminiModel  string
+	// KeysSODisabled — Keys.so выключен секцией pipeline конфига задачи (pipeline.keysso: false).
+	// Отрицание намеренно: нулевое значение обязано означать прежнее поведение — сбор идёт.
+	KeysSODisabled bool
 
 	KeysSOEmail      string
 	KeysSOPassword   string
@@ -190,6 +193,21 @@ func load(requireEnvFile bool, defaults TaskDefaults) (Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// LoadEnvFile loads the project .env into the process environment without building a Config.
+// The manual Keys.so login needs two secrets from it and nothing else, while Load validates the
+// whole task configuration, database included.
+func LoadEnvFile() error {
+	envPath, err := envFilePath()
+	if err != nil {
+		return err
+	}
+	if err := godotenv.Load(envPath); err != nil {
+		// Не включаем ошибку парсера: она может содержать строку из .env с секретом.
+		return fmt.Errorf("failed to load .env\n\nsearched:\n%s", envPath)
+	}
+	return nil
 }
 
 func envFilePath() (string, error) {

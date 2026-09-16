@@ -76,6 +76,7 @@ func main() {
 		logger.Error("не удалось прочитать секцию pipeline конфига задачи", "error", err)
 		os.Exit(1)
 	}
+	cfg.KeysSODisabled = !pipelineCfg.KeysSO
 	logger, err = newLogger(cfg.LogLevel, cfg.LogFormat)
 	if err != nil {
 		logger = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))

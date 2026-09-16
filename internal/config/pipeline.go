@@ -31,11 +31,17 @@ type PipelineConfig struct {
 	// Умолчание — выгружать: так работали задачи до появления этой секции. Отказ Google
 	// генерацию не роняет ни при каком значении.
 	GoogleDocs bool `yaml:"google_docs"`
+	// KeysSO — собирать ли исходные запросы у конкурента через Keys.so и чистить ли их там же.
+	//
+	// Умолчание — собирать: так работали задачи до появления ключа. Выключенный Keys.so браузер
+	// не открывает вовсе: запросы подбирает модель и в том же ответе снимает неявные дубли,
+	// повторы снимает код, и в Arsenkin уходит её список.
+	KeysSO bool `yaml:"keysso"`
 }
 
 // DefaultPipelineConfig — поведение задачи, которая секцию не объявила.
 func DefaultPipelineConfig() PipelineConfig {
-	return PipelineConfig{PublishAfterRun: false, GoogleDocs: true}
+	return PipelineConfig{PublishAfterRun: false, GoogleDocs: true, KeysSO: true}
 }
 
 // LoadPipelineConfig читает секцию pipeline из конфига задачи.

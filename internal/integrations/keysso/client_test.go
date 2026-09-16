@@ -257,3 +257,31 @@ func TestResultStateScriptWaitsBeforeCallingPageEmpty(t *testing.T) {
 		t.Fatalf("выдержка %d мс не оставляет времени самому ожиданию", keywordsEmptySettleMilliseconds)
 	}
 }
+
+// Исчерпанный дневной лимит Keys.so рисует вместо таблицы. Пока скрипт его не знал, каждая
+// статья ждала таблицу три минуты и падала таймаутом, а прогон шёл к следующей за тем же.
+func TestResultStateScriptRecognizesDailyLimit(t *testing.T) {
+	if !strings.Contains(keywordsResultStateJS, "selectors.dailyLimit") {
+		t.Fatal("скрипт не знает страницу исчерпанного лимита: она снова станет таймаутом")
+	}
+}
+
+// Лимит — отказ сервиса, а не пустой ответ о конкуренте: повторять его в тот же день
+// бессмысленно, а резервный подбор запросов моделью включаться не должен.
+func TestDailyLimitStopsWithoutRetryAndWithoutFallback(t *testing.T) {
+	service := New(Config{ArticleID: 58}, slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)))
+	attempts := 0
+	service.waitKeywordsResultsHook = func(context.Context) error {
+		attempts++
+		return &resultError{Kind: resultLimitExceeded, Retryable: false, Err: ErrDailyLimit}
+	}
+	service.refreshKeywordsResultsHook = func(context.Context) error { return nil }
+	service.saveDebugArtifactsHook = func(string, int, int, error) {}
+	err := &StageError{Stage: "collect_competitor_queries", Err: service.waitKeywordsResults(context.Background())}
+	if attempts != 1 || !errors.Is(err, ErrDailyLimit) {
+		t.Fatalf("err=%v attempts=%d", err, attempts)
+	}
+	if NoRawKeywords(err) {
+		t.Fatal("исчерпанный лимит опознан как отсутствие запросов у конкурента")
+	}
+}

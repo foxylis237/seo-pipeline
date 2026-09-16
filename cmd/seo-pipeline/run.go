@@ -57,9 +57,9 @@ type keyssoCollector interface {
 	CleanKeywords(context.Context, []string) (keysso.CollectResult, error)
 }
 
-// keywordsFallback подбирает исходные запросы, когда Keys.so не нашёл у конкурента ни одного.
-// nil означает «резервного источника в этом прогоне нет» — тогда пустой результат Keys.so
-// остаётся ошибкой этапа, как и раньше.
+// keywordsFallback подбирает исходные запросы, когда Keys.so их не дал: не нашёл у конкурента
+// или отказал сам. nil означает «резервного источника в этом прогоне нет» — тогда и пустой
+// результат, и отказ Keys.so остаются ошибкой этапа, как и раньше.
 type keywordsFallback interface {
 	RawKeywords(ctx context.Context, articleName string) ([]string, error)
 }
@@ -143,6 +143,18 @@ func prepareArticle(
 	if newFallback != nil {
 		fallback = newFallback(selected)
 	}
+	// Выключенный Keys.so не открывает браузер вовсе: сбор и очистку запросов берёт на себя модель.
+	var keyssoService keyssoCollector = modelOnlyKeywords{}
+	if !cfg.KeysSODisabled {
+		keyssoService = keysso.New(keysso.Config{
+			ArticleID:  selected.ID,
+			ExternalID: selected.ExternalID,
+			Email:      cfg.KeysSOEmail,
+			Password:   cfg.KeysSOPassword,
+			Headless:   true,
+			DebugDir:   debugDirs.keysso,
+		}, logger)
+	}
 	return prepareArticleWithCollectors(
 		ctx,
 		articleRepository,
@@ -150,14 +162,7 @@ func prepareArticle(
 		logger,
 		writer,
 		selected,
-		keysso.New(keysso.Config{
-			ArticleID:  selected.ID,
-			ExternalID: selected.ExternalID,
-			Email:      cfg.KeysSOEmail,
-			Password:   cfg.KeysSOPassword,
-			Headless:   true,
-			DebugDir:   debugDirs.keysso,
-		}, logger),
+		keyssoService,
 		arsenkin.New(arsenkin.Config{
 			ArticleID: selected.ID,
 			Email:     cfg.ArsenkinEmail,
@@ -449,10 +454,15 @@ func collectCleanedKeywords(
 
 	collected, err := keyssoService.CollectCleanKeywords(ctx, selected.ReferenceURL)
 	if err != nil {
-		// Отсутствие исходных запросов — единственный отказ, который лечится сменой
-		// источника. Таймауты, отказ авторизации и сломанная навигация остаются ошибками
-		// этапа: их повтор осмыслен, а подмена источника скрыла бы поломку интеграции.
-		if fallback != nil && keysso.NoRawKeywords(err) {
+		// Источник меняется при любом отказе Keys.so — и при пустом ответе о конкуренте, и при
+		// лимите, таймауте или сломанной навигации: статья не должна вставать из-за сервиса.
+		// Отказ при этом не прячется — collectFallbackKeywords называет его проблемой Keys.so.
+		// Исключений два. Остановленный прогон не подбирает ничего. Несостоявшийся вход моделью
+		// не лечится: без сессии не пройдёт и очистка от дублей, а в обход неё запросы в Arsenkin
+		// не уходят, — подбор только потратил бы запрос к модели.
+		if keysso.LoginFailed(err) {
+			err = fmt.Errorf("не удалось войти в Keys.so, войти вручную: make login keysso: %w", err)
+		} else if fallback != nil && ctx.Err() == nil {
 			return collectFallbackKeywords(ctx, articleRepository, logger, stageLogger, artifacts,
 				selected, trace, keyssoService, fallback, report, stageStarted, err)
 		}
@@ -536,15 +546,25 @@ func collectFallbackKeywords(
 	stageStarted time.Time,
 	collectErr error,
 ) (keysso.CollectResult, string, string, error) {
-	stageLogger.Warn("Keys.so не нашёл исходных запросов, запускается резервный подбор",
-		append(keyssoLogFields("fallback_start", stageStarted, "", 0, 0),
-			"source", diagnostics.KeywordSourceFallback, "reason", collectErr.Error())...)
+	fields := append(keyssoLogFields("fallback_start", stageStarted, "", 0, 0),
+		"source", diagnostics.KeywordSourceFallback, "reason", collectErr.Error())
+	problem := keyssoProblem(collectErr)
+	switch {
+	case errors.Is(collectErr, errKeysSODisabled):
+		stageLogger.Info("Keys.so выключен в конфиге задачи: запросы подбирает и чистит модель", fields...)
+	case problem == "":
+		stageLogger.Warn("Keys.so не нашёл исходных запросов, запускается резервный подбор", fields...)
+	default:
+		stageLogger.Warn("ПРОБЛЕМА С KEYS.SO: "+problem+"; запросы подбирает модель",
+			append(fields, "keysso_problem", problem)...)
+	}
 	diagnostics.LogStep(logger, "keysso", "before", trace, "source", diagnostics.KeywordSourceFallback)
 
 	rawKeywords, err := fallback.RawKeywords(ctx, selected.Title)
 	if err != nil {
 		report.Fail("keywords_fallback", err.Error(), map[string]any{
-			"keysso_reason": collectErr.Error(),
+			"keysso_reason":  collectErr.Error(),
+			"keysso_problem": problem,
 		})
 		return keysso.CollectResult{}, diagnostics.KeywordSourceFallback, "keywords_fallback",
 			savePipelineError(ctx, articleRepository, selected.ID, fmt.Errorf(
@@ -553,13 +573,60 @@ func collectFallbackKeywords(
 			))
 	}
 	report.Pass("keywords_fallback", map[string]any{
-		"keysso_reason": collectErr.Error(),
-		"raw_count":     len(rawKeywords),
-		"fingerprint":   diagnostics.Fingerprint(strings.Join(rawKeywords, "\n")),
+		"keysso_reason":  collectErr.Error(),
+		"keysso_problem": problem,
+		"raw_count":      len(rawKeywords),
+		"fingerprint":    diagnostics.Fingerprint(strings.Join(rawKeywords, "\n")),
 	})
 
 	return cleanRawKeywords(ctx, articleRepository, logger, artifacts, selected, trace,
 		keyssoService, report, stageStarted, diagnostics.KeywordSourceFallback, rawKeywords)
+}
+
+// errKeysSODisabled — Keys.so выключен в конфиге задачи. Это не отказ сервиса, а решение
+// владельца задачи, но путь у него тот же: исходные запросы подбирает модель.
+var errKeysSODisabled = errors.New("Keys.so выключен в конфиге задачи (pipeline.keysso: false)")
+
+// modelOnlyKeywords стоит на месте Keys.so, когда он выключен. Сбор у конкурента не начинается
+// вовсе, а очистка сводится к снятию повторов: неявные дубли — один интент разными словами —
+// модель снимает сама, в том же ответе, об этом просит промпт keywords.
+type modelOnlyKeywords struct{}
+
+func (modelOnlyKeywords) CollectCleanKeywords(context.Context, string) (keysso.CollectResult, error) {
+	return keysso.CollectResult{}, errKeysSODisabled
+}
+
+func (modelOnlyKeywords) CleanKeywords(_ context.Context, queries []string) (keysso.CollectResult, error) {
+	seen := make(map[string]bool, len(queries))
+	cleaned := make([]string, 0, len(queries))
+	for _, query := range queries {
+		normalized := strings.Join(strings.Fields(query), " ")
+		key := strings.ToLower(normalized)
+		if normalized == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		cleaned = append(cleaned, normalized)
+	}
+	return keysso.CollectResult{CollectedCount: len(queries), CleanedKeywords: cleaned}, nil
+}
+
+// keyssoProblem называет отказ Keys.so, который закрыл собой резервный подбор. Пустая строка —
+// не проблема сервиса, а его честный ответ: запросов у конкурента нет или их слишком мало.
+func keyssoProblem(err error) string {
+	var stageErr *keysso.StageError
+	switch {
+	case errors.Is(err, errKeysSODisabled):
+		return errKeysSODisabled.Error()
+	case keysso.NoRawKeywords(err):
+		return ""
+	case errors.Is(err, keysso.ErrDailyLimit):
+		return "исчерпан дневной лимит аккаунта"
+	case errors.As(err, &stageErr):
+		return "сервис не ответил на этапе " + stageErr.Stage
+	default:
+		return ""
+	}
 }
 
 // cleanRawKeywords прогоняет исходные запросы через форму delete-double Keys.so и возвращает

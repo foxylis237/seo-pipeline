@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"sort"
 	"strings"
 
 	"github.com/foxylis237/seo-pipeline/internal/config"
 	"github.com/foxylis237/seo-pipeline/internal/integrations/google"
+	"github.com/foxylis237/seo-pipeline/internal/integrations/keysso"
 	"github.com/foxylis237/seo-pipeline/internal/llm/deepseekweb"
 	"github.com/foxylis237/seo-pipeline/internal/tasks"
 )
@@ -29,20 +31,20 @@ type loginHandler func(ctx context.Context, logger *slog.Logger) error
 
 // loginServices — реестр сервисов с ручным входом.
 //
-// Keys.so и Arsenkin сюда не входят намеренно: они логинятся автоматически по KEYS_SO_* и
-// ARSENKIN_* из .env, и отдельного шага человека им не требуется. Когда он понадобится,
-// сервис добавляется одной записью здесь.
+// Arsenkin сюда не входит намеренно: он логинится автоматически по ARSENKIN_* из .env, и
+// отдельного шага человека ему не требуется. Keys.so тоже входит сам, но аккаунту, которого он
+// не знает, показывает капчу, — её решает человек в окне `login keysso`.
 func loginServices() map[string]loginHandler {
 	return map[string]loginHandler{
 		"deepseek": runDeepSeekLogin,
 		"google":   runGoogleLogin,
+		"keysso":   runKeysSOLogin,
 	}
 }
 
 // automaticLoginServices — сервисы, у которых ручного входа нет. Список нужен, чтобы
-// `login keysso` отвечал объяснением, а не «unknown service».
+// `login arsenkin` отвечал объяснением, а не «unknown service».
 var automaticLoginServices = map[string]string{
-	"keysso":   "KEYS_SO_EMAIL и KEYS_SO_PASSWORD",
 	"arsenkin": "ARSENKIN_EMAIL и ARSENKIN_PASSWORD",
 }
 
@@ -123,6 +125,14 @@ func runGoogleLogin(ctx context.Context, logger *slog.Logger) error {
 	// Диагностика входа не принадлежит задаче — вход общий, поэтому каталог по умолчанию
 	// интеграции здесь и нужен.
 	return google.Login(ctx, googleConfig(false, "", ""), logger)
+}
+
+// runKeysSOLogin открывает вход в Keys.so в видимом окне с формой, заполненной из .env.
+func runKeysSOLogin(ctx context.Context, logger *slog.Logger) error {
+	if err := config.LoadEnvFile(); err != nil {
+		return err
+	}
+	return keysso.Login(ctx, os.Getenv("KEYS_SO_EMAIL"), os.Getenv("KEYS_SO_PASSWORD"), logger.With("integration", "keysso"))
 }
 
 // diagnosticsDirs — корни диагностики интеграций одной задачи.
