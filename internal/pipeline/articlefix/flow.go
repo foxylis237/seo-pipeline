@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"regexp"
 	"strings"
 	"text/template"
 
@@ -100,6 +101,10 @@ type Flow struct {
 	keepText bool
 	// headingsRewritten — промпт задачи переписывает заголовки разделов. См. RewriteHeadings.
 	headingsRewritten bool
+	// preparedDir — каталог готовых правок: правка берётся оттуда, а не у модели. См. Prepared.
+	preparedDir string
+	// preparedFields — поля записи, которые готовой правке разрешено менять.
+	preparedFields *regexp.Regexp
 }
 
 // Option — необязательная настройка потока правки.
@@ -252,7 +257,11 @@ func (f *Flow) run(ctx context.Context, article Article) error {
 		"post_id", current.ID, "title", current.Title, "new_title", newTitle,
 		"html_runes", len([]rune(current.ContentHTML)))
 
-	prompt, rewritten, err := f.rewrite(ctx, article, current, logger)
+	prepared, err := f.prepare(article, current)
+	if err != nil {
+		return err
+	}
+	prompt, rewritten, err := f.rewrite(ctx, article, current, prepared, logger)
 	if err != nil {
 		return err
 	}
@@ -278,6 +287,7 @@ func (f *Flow) run(ctx context.Context, article Article) error {
 	if err != nil {
 		return err
 	}
+	fields = append(fields, prepared.Fields...)
 	if err := f.publish(ctx, current, newTitle, rewritten, fields); err != nil {
 		return err
 	}
@@ -338,12 +348,24 @@ func (f *Flow) fetch(ctx context.Context, article Article) (Post, string, error)
 }
 
 // rewrite отдаёт статью модели и возвращает отрендеренный промпт и исправленный текст.
-func (f *Flow) rewrite(ctx context.Context, article Article, current Post, logger *slog.Logger) (string, string, error) {
+func (f *Flow) rewrite(ctx context.Context, article Article, current Post, prepared preparedRewrite,
+	logger *slog.Logger) (string, string, error) {
 	// Текст не трогаем — значит, и модель не поднимаем. Возвращается прочитанный HTML как
 	// есть, включая H1: DropHeading1 тоже правка текста, а обещано «только заголовок».
 	if f.keepText {
 		logger.Info("текст статьи не меняется, модель не спрашивается", "stage", StageRewrite)
 		return "", current.ContentHTML, nil
+	}
+	// Готовая правка к модели не ходит: её уже написали. Проверяется она тем же признаком,
+	// каким ловится оборванный ответ модели, — файл кладёт не код, и половина страницы в нём
+	// выглядела бы так же законченно.
+	if f.preparedDir != "" {
+		logger.Info("правка подготовлена заранее, модель не спрашивается", "stage", StageRewrite,
+			"text_changed", prepared.TextChanged, "fields", len(prepared.Fields))
+		if err := f.covers(current.ContentHTML, prepared.ArticleHTML); err != nil {
+			return "", "", fmt.Errorf("готовая правка не покрывает статью: %w", err)
+		}
+		return "", generation.DropHeading1(prepared.ArticleHTML), nil
 	}
 	prompt, err := render(f.prompt, PromptData{
 		Title: current.Title, URL: article.SourceURL, OriginalHTML: current.ContentHTML,
@@ -480,6 +502,11 @@ func (f *Flow) Plan(ctx context.Context, article Article) (PlannedChange, error)
 	// человек проверяет именно первое — его читают на странице, второе видно только в админке.
 	planned.OldHeader = strings.TrimSpace(current.Fields[HeaderField])
 	planned.OldSEOTitle = strings.TrimSpace(current.Fields[SEOTitleField])
+	// Готовая правка проверяется до заголовков: правило переименования может к статье не
+	// подойти и завершить план раньше, а вопрос «готова ли правка» от заголовка не зависит.
+	if f.preparedDir != "" {
+		f.planPrepared(article, current, &planned)
+	}
 	// Заголовок, к которому правило не подходит, — не отказ плана, а его содержание: план
 	// затем и нужен, чтобы такие статьи стали видны все сразу, а не по одной на прогоне.
 	newTitle, err := f.rule.Apply(current.Title)
@@ -533,6 +560,12 @@ type PlannedChange struct {
 	HTMLRunes    int
 	Headings     int
 	Rewritten    bool
+	// PreparedReady, PreparedTextChanged, PreparedFields и PreparedProblem — готовая правка
+	// статьи у задачи, которая берёт её из каталога (см. Prepared). У остальных задач пусты.
+	PreparedReady       bool
+	PreparedTextChanged bool
+	PreparedFields      int
+	PreparedProblem     string
 }
 
 func render(tpl *template.Template, data any) (string, error) {

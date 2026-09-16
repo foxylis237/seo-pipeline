@@ -144,7 +144,7 @@ func runArticleFixRun(ctx context.Context, repository *articlefix.Repository, de
 	if err != nil {
 		return err
 	}
-	blog := articleFixBlog{client: client}
+	blog := articleFixBlog{client: client, postTypes: articleFixPostTypesFor(deps.profile)}
 
 	// План не трогает ни модель, ни блог: он только читает статьи и показывает, во что
 	// превратит их заголовки правило переименования. Поэтому и клиента модели не поднимает —
@@ -157,7 +157,20 @@ func runArticleFixRun(ctx context.Context, repository *articlefix.Repository, de
 	// нужен (он лежит черновиком), ни браузерный профиль под flock, который стоит дорого и
 	// поднимался бы ради ни одного запроса.
 	var chats taskflow.ChatFactory
-	if !deps.profile.ArticleFix.TextUnchanged {
+	// Правка, подготовленная заранее, к модели тоже не ходит: текст уже написан и лежит на
+	// диске. Регламент при этом проверяется — по нему правку готовили, и незаполненный
+	// регламент означает, что готовили наугад.
+	preparedAhead := deps.profile.ArticleFix.PreparedDir != ""
+	if preparedAhead {
+		if err := articlefix.EnsurePromptFilled(deps.profile.ArticleFix.RewritePromptPath); err != nil {
+			return err
+		}
+		deps.logger.Info("правка подготовлена заранее: модель не спрашивается",
+			"task", deps.profile.Name, "prepared_dir", deps.profile.ArticleFix.PreparedDir)
+		fmt.Fprintf(deps.output, "%s записывает готовые правки из %s: модель не спрашивается.\n",
+			deps.profile.Command, deps.profile.ArticleFix.PreparedDir)
+	}
+	if !deps.profile.ArticleFix.TextUnchanged && !preparedAhead {
 		// Промпт проверяется здесь, после плана и до модели: заведённая, но ещё не заполненная
 		// задача правки обязана останавливаться до первого запроса, а не переписывать статьи
 		// наугад. План на неё при этом работает — правило переименования проверяют раньше текста.
@@ -175,7 +188,7 @@ func runArticleFixRun(ctx context.Context, repository *articlefix.Repository, de
 			}
 		}()
 		chats = openedChats
-	} else {
+	} else if deps.profile.ArticleFix.TextUnchanged {
 		deps.logger.Info("задача правит только заголовок: текст статей не меняется",
 			"task", deps.profile.Name)
 		fmt.Fprintf(deps.output, "%s меняет только заголовок: текст статей не трогается.\n", deps.profile.Command)
@@ -208,6 +221,11 @@ func newArticleFixFlow(repository articlefix.Articles, blog articlefix.Blog, cha
 	// а не имя в switch.
 	if deps.profile.ArticleFix.HeadingsRewritten {
 		options = append(options, articlefix.RewriteHeadings())
+	}
+	// Готовая правка — черта задачи из профиля. Менять ей разрешено только блок частых
+	// вопросов: остальные поля записи из каталога правок в блог не уходят.
+	if dir := deps.profile.ArticleFix.PreparedDir; dir != "" {
+		options = append(options, articlefix.Prepared(dir, articlefix.PreparedFAQFields))
 	}
 	return articlefix.NewFlow(repository, blog, chats, articlefix.NewArtifacts(deps.cfg.OutputDir),
 		rule, deps.profile.ArticleFix.RewritePromptPath, deps.profile.TemplatePath, deps.logger, options...)
@@ -266,6 +284,14 @@ func runArticleFixPlan(ctx context.Context, blog articleFixBlog, rule articlefix
 		// именно его человек и читает на странице.
 		printPlannedField(writer, "H1", planned.OldHeader, planned.NewHeader)
 		printPlannedField(writer, "SEO", planned.OldSEOTitle, planned.NewSEOTitle)
+		if deps.profile.ArticleFix.PreparedDir != "" {
+			if planned.PreparedProblem != "" {
+				problems++
+				fmt.Fprintf(writer, "  !\t\t\t\tготовая правка: %s\n", planned.PreparedProblem)
+			} else {
+				fmt.Fprintf(writer, "  правка\t\t\t\t%s\n", preparedSummary(planned))
+			}
+		}
 		if renames && !planned.Changes() {
 			fmt.Fprintf(writer, "  !\t\t\t\tни один заголовок не меняется — правка не нужна\n")
 		}
@@ -294,7 +320,11 @@ func articleFixArticles(ctx context.Context, repository *articlefix.Repository, 
 //
 // Он и есть единственное место, где задача встречается с площадкой: сам поток знает только
 // «найти по слагу, прочитать, переписать» и о XML-RPC не подозревает.
-type articleFixBlog struct{ client *wordpress.Client }
+type articleFixBlog struct {
+	client *wordpress.Client
+	// postTypes — где искать запись по слагу; см. articleFixPostTypesFor.
+	postTypes []string
+}
 
 // articleFixPostTypes — где искать статью по слагу и в каком порядке.
 //
@@ -305,8 +335,20 @@ type articleFixBlog struct{ client *wordpress.Client }
 // Список общий у всех задач правки: площадка одна, и второй копии порядка типов быть не должно.
 var articleFixPostTypes = []string{coursePostType, "post", "page"}
 
+// articleFixPostTypesFor выбирает список типов записей по профилю задачи правки.
+//
+// Задача, чьи страницы — услуги площадки (ArticleFix.ServicePages), ищет их тем же списком,
+// что и аудит услуг: типы каталога, затем записи и страницы. Второй копии этого списка быть
+// не должно, поэтому он берётся у аудита, а не собирается здесь заново.
+func articleFixPostTypesFor(profile tasks.Profile) []string {
+	if profile.ArticleFix != nil && profile.ArticleFix.ServicePages {
+		return articleAuditPostTypes
+	}
+	return articleFixPostTypes
+}
+
 func (b articleFixBlog) Find(ctx context.Context, slug string) (articlefix.Post, error) {
-	found, err := b.client.FindPostBySlug(ctx, articleFixPostTypes, slug)
+	found, err := b.client.FindPostBySlug(ctx, b.postTypes, slug)
 	if err != nil {
 		return articlefix.Post{}, err
 	}
@@ -356,4 +398,13 @@ func unchangedMark(unchanged bool) string {
 		return " (не меняется)"
 	}
 	return ""
+}
+
+// preparedSummary — что изменит готовая правка статьи, одной строкой плана.
+func preparedSummary(planned articlefix.PlannedChange) string {
+	text := "текст не меняется"
+	if planned.PreparedTextChanged {
+		text = "текст меняется"
+	}
+	return fmt.Sprintf("%s, полей FAQ: %d", text, planned.PreparedFields)
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/foxylis237/seo-pipeline/internal/tasks/pproffix3"
 	"github.com/foxylis237/seo-pipeline/internal/tasks/pproffix4"
 	"github.com/foxylis237/seo-pipeline/internal/tasks/pproffix5"
+	"github.com/foxylis237/seo-pipeline/internal/tasks/pproffix6"
 )
 
 // articleFixProfiles — задачи правки из реестра. Список берётся признаком, а не именами:
@@ -37,6 +38,7 @@ func TestRegistryResolvesArticleFixTasks(t *testing.T) {
 		pproffix3.Name, pproffix3.Command,
 		pproffix4.Name, pproffix4.Command,
 		pproffix5.Name, pproffix5.Command,
+		pproffix6.Name, pproffix6.Command,
 	} {
 		profile, err := lookupTask(want)
 		if err != nil {
@@ -157,5 +159,29 @@ func TestArticleFixThreeKeepsTitle(t *testing.T) {
 	}
 	if got != title {
 		t.Fatalf("заголовок изменился: %q → %q", title, got)
+	}
+}
+
+// Страницы услуг ищутся среди типов каталога, остальные задачи правки — среди своих трёх типов:
+// иначе пачка из аудита услуг падала бы на поиске каждой страницы.
+func TestArticleFixPostTypesFollowProfile(t *testing.T) {
+	for _, profile := range articleFixProfiles() {
+		types := articleFixPostTypesFor(profile)
+		hasService := false
+		for _, postType := range types {
+			if postType == "povysh" {
+				hasService = true
+			}
+		}
+		if profile.ArticleFix.ServicePages != hasService {
+			t.Fatalf("задача %s: ServicePages=%v, а типы поиска %v", profile.Name, profile.ArticleFix.ServicePages, types)
+		}
+	}
+	profile, err := lookupTask(pproffix6.Command)
+	if err != nil {
+		t.Fatalf("задача %s не найдена: %v", pproffix6.Command, err)
+	}
+	if !profile.ArticleFix.ServicePages {
+		t.Fatalf("у %s страницы услуг, а признак ServicePages не выставлен", pproffix6.Name)
 	}
 }
