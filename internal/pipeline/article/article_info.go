@@ -95,6 +95,16 @@ func parseTolerantArticleInfo(text string) ArticleInfo {
 	current := sectionUnknown
 
 	for _, line := range lines {
+		// Пара «Вопрос: … / Ответ: …» открывает FAQ и без строки-заголовка «FAQ:». Модель
+		// ставит её не всегда: у одной статьи заголовок есть, у соседней вопросы идут сразу,
+		// и тогда весь блок уходил в TL;DR, а FAQ оставался пустым — публикация такую статью
+		// не принимает. Форма записи здесь ровно та же договорённость между стадиями, что и
+		// «H2 - Название» в тексте статьи, и приводит к ней тоже код, а не промпт.
+		if current != sectionFAQ && isFAQQuestionLine(line) {
+			current = sectionFAQ
+			values[current] = append(values[current], line)
+			continue
+		}
 		if section, inline, recognized := parseInfoHeading(line); recognized {
 			if section == current && inline != "" {
 				values[current] = append(values[current], line)
@@ -121,6 +131,19 @@ func parseTolerantArticleInfo(text string) ArticleInfo {
 		FAQ:            strings.TrimSpace(strings.Join(values[sectionFAQ], "\n")),
 		AdditionalInfo: strings.TrimSpace(strings.Join(additional, "\n")),
 	}
+}
+
+// isFAQQuestionLine сообщает, что строка открывает вопрос FAQ. Проверяется только начало
+// строки: ответ («Ответ:») сам секцию не открывает, иначе оборванный блок без вопроса
+// объявлялся бы разделом.
+func isFAQQuestionLine(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	for strings.HasPrefix(trimmed, "#") {
+		trimmed = strings.TrimSpace(strings.TrimPrefix(trimmed, "#"))
+	}
+	trimmed = strings.TrimLeft(trimmed, "-*• ")
+	trimmed = strings.TrimPrefix(trimmed, "**")
+	return strings.HasPrefix(strings.ToUpper(trimmed), "ВОПРОС:")
 }
 
 func parseInfoHeading(line string) (infoSection, string, bool) {

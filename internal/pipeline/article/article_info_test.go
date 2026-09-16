@@ -123,3 +123,30 @@ func TestParseArticleInfoDoesNotRecognizeTags(t *testing.T) {
 		t.Fatalf("блок меток не попал в AdditionalInfo: %+v", info)
 	}
 }
+
+// TestParseArticleInfoFAQWithoutHeading — ответ без строки «FAQ:». Модель ставит её не
+// всегда: у статьи 2 заголовок был, у статьи 3 вопросы пошли сразу, и весь блок уходил
+// в TL;DR — публикация отказывала по пустому FAQ уже после оплаченной генерации.
+func TestParseArticleInfoFAQWithoutHeading(t *testing.T) {
+	const response = `TLDR: Повышение маляра с 3-го на 4-й разряд даёт рост зарплаты и доступ к сложным работам.
+
+Вопрос: Как повысить разряд маляра без отрыва от работы?
+Ответ: Через комиссию предприятия, если она есть.
+
+Вопрос: Можно ли повысить разряд без обучения в центре?
+Ответ: Можно, если экзамен принимает комиссия предприятия.`
+
+	info, err := ParseArticleInfo(response)
+	if err != nil {
+		t.Fatalf("ParseArticleInfo: %v", err)
+	}
+	if strings.Contains(info.TLDR, "Вопрос:") {
+		t.Fatalf("вопросы попали в TL;DR: %q", info.TLDR)
+	}
+	if strings.Count(info.FAQ, "Вопрос:") != 2 {
+		t.Fatalf("в FAQ ожидались два вопроса, получено: %q", info.FAQ)
+	}
+	if !strings.Contains(info.FAQ, "Ответ: Через комиссию предприятия") {
+		t.Fatalf("ответ потерян: %q", info.FAQ)
+	}
+}
