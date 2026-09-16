@@ -323,13 +323,16 @@ func TestFlowMovesArticleThroughKnownSteps(t *testing.T) {
 	}
 }
 
-// Ссылки перелинковки задаёт человек, и обязательны все: разметку без них поток не принимает,
-// а просит модель вернуть её исправленной тем же чатом.
-func TestHTMLStageAsksModelToAddMissingLinks(t *testing.T) {
+// Ссылок в тексте меньше трёх — недостающие доспрашиваются у модели тем же чатом, одним
+// коротким сообщением, а предложение модели вписывается в названный ею раздел. Своей шаблонной
+// строки код не пишет.
+func TestHTMLStageAsksModelForMissingLinks(t *testing.T) {
 	flow, chats, repository, _, writer := newFlowFixture(t)
+	repository.input.Links = "Обучение на логопеда — https://example.test/logoped"
+	sentence := `Этому учат на программе <a href="https://example.test/logoped">Обучение на логопеда</a>.`
 	chats.queue = map[string][]string{StageHTML: {
-		"<h2>Заголовок</h2><p>текст без перелинковки</p>",
-		htmlWithLink,
+		"<h2>Заголовок</h2>\n<p>текст без перелинковки</p>\n<h2>Второй раздел</h2>\n<p>ещё текст.</p>",
+		"https://example.test/logoped ;; Второй раздел ;; " + sentence,
 	}}
 	ctx := context.Background()
 
@@ -345,14 +348,50 @@ func TestHTMLStageAsksModelToAddMissingLinks(t *testing.T) {
 	}
 
 	if got := len(chats.chats[2]); got != 2 {
-		t.Fatalf("чат разметки: %d сообщений, ожидалось 2 — первое и починка", got)
+		t.Fatalf("чат разметки: %d сообщений, ожидалось два — разметка и доспрос ссылок", got)
 	}
 	saved, err := writer.Read(repository.htmlPath)
 	if err != nil {
 		t.Fatalf("разметка не читается: %v", err)
 	}
-	if !strings.Contains(saved, "https://example.test/logoped") {
-		t.Fatalf("в сохранённой разметке нет обязательной ссылки: %q", saved)
+	if !strings.Contains(saved, "<p>ещё текст. "+sentence+"</p>") {
+		t.Fatalf("предложение модели не вписано в конец абзаца раздела: %q", saved)
+	}
+	if strings.Contains(saved, "Подробнее о программе") {
+		t.Fatalf("код дописал шаблонную строку: %q", saved)
+	}
+}
+
+// От трёх ссылок в тексте недостающие не доспрашиваются и код их не дописывает.
+func TestHTMLStageSkipsLinkRepairWithThreeLinks(t *testing.T) {
+	flow, chats, repository, _, writer := newFlowFixture(t)
+	repository.input.Links = "https://example.test/a\nhttps://example.test/b\nhttps://example.test/c\nОбучение на логопеда — https://example.test/logoped"
+	chats.answers[StageHTML] = `<h2>Один</h2><p>про <a href="https://example.test/a">a</a></p>` +
+		`<h2>Два</h2><p>про <a href="https://example.test/b">b</a></p>` +
+		`<h2>Три</h2><p>про <a href="https://example.test/c">c</a></p>` +
+		`<h2>Четыре</h2><p>без ссылки</p>`
+	ctx := context.Background()
+
+	if err := flow.RunStructure(ctx, "7"); err != nil {
+		t.Fatal(err)
+	}
+	if err := flow.RunArticle(ctx, "7"); err != nil {
+		t.Fatal(err)
+	}
+	repository.saved.FixedArticlePath = repository.finalArticlePath
+	if err := flow.RunHTML(ctx, "7"); err != nil {
+		t.Fatalf("html: %v", err)
+	}
+
+	if got := len(chats.chats[2]); got != 1 {
+		t.Fatalf("чат разметки: %d сообщений, ожидалось одно — трёх ссылок достаточно", got)
+	}
+	saved, err := writer.Read(repository.htmlPath)
+	if err != nil {
+		t.Fatalf("разметка не читается: %v", err)
+	}
+	if strings.Contains(saved, "https://example.test/logoped") {
+		t.Fatalf("недостающую ссылку дописал код: %q", saved)
 	}
 }
 

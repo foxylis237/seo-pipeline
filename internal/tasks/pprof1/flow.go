@@ -349,16 +349,19 @@ func (f *Flow) RunHTML(ctx context.Context, externalID string) error {
 		return f.Fail(ctx, logger, input.Article, "html_generation", err)
 	}
 
-	prompt, err := f.Render(StageHTML, htmlData(input, finalText, f.namedLinks(ctx, logger, input.Links)))
+	// Названия программ снимаются со страниц сайта один раз: их видит и промпт, и код,
+	// дописывающий недостающие ссылки, — анкором становится ровно название программы.
+	named := f.namedLinks(ctx, logger, input.Links)
+	prompt, err := f.Render(StageHTML, htmlData(input, finalText, named))
 	if err != nil {
 		return f.Fail(ctx, logger, input.Article, "html_generation", err)
 	}
 	// Чат разметки принимает больше одного сообщения: оборванный ответ дописывается
 	// продолжением той же стадии, а чат роутера принимает ровно столько сообщений, сколько
 	// стадий ему названо при создании.
-	// Чат открывается на два полных набора сообщений: первый ответ со своими продолжениями и
-	// ремонт перелинковки со своими. Ремонт — такой же ответ модели и обрывается так же.
-	htmlStages := append(generation.HTMLChatStages(StageHTML), generation.HTMLChatStages(StageHTML)...)
+	// Сверх первого ответа с продолжениями — одно сообщение на доспрос перелинковки: ответ на
+	// него короткий, по строке на ссылку, и обрываться ему не на чем.
+	htmlStages := append(generation.HTMLChatStages(StageHTML), StageHTML)
 	chat, err := f.NewChat(ctx, input.Article.ID, htmlStages...)
 	if err != nil {
 		return f.Fail(ctx, logger, input.Article, "html_generation", err)
@@ -384,7 +387,7 @@ func (f *Flow) RunHTML(ctx context.Context, externalID string) error {
 	if err != nil {
 		return f.Fail(ctx, logger, input.Article, "html_generation", err)
 	}
-	html = f.completeHTMLPage(ctx, logger, chat, finalText, input.Links, html)
+	html = f.completeLinks(ctx, logger, chat, named, f.completeHTMLPage(logger, finalText, html))
 	pending, err := f.writer.StageHTML(input.Article.ExternalID, input.Article.Slug, prompt, html)
 	if err != nil {
 		return f.Fail(ctx, logger, input.Article, "save_html", err)
@@ -409,11 +412,8 @@ func (f *Flow) RunHTML(ctx context.Context, externalID string) error {
 // Лид и ряд плашек возвращаются кодом, без запроса к модели: у длинной статьи разметка не
 // помещается в один ответ, и просьба «верни страницу заново» обрывалась бы ровно так же, как
 // первый ответ. Оба блока известны целиком и место их известно, придумывать нечего.
-// Ссылки перелинковки код вставить не может — анкор придумывать некому, — поэтому недостающие
-// просят у модели одним заходом, и он идёт через то же дописывание, что и первый ответ. Не
-// вставленные и после этого ссылки остаются предупреждением в логе.
-func (f *Flow) completeHTMLPage(ctx context.Context, logger *slog.Logger, chat taskflow.Chat,
-	page, links, markup string) string {
+// Перелинковкой занимается completeLinks.
+func (f *Flow) completeHTMLPage(logger *slog.Logger, page, markup string) string {
 	markup = generation.LinkSources(generation.RestoreStats(page, generation.CleanBlogMarkup(generation.DropHeading1(markup))))
 	if !generation.LeadKept(page, markup) {
 		markup = generation.RestoreLead(page, markup)
@@ -423,41 +423,64 @@ func (f *Flow) completeHTMLPage(ctx context.Context, logger *slog.Logger, chat t
 		logger.Warn("вёрстка не узнала метки визуальных блоков, они остались в разметке текстом",
 			"stage", "html_generation", "markers", strings.Join(left, ", "))
 	}
-	missing := generation.MissingInternalLinks(markup, links)
-	if len(missing) == 0 {
-		return markup
+	return markup
+}
+
+// enoughInternalLinks — столько ссылок перелинковки в тексте достаточно: недостающие к ним уже
+// не доспрашиваются. Доспрос нужен статье, где перелинковки почти нет, а не той, где модель
+// уронила одну ссылку из пяти.
+const enoughInternalLinks = 3
+
+// completeLinks доводит перелинковку.
+//
+// Своих предложений код не пишет: шаблонная строка «Подробнее о программе — …» заказчику не
+// нужна, а осмысленную фразу без контекста раздела код не составит. Если ссылок в тексте меньше
+// enoughInternalLinks, недостающие просит у модели одно короткое сообщение в том же чате —
+// по строке на ссылку, не страницу заново, — а вставляет их код. Сгрудившиеся ссылки код
+// по-прежнему разводит по разделам: это перенос уже написанных моделью предложений.
+func (f *Flow) completeLinks(ctx context.Context, logger *slog.Logger, chat taskflow.Chat, links, markup string) string {
+	if missing := generation.MissingInternalLinks(markup, links); len(missing) > 0 {
+		if placed := generation.PlacedInternalLinks(markup, links); placed >= enoughInternalLinks {
+			logger.Info("ссылок перелинковки в тексте достаточно, недостающие не доспрашиваются",
+				"stage", "html_generation", "placed_links", placed, "missing_links", len(missing))
+		} else {
+			markup = f.repairLinks(ctx, logger, chat, links, markup, missing)
+		}
 	}
-	logger.Warn("в разметке нет части ссылок перелинковки, просим модель их добавить",
-		"stage", "html_generation", "missing_links", len(missing))
-	repaired, err := generation.BuildHTMLPage(ctx, generation.HTMLPageRequest{
-		Page:   page,
-		Prompt: generation.RepairHTMLPrompt(missing),
-		Send: func(ctx context.Context, message string) (string, error) {
-			return f.Answer(ctx, chat.Continue, message, StageHTML)
-		},
-		Continue: func(ctx context.Context, message string) (string, error) {
-			return f.Answer(ctx, chat.Continue, message, StageHTML)
-		},
-		Logger: logger,
-	})
-	if err != nil {
-		logger.Warn("исправленная разметка не получена, остаётся прежняя",
-			"stage", "html_generation", "error", err)
-		return markup
+	spread, moved := generation.SpreadCrowdedLinks(markup, links)
+	if moved > 0 {
+		logger.Info("перелинковка расставлена кодом",
+			"stage", "html_generation", "links_moved", moved)
+		markup = spread
 	}
-	repaired = generation.LinkSources(generation.RestoreStats(page, generation.CleanBlogMarkup(generation.DropHeading1(repaired))))
-	repaired = generation.RestoreLead(page, repaired)
-	// Исправленную разметку берём, только если она и правда лучше: ремонт вправе выйти
-	// короче или потерять хвост, и менять целую страницу на половину смысла нет.
-	if len(generation.MissingInternalLinks(repaired, links)) >= len(missing) ||
-		len([]rune(repaired)) < len([]rune(markup))/2 {
-		logger.Warn("исправленная разметка не лучше прежней, остаётся прежняя",
-			"stage", "html_generation")
-		return markup
-	}
-	if left := generation.MissingInternalLinks(repaired, links); len(left) > 0 {
+	if left := generation.MissingInternalLinks(markup, links); len(left) > 0 {
 		logger.Warn("часть ссылок перелинковки в разметку так и не попала",
 			"stage", "html_generation", "missing_links", len(left))
 	}
+	if crowded := generation.CrowdedLinks(markup, links); len(crowded) > 0 {
+		logger.Warn("часть ссылок осталась в одном разделе: свободных разделов не хватило",
+			"stage", "html_generation", "crowded_links", len(crowded))
+	}
+	return markup
+}
+
+// repairLinks доспрашивает недостающие ссылки у модели. Отказ стадию не роняет: за разметку
+// уже заплачено, и страница без части ссылок полезнее, чем её отсутствие.
+func (f *Flow) repairLinks(ctx context.Context, logger *slog.Logger, chat taskflow.Chat, links, markup string, missing []string) string {
+	logger.Info("ссылок перелинковки в тексте мало, недостающие доспрашиваются у модели",
+		"stage", "html_generation", "missing_links", len(missing))
+	answer, err := f.Answer(ctx, chat.Continue, generation.RepairLinksPrompt(markup, links, missing), StageHTML)
+	if err != nil {
+		logger.Warn("доспрос перелинковки не удался", "stage", "html_generation", "error", err)
+		return markup
+	}
+	inserts := generation.ParseLinkInserts(answer, links, missing)
+	repaired, skipped := generation.InsertLinkSentences(markup, inserts)
+	for _, insert := range skipped {
+		logger.Warn("раздел, названный моделью для ссылки, в разметке не найден",
+			"stage", "html_generation", "url", insert.URL, "heading", insert.Heading)
+	}
+	logger.Info("перелинковка дописана моделью", "stage", "html_generation",
+		"asked_links", len(missing), "inserted_links", len(inserts)-len(skipped))
 	return repaired
 }

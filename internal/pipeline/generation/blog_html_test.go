@@ -83,13 +83,6 @@ func TestLeadKept(t *testing.T) {
 	}
 }
 
-func TestRepairHTMLPromptNamesMissingLinks(t *testing.T) {
-	prompt := RepairHTMLPrompt([]string{"https://dpoprof.ru/obuchenie/malyar/"})
-	if !strings.Contains(prompt, "https://dpoprof.ru/obuchenie/malyar/") {
-		t.Fatalf("в просьбе нет пропущенной ссылки: %s", prompt)
-	}
-}
-
 // Лид возвращает код, а не модель: у длинной статьи разметка не помещается в один ответ, и
 // просьба «верни страницу заново» оборвалась бы так же, как первый ответ.
 func TestRestoreLeadPutsParagraphBack(t *testing.T) {
