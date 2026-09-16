@@ -275,9 +275,30 @@ func blogCustomFields(
 		wordpress.CustomField{Key: "prof_blue", Value: profBlueValue},
 		wordpress.CustomField{Key: "prof_name", Value: professionName(tagNames)},
 		wordpress.CustomField{Key: "_yoast_wpseo_focuskw", Value: strings.TrimSpace(input.Keyword)},
-		wordpress.CustomField{Key: "_yoast_wpseo_title", Value: strings.TrimSpace(input.Article.Title)},
+		// Заголовок выдачи — своя колонка книги, а не название статьи. Название читает
+		// человек в админке и в списке записей, там длинная описательная строка полезна;
+		// поиск режет заголовок примерно на 60 знаках, и ему нужна короткая. Пустой
+		// seo_title — законное состояние и прежнее поведение: в выдачу идёт название.
+		wordpress.CustomField{
+			Key:   "_yoast_wpseo_title",
+			Value: firstNonEmpty(input.SEOTitle, input.Article.Title),
+		},
 		wordpress.CustomField{Key: "_yoast_wpseo_metadesc", Value: strings.TrimSpace(input.MetaDescription)},
 	)
+}
+
+// firstNonEmpty отдаёт первое непустое значение из списка, уже обрезанное по краям.
+//
+// Нужен там, где у поля есть колонка книги и запасной источник: пустая колонка означает не
+// ошибку, а прежнее поведение, и различать эти два случая должен один помощник, а не
+// повторённая в каждой раскладке пара TrimSpace + if.
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 // professionName берёт название профессии из первой метки.

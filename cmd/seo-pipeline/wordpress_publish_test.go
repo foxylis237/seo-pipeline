@@ -451,6 +451,52 @@ func TestPublishSendsCompletePayload(t *testing.T) {
 // Задача без стадии info публикуется без TL;DR, FAQ и времени чтения: их у неё нет ни в
 // базе, ни в result.md. Пока требование было общим, pprof_2 не доходил до площадки вовсе —
 // публикация отказывала на разделе «## Время чтения», которого нет в его шаблоне.
+// Заголовок выдачи берётся из своей колонки книги, а название записи остаётся длинным.
+//
+// Разделены они затем, что читают их разные: post_title человек видит в админке и в списке
+// записей, _yoast_wpseo_title показывает поиск и режет примерно на 60 знаках. Проверка ловит
+// подмену в обе стороны — и короткий заголовок, уехавший в название записи, и длинное
+// название, оставшееся в выдаче.
+func TestPublishSendsSEOTitleSeparateFromPostTitle(t *testing.T) {
+	deps, repository, client, _, _ := newWPPublishDeps()
+	repository.input.SEOTitle = "Разряды газосварщиков: категории"
+
+	if err := runWordPressPublish(context.Background(), deps, "16"); err != nil {
+		t.Fatalf("публикация: %v", err)
+	}
+	payload := client.created[0]
+	if payload.Title != "Разряды газосварщиков: категории и зарплата" {
+		t.Fatalf("название записи = %q, а короткий заголовок туда попадать не должен", payload.Title)
+	}
+	fields := map[string]string{}
+	for _, field := range payload.Fields {
+		fields[field.Key] = field.Value
+	}
+	if fields["_yoast_wpseo_title"] != "Разряды газосварщиков: категории" {
+		t.Fatalf("заголовок выдачи = %q", fields["_yoast_wpseo_title"])
+	}
+}
+
+// Пустая колонка — прежнее поведение, а не отказ: в выдачу идёт название статьи.
+//
+// Так живут task_1 и все статьи, импортированные до появления колонки; требовать значение
+// значило бы не опубликовать ни одну из них.
+func TestPublishFallsBackToTitleWithoutSEOTitle(t *testing.T) {
+	deps, repository, client, _, _ := newWPPublishDeps()
+	repository.input.SEOTitle = "   "
+
+	if err := runWordPressPublish(context.Background(), deps, "16"); err != nil {
+		t.Fatalf("публикация: %v", err)
+	}
+	fields := map[string]string{}
+	for _, field := range client.created[0].Fields {
+		fields[field.Key] = field.Value
+	}
+	if fields["_yoast_wpseo_title"] != "Разряды газосварщиков: категории и зарплата" {
+		t.Fatalf("без колонки в выдачу должно идти название статьи, ушло %q", fields["_yoast_wpseo_title"])
+	}
+}
+
 func TestPublishWithoutArticleMetadataSkipsBlogFields(t *testing.T) {
 	deps, _, client, _, _ := newWPPublishDeps()
 	deps.withoutArticleMetadata = true

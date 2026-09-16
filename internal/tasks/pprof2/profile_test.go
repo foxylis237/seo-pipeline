@@ -109,17 +109,27 @@ func TestInputColumnsAreKnownToRepository(t *testing.T) {
 // Задачи не должны заимствовать колонки друг у друга: набор pprof_2 и набор задач, пишущих
 // статьи блога, пересекаться не имеют права. Проверка ловит обе стороны — и свою колонку,
 // уехавшую к соседу, и чужую, приехавшую сюда.
+//
+// Исключения перечислены в repository.SharedInputColumns и только там: это поля, которые у
+// обеих задач значат одно и то же и уходят в одно и то же место площадки. Список явный,
+// потому что случайное пересечение и осознанное различаются только намерением автора.
 func TestInputColumnsDoNotOverlapWithBlogTasks(t *testing.T) {
 	blog := pprof1.Profile().ExtraInputColumns
 	if len(blog) == 0 {
 		t.Fatal("pprof_1 перестал объявлять свои колонки: перелинковка, профессии и метки нужны ему")
 	}
 	for _, own := range InputColumns {
+		if slices.Contains(repository.SharedInputColumns, own) {
+			continue
+		}
 		if slices.Contains(blog, own) {
 			t.Fatalf("колонка %q объявлена и у pprof_2, и у pprof_1", own)
 		}
 	}
 	for _, foreign := range blog {
+		if slices.Contains(repository.SharedInputColumns, foreign) {
+			continue
+		}
 		if slices.Contains(InputColumns, foreign) {
 			t.Fatalf("колонка %q статей блога объявлена у pprof_2", foreign)
 		}
@@ -172,6 +182,10 @@ func TestOwnMigrationDescribesWholeSchema(t *testing.T) {
 			t.Fatal(readErr)
 		}
 		for _, column := range InputColumns {
+			// Общую колонку чужая миграция заводить обязана — она нужна и той задаче.
+			if slices.Contains(repository.SharedInputColumns, column) {
+				continue
+			}
 			if strings.Contains(string(text), " "+column+" TEXT") {
 				t.Fatalf("миграция %s/%s заводит колонку %q задачи pprof_2",
 					filepath.Base(filepath.Dir(name)), filepath.Base(name), column)

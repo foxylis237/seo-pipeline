@@ -65,8 +65,11 @@ func Profile() tasks.Profile {
 		DBSchema:         Name,
 		EnvPrefix:        "PPROF_1_",
 		// Те же колонки, что и у task_1: pprof_1 пишет статьи блога, и автор, перелинковка,
-		// похожие профессии и метки ему нужны.
-		ExtraInputColumns: []string{"author", "links", "professions", "tags"},
+		// похожие профессии и метки ему нужны. Плюс seo_title — короткий заголовок выдачи:
+		// название статьи уходит человеку в админку, а поиску нужна строка до 60 знаков, и
+		// одной колонкой эти две задачи не закрываются. У task_1 её нет: он остаётся старой
+		// реализацией, и пустое значение там означает прежнее поведение.
+		ExtraInputColumns: []string{"author", "links", "professions", "seo_title", "tags"},
 		LLMStages:         Stages,
 	}
 }

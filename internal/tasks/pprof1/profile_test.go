@@ -77,8 +77,9 @@ func TestOwnMigrationMatchesProfileColumns(t *testing.T) {
 		}
 	}
 	// Колонок pprof_2 в этой схеме быть не должно: поля одной задачи не имеют права
-	// появляться в таблицах другой, и проверка схемы строга в обе стороны.
-	for _, foreign := range []string{"seo_title", "section", "profession", "teachers", "service_name"} {
+	// появляться в таблицах другой, и проверка схемы строга в обе стороны. seo_title в этот
+	// список не входит — она общая по решению, см. repository.SharedInputColumns.
+	for _, foreign := range []string{"section", "profession", "teachers", "service_name"} {
 		if strings.Contains(schema, foreign+" TEXT") {
 			t.Fatalf("схема pprof_1 заводит колонку %q задачи pprof_2", foreign)
 		}

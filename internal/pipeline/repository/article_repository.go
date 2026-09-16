@@ -555,8 +555,16 @@ func (r *ArticleRepository) Create(
 // Входные данные пишутся не только новой статье, но и уже существующей, у которой их нет:
 // после `reset <external_id>` строка articles остаётся, а article_inputs стирается, и без
 // этого повторный импорт молча прошёл бы мимо — статья осталась бы навсегда без входных
-// данных. Существующие article_inputs при этом не трогаются (DO NOTHING): импорт по-прежнему
-// не переписывает уже импортированную статью.
+// данных.
+//
+// У существующей строки article_inputs импорт дозаполняет только колонки со значением NULL
+// (coalesceAssignments) и никогда не переписывает заполненные. NULL там означает ровно одно:
+// колонки не было в схеме, когда статью импортировали, — так появилась seo_title у 85 статей
+// pprof_1. Прежнее DO NOTHING оставляло такую колонку пустой навсегда, и добраться до неё
+// можно было только через `reset`, то есть стерев артефакты статьи. Заполненное значение
+// импорт не трогает намеренно: книгу правят по ходу работы, а статья, ушедшая в research или
+// в блог, писалась по данным на момент импорта, и подмена их под ней развела бы артефакты с
+// базой.
 func (r *ArticleRepository) Import(ctx context.Context, input article.Input) (article.Article, bool, error) {
 	var selected article.Article
 	inputColumns, inputValues := r.insertInputColumns(input)
@@ -574,13 +582,15 @@ func (r *ArticleRepository) Import(ctx context.Context, input article.Input) (ar
 		), saved_input AS (
 			INSERT INTO article_inputs (article_id, %s)
 			SELECT id, %s FROM target
-			ON CONFLICT (article_id) DO NOTHING
+			ON CONFLICT (article_id) DO UPDATE
+			SET %s
 			RETURNING article_id
 		)
 		SELECT id, external_id, title, status, current_step, error_message, created_at, updated_at
 		FROM created
 		WHERE EXISTS (SELECT 1 FROM saved_input)
-	`, strings.Join(inputColumns, ", "), placeholders(3, len(inputColumns)))
+	`, strings.Join(inputColumns, ", "), placeholders(3, len(inputColumns)),
+		coalesceAssignments("article_inputs", inputColumns))
 	importArgs := append([]any{fmt.Sprint(input.ExcelID), input.Title}, inputValues...)
 	err := r.pool.QueryRow(ctx, importQuery, importArgs...).Scan(
 		&selected.ID, &selected.ExternalID, &selected.Title, &selected.Status,
