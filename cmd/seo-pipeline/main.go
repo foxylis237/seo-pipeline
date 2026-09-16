@@ -565,6 +565,7 @@ func main() {
 				writer:                 writer,
 				images:                 newArticleImages(profile.InputDir),
 				resultBuild:            resultService,
+				courses:                wordPressCourses(relatedCourses),
 				settings:               cfg.WordPress,
 				logger:                 taskLogger,
 				out:                    os.Stdout,
