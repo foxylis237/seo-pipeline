@@ -12,7 +12,7 @@ DRY_RUN_DATABASE_URL ?= postgres://seo:seo@localhost:5433/seo_dry_run?sslmode=di
 #
 # Задачи различаются только именем: набор операций, разбор аргументов и рецепт у них общие,
 # а пути, схему стадий и схему PostgreSQL выбирает профиль внутри CLI.
-TASK_NAMES := task-1 pprof-1 pprof-2 pprof-template-1 pprof-fix-1 pprof-fix-2 pprof-fix-3 pprof-fix-4 pprof-fix-5
+TASK_NAMES := task-1 pprof-1 pprof-2 pprof-template-1 pprof-fix-1 pprof-fix-2 pprof-fix-3 pprof-fix-4 pprof-fix-5 pprof-audit-1 pprof-audit-2
 TASK_NAME := $(firstword $(MAKECMDGOALS))
 CLI = $(GO) run ./cmd/seo-pipeline $(TASK_NAME)
 
@@ -22,10 +22,10 @@ LOGIN_SERVICE := $(word 2,$(MAKECMDGOALS))
 TASK_OPERATION := $(word 2,$(MAKECMDGOALS))
 TASK_ARG := $(word 3,$(MAKECMDGOALS))
 TASK_EXTRA_ARGS := $(wordlist 4,$(words $(MAKECMDGOALS)),$(MAKECMDGOALS))
-TASK_OPERATIONS := import import-check errors keywords retry run regenerate dry-run prepare generate demo-generate article info review fix html result clear reset google-login google-publish deepseek-login wordpress-check publish republish mark-published catalog-sync catalog-show
+TASK_OPERATIONS := import import-check errors keywords retry run regenerate dry-run prepare generate demo-generate article info review fix html result report clear reset google-login google-publish deepseek-login wordpress-check publish republish mark-published catalog-sync catalog-show
 OPTIONAL_ARGUMENT_OPERATIONS := import-check errors keywords retry run regenerate clear reset google-publish prepare generate demo-generate article info review fix html result publish mark-published
 
-.PHONY: help task-1 pprof-1 pprof-2 pprof-template-1 pprof-fix-1 pprof-fix-2 pprof-fix-3 pprof-fix-4 pprof-fix-5 login docker-up docker-start docker-stop docker-down docker-restart docker-logs docker-ps
+.PHONY: help task-1 pprof-1 pprof-2 pprof-template-1 pprof-fix-1 pprof-fix-2 pprof-fix-3 pprof-fix-4 pprof-fix-5 pprof-audit-1 pprof-audit-2 login docker-up docker-start docker-stop docker-down docker-restart docker-logs docker-ps
 .PHONY: test test-race fmt vet lint lint-fix build
 
 # ----------------------------------------------------
@@ -125,7 +125,16 @@ help: ## этот список
 		'make pprof-fix-4 run [ID]'        'править статьи и записать их в блог' \
 		'make pprof-fix-5 import'          'индексы и ссылки из файла в input/pprof_fix_5' \
 		'make pprof-fix-5 run plan [ID]'   'что изменится в блоге, без правки' \
-		'make pprof-fix-5 run [ID]'        'править статьи и записать их в блог'
+		'make pprof-fix-5 run [ID]'        'править статьи и записать их в блог' \
+		'' '' \
+		'pprof-audit-1,2 - проверка опубликованных страниц, в блог не пишет:' '' \
+		'make pprof-audit-1 import'        'индексы и ссылки из файла в input/pprof_audit_1' \
+		'make pprof-audit-1 run plan [ID]' 'что будет проверено и какие поля пусты' \
+		'make pprof-audit-1 run [ID]'      'проверить статьи блога, отчёт в result.md' \
+		'make pprof-audit-2 import'        'индексы и ссылки из файла в input/pprof_audit_2' \
+		'make pprof-audit-2 run plan [ID]' 'что будет проверено и какие поля пусты' \
+		'make pprof-audit-2 run [ID]'      'проверить страницы услуг, отчёт в result.md' \
+		'make pprof-audit-2 report'        'сводка по пачке: оценки, пробелы, частые ошибки'
 	@printf '\nВход в сервисы — общий для задач\n'
 	@printf '  %-34s%s\n' \
 		'make login deepseek'              'ручной вход в DeepSeek' \
@@ -238,6 +247,12 @@ pprof-fix-4: ## Run a pprof_fix_4 operation
 	$(run_task_operation)
 
 pprof-fix-5: ## Run a pprof_fix_5 operation
+	$(run_task_operation)
+
+pprof-audit-1: ## Run a pprof_audit_1 operation
+	$(run_task_operation)
+
+pprof-audit-2: ## Run a pprof_audit_2 operation
 	$(run_task_operation)
 
 # ----------------------------------------------------

@@ -151,6 +151,26 @@ func main() {
 		return
 	}
 
+	// Задачи аудита идут своей веткой и ровно по той же причине, что задачи правки: таблицы у
+	// них свои, article_inputs и article_metadata у них нет по замыслу, и проверка схемы
+	// движка искала бы их напрасно. Ветка отдельная от правки, а не общая, потому что
+	// различие содержательное: правка пишет в живой блог, аудит не пишет в него ничего — и
+	// поток у него другой, с читающим интерфейсом площадки.
+	if profile.ArticleAudit != nil {
+		auditLogger := logger.With("task", profile.Name, "operation", command.Name)
+		if auditErr := runArticleAudit(ctx, articleAuditDeps{
+			profile: profile, command: command, cfg: cfg, pool: pool, logger: auditLogger, output: os.Stdout,
+		}); auditErr != nil {
+			if isGracefulCancellation(ctx, auditErr) {
+				auditLogger.Info("завершение приложения по сигналу", "stage", "shutdown")
+				return
+			}
+			auditLogger.Error("операция не выполнена", "error", auditErr)
+			os.Exit(1)
+		}
+		return
+	}
+
 	// Проверка знает про необщие колонки этой задачи: у той, что их объявила, отсутствие
 	// колонки — ошибка, а у той, что не объявляла, лишняя колонка в схеме означает чужую
 	// или недоприменённую миграцию. Так поля одной задачи не расползаются по таблицам другой.
@@ -863,7 +883,7 @@ func parseCommand(args []string) (taskCommand, error) {
 // availableOperations перечисляет операции задачи. Набор у задач один и тот же: pprof_1
 // отличается путями и схемой стадий, а не составом команд.
 func availableOperations(task string) string {
-	return "available " + task + " operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, clear, reset, google-login, google-publish, deepseek-login, " +
+	return "available " + task + " operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, " +
 		wordPressCheckOperation + ", " + wordPressPublishOperation + ", " + wordPressRepublishOperation + ", " +
 		wordPressMarkPublishedOperation + ", " +
 		catalogSyncOperation + ", " + catalogShowOperation
@@ -894,7 +914,7 @@ func parseTaskCommand(args []string) (taskCommand, error) {
 	// wordpress-check проверяет площадку задачи целиком, а не доступ к одной статье.
 	// Каталог услуг общий для задач: сбор не принимает ни статьи, ни ограничений — он
 	// заменяет каталог целиком.
-	case "deepseek-login", "google-login", wordPressCheckOperation, catalogSyncOperation:
+	case "deepseek-login", "google-login", wordPressCheckOperation, catalogSyncOperation, "report":
 		if len(args) != 3 {
 			return taskCommand{}, fmt.Errorf("usage: seo-pipeline %s %s", profile.Command, task)
 		}
@@ -998,7 +1018,9 @@ func validateConfig(command string, cfg config.Config) error {
 		return cfg.ValidateGenerate()
 	case "result":
 		return cfg.ValidateReset()
-	case "errors", "reset", "clear", "keywords", "google-publish", wordPressMarkPublishedOperation:
+	// Сводке аудита хватает базы и уже сохранённых артефактов: ни площадка, ни модель ей
+	// не нужны, и требовать их credentials нельзя.
+	case "errors", "reset", "clear", "keywords", "report", "google-publish", wordPressMarkPublishedOperation:
 		return cfg.ValidateReset()
 	case wordPressCheckOperation:
 		return cfg.ValidateWordPress()
