@@ -440,6 +440,54 @@ func validatePathPart(name, value string) error {
 	return nil
 }
 
+// File — один артефакт, который публикуется вместе с остальными.
+//
+// Путь относителен корня артефактов и называется вызывающим целиком: слоты ArticlePaths
+// описывают этапы генерации статьи, и задаче с другой раскладкой они не подходят. Заводить
+// им по паре Stage/Save на каждый новый файл значило бы учить движок чужим этапам.
+type File struct {
+	Path    string
+	Content []byte
+}
+
+// StageFiles готовит к публикации произвольные артефакты одной статьи.
+//
+// Нужен задачам, у которых свой набор файлов и своя таблица: атомарность им нужна та же
+// самая — файлы публикуются переименованием, а строка в базе пишется в том же Commit и
+// откатывает файлы при своей ошибке, — а слоты ArticlePaths им называть нечем. Поэтому
+// Paths у результата остаётся пустым: раскладку знает вызывающий, и второй её копии здесь
+// быть не должно.
+//
+// Каталоги создаются здесь же: os.CreateTemp кладёт временный файл рядом с будущим, и без
+// каталога публикация упала бы на первом артефакте.
+func (w *Writer) StageFiles(files ...File) (*PendingArtifact, error) {
+	if len(files) == 0 {
+		return nil, fmt.Errorf("no artifacts to stage")
+	}
+	contents := make([]fileContent, 0, len(files))
+	for _, file := range files {
+		cleaned, err := relativeArtifactPath(file.Path)
+		if err != nil {
+			return nil, err
+		}
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(w.root, cleaned)), 0o755); err != nil {
+			return nil, fmt.Errorf("create artifact directory: %w", err)
+		}
+		contents = append(contents, fileContent{relativePath: filepath.ToSlash(cleaned), data: file.Content})
+	}
+	return w.stage(ArticlePaths{}, contents)
+}
+
+// relativeArtifactPath отбивает путь, который увёл бы запись за корень артефактов.
+func relativeArtifactPath(relativePath string) (string, error) {
+	cleaned := filepath.Clean(filepath.FromSlash(relativePath))
+	if relativePath == "" || filepath.IsAbs(cleaned) || cleaned == ".." ||
+		strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("invalid relative output path %q", relativePath)
+	}
+	return cleaned, nil
+}
+
 type fileContent struct {
 	relativePath string
 	data         []byte

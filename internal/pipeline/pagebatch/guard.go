@@ -1,4 +1,4 @@
-package articlefix
+package pagebatch
 
 import (
 	"errors"
@@ -57,7 +57,7 @@ func NewFailureGuard() *FailureGuard {
 	return &FailureGuard{SameReasonLimit: DefaultSameReasonLimit, FailureLimit: DefaultFailureLimit}
 }
 
-// Passed отмечает переписанную статью и снимает накопленное.
+// Passed отмечает пройденную статью и снимает накопленное.
 //
 // Счётчики именно подряд идущие: пачка, где каждая третья статья падает по своей причине,
 // прогон останавливать не должна — это её нормальное состояние, а не поломка.
@@ -90,7 +90,7 @@ func (g *FailureGuard) Failed(err error) error {
 			ErrRunStopped, g.sameReason, err)
 	}
 	if g.inARow >= totalLimit {
-		return fmt.Errorf("%w: %d статей подряд не переписаны", ErrRunStopped, g.inARow)
+		return fmt.Errorf("%w: %d статей подряд не пройдены", ErrRunStopped, g.inARow)
 	}
 	return nil
 }

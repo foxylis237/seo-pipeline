@@ -234,3 +234,60 @@ func assertNoStagingFiles(t *testing.T, root string) {
 		t.Fatal(err)
 	}
 }
+
+// StageFiles публикует произвольные артефакты одной транзакцией с записью в базу: у задач со
+// своей раскладкой слотов ArticlePaths нет, а атомарность нужна та же.
+func TestStageFilesPublishesArbitraryLayout(t *testing.T) {
+	root := t.TempDir()
+	writer := NewWriter(root)
+	pending, err := writer.StageFiles(
+		File{Path: "12-logoped/original/article.html", Content: []byte("<p>было</p>")},
+		File{Path: "12-logoped/result.md", Content: []byte("# отчёт")},
+	)
+	if err != nil {
+		t.Fatalf("StageFiles: %v", err)
+	}
+	// До Commit на диске лежат только временные файлы: оборванный прогон не оставляет
+	// половину отчёта под именем готового.
+	if _, err := os.Stat(filepath.Join(root, "12-logoped", "result.md")); !os.IsNotExist(err) {
+		t.Fatalf("артефакт опубликован до Commit: %v", err)
+	}
+	var persisted bool
+	if err := Commit(func() error { persisted = true; return nil }, pending); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	if !persisted {
+		t.Fatal("persist не вызван")
+	}
+	assertFileText(t, filepath.Join(root, "12-logoped", "original", "article.html"), "<p>было</p>")
+	assertFileText(t, filepath.Join(root, "12-logoped", "result.md"), "# отчёт")
+	assertNoStagingFiles(t, root)
+}
+
+// Ошибка записи в базу откатывает файлы: путь в базе, указывающий на отчёт, которого нет, —
+// хуже отсутствия отчёта.
+func TestStageFilesRollsBackWhenPersistFails(t *testing.T) {
+	root := t.TempDir()
+	writer := NewWriter(root)
+	pending, err := writer.StageFiles(File{Path: "3-sanitar/result.md", Content: []byte("новый отчёт")})
+	if err != nil {
+		t.Fatalf("StageFiles: %v", err)
+	}
+	if err := Commit(func() error { return errors.New("база недоступна") }, pending); err == nil {
+		t.Fatal("Commit скрыл ошибку записи в базу")
+	}
+	if _, err := os.Stat(filepath.Join(root, "3-sanitar", "result.md")); !os.IsNotExist(err) {
+		t.Fatalf("файл остался опубликованным после отката: %v", err)
+	}
+	assertNoStagingFiles(t, root)
+}
+
+// Путь, уводящий за корень артефактов, отбивается до записи.
+func TestStageFilesRejectsEscapingPath(t *testing.T) {
+	writer := NewWriter(t.TempDir())
+	for _, path := range []string{"", "../чужое.md", "/etc/passwd"} {
+		if _, err := writer.StageFiles(File{Path: path, Content: []byte("x")}); err == nil {
+			t.Fatalf("путь %q принят", path)
+		}
+	}
+}

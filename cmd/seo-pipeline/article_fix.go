@@ -2,11 +2,9 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
 	"strings"
 	"text/tabwriter"
 
@@ -14,7 +12,6 @@ import (
 
 	"github.com/foxylis237/seo-pipeline/internal/config"
 	"github.com/foxylis237/seo-pipeline/internal/integrations/wordpress"
-	"github.com/foxylis237/seo-pipeline/internal/llm"
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/articlefix"
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/taskflow"
 	"github.com/foxylis237/seo-pipeline/internal/tasks"
@@ -56,6 +53,34 @@ func runArticleFix(ctx context.Context, deps articleFixDeps) error {
 	}
 }
 
+// pageBatch — общая часть зависимостей и слова, которыми задача правки называет свою работу.
+//
+// Слова перечислены явно, а не выведены из имени задачи: они уходят человеку в консоль и в
+// лог, и менять их вслед за рефакторингом нельзя.
+func (deps articleFixDeps) pageBatch() pageBatchDeps {
+	return pageBatchDeps{
+		profile:   deps.profile,
+		command:   deps.command,
+		outputDir: deps.cfg.OutputDir,
+		logger:    deps.logger,
+		output:    deps.output,
+		words: pageBatchWords{
+			ItemsGenitive: "статей",
+			ItemGenitive:  "статьи",
+			States:        "переписана или нет",
+			Done:          "переписана",
+			DoneMany:      "переписано",
+			FailedMany:    "не переписано",
+			FailedOne:     "статья не переписана",
+			DoneCounter:   "rewritten",
+			ResetConsequence: []string{
+				"Опубликованные правки это не отменяет: статьи в блоге останутся такими,",
+				"какими их переписал прогон. Сброс означает «пройти заново», а не «вернуть как было».",
+			},
+		},
+	}
+}
+
 // runArticleFixReset возвращает задачу к нулю: пустая таблица и пустой каталог артефактов.
 //
 // Блог он не откатывает и откатить не может: правки уже опубликованы, а команды, возвращающей
@@ -63,49 +88,11 @@ func runArticleFix(ctx context.Context, deps articleFixDeps) error {
 // снова заплатит за модель и снова перезапишет те же записи. Об этом сказано прямо в
 // подтверждении: перепутать «отменить» и «переделать» здесь стоит дорого.
 //
-// Только без ID. Сброс одной статьи не поддерживается намеренно: у задачи нет ни промежуточных
-// состояний, ни этапов, которые имело бы смысл переигрывать поодиночке, — есть переписанная
-// статья и непереписанная.
+// Сам сброс общий у задач правки и аудита (runPageBatchReset): считать строки, показать
+// масштаб, спросить подтверждение и вычистить каталог — одно и то же, различаются только
+// слова.
 func runArticleFixReset(ctx context.Context, repository *articlefix.Repository, deps articleFixDeps) error {
-	if strings.TrimSpace(deps.command.ExternalID) != "" {
-		return fmt.Errorf("%s reset сбрасывает всю задачу и ID не принимает: "+
-			"состояний у статьи два — переписана или нет", deps.profile.Command)
-	}
-	articles, err := repository.Count(ctx)
-	if err != nil {
-		return err
-	}
-	folders, err := countDirectoryEntries(deps.cfg.OutputDir)
-	if err != nil {
-		return err
-	}
-	fmt.Fprintln(deps.output)
-	fmt.Fprintln(deps.output, "Будет удалено безвозвратно:")
-	fmt.Fprintf(deps.output, "  статей в схеме %s: %d (счётчик идентификаторов обнулится)\n", deps.profile.Name, articles)
-	fmt.Fprintf(deps.output, "  каталогов артефактов в %s: %d\n", deps.cfg.OutputDir, folders)
-	fmt.Fprintln(deps.output)
-	fmt.Fprintln(deps.output, "Опубликованные правки это не отменяет: статьи в блоге останутся такими,")
-	fmt.Fprintln(deps.output, "какими их переписал прогон. Сброс означает «пройти заново», а не «вернуть как было».")
-	fmt.Fprintln(deps.output)
-	confirmed, err := confirmDestructive(confirmationWord, deps.command.AssumeYes,
-		isCharDevice(os.Stdin), os.Stdin, deps.output)
-	if err != nil {
-		return err
-	}
-	if !confirmed {
-		fmt.Fprintln(deps.output, "Отменено.")
-		return nil
-	}
-	if err := repository.Reset(ctx); err != nil {
-		return err
-	}
-	if err := clearDirectoryContents(deps.cfg.OutputDir); err != nil {
-		return err
-	}
-	deps.logger.Info("задача сброшена", "articles", articles, "folders", folders, "output_dir", deps.cfg.OutputDir)
-	fmt.Fprintf(deps.output, "Задача %s сброшена: таблица пуста, счётчик идентификаторов с единицы, "+
-		"артефакты удалены. Следующий шаг — %s import.\n", deps.profile.Name, deps.profile.Command)
-	return nil
+	return runPageBatchReset(ctx, repository, deps.pageBatch())
 }
 
 // runArticleFixImport читает вход задачи: индексы и ссылки на статьи.
@@ -178,7 +165,7 @@ func runArticleFixRun(ctx context.Context, repository *articlefix.Repository, de
 			return err
 		}
 
-		openedChats, closeLLM, err := newArticleFixChats(ctx, deps.profile, newDiagnosticsDirs(deps.profile), deps.logger)
+		openedChats, closeLLM, err := newSingleSchemeChats(ctx, deps.profile, newDiagnosticsDirs(deps.profile), deps.logger)
 		if err != nil {
 			return err
 		}
@@ -198,41 +185,11 @@ func runArticleFixRun(ctx context.Context, repository *articlefix.Repository, de
 	if err != nil {
 		return err
 	}
-	// Предохранитель считает подряд идущие отказы: единичные не останавливают пачку, а
-	// сплошные — останавливают. Без него прогон, у которого слёг провайдер, честно перебирает
-	// все оставшиеся статьи по пятнадцать минут на каждую.
-	guard := articlefix.NewFailureGuard()
-	var failed, rewritten int
-	for index, article := range articles {
-		if err := flow.Run(ctx, article.ExternalID); err != nil {
-			if ctx.Err() != nil {
-				return err
-			}
-			failed++
-			deps.logger.Error("статья не переписана", "external_id", article.ExternalID, "error", err)
-			fmt.Fprintf(deps.output, "%s — ошибка: %v\n", article.ExternalID, err)
-			if stop := guard.Failed(err); stop != nil {
-				// Оставшиеся статьи не тронуты: их не пробовали, отметки о правке у них нет,
-				// и следующий run возьмёт их сам. Сказать об этом надо здесь — по коду
-				// возврата отличить брошенную пачку от пройденной нельзя.
-				untouched := len(articles) - index - 1
-				deps.logger.Error("прогон остановлен предохранителем",
-					"error", stop, "rewritten", rewritten, "failed", failed, "untouched", untouched)
-				fmt.Fprintf(deps.output, "\n%v.\nОстальные %d статей не тронуты — их возьмёт следующий %s run.\n",
-					stop, untouched, deps.profile.Command)
-				return fmt.Errorf("%w (переписано %d, не переписано %d, не тронуто %d)",
-					stop, rewritten, failed, untouched)
-			}
-			continue
-		}
-		guard.Passed()
-		rewritten++
-		fmt.Fprintf(deps.output, "%s — переписана\n", article.ExternalID)
+	externalIDs := make([]string, 0, len(articles))
+	for _, article := range articles {
+		externalIDs = append(externalIDs, article.ExternalID)
 	}
-	if failed > 0 {
-		return fmt.Errorf("не переписано статей: %d из %d", failed, len(articles))
-	}
-	return nil
+	return runPageBatch(ctx, externalIDs, flow.Run, deps.pageBatch())
 }
 
 // newArticleFixFlow собирает поток правки из профиля задачи.
@@ -376,51 +333,6 @@ func (b articleFixBlog) Write(ctx context.Context, postID int64, title, contentH
 	return b.client.EditPost(ctx, wordpress.PostUpdate{
 		PostID: postID, Title: title, ContentHTML: contentHTML, Fields: updates,
 	})
-}
-
-// newArticleFixChats поднимает диалоги с моделью по схеме стадий задачи.
-//
-// Схема одна (наложения у задач правки нет), поэтому резолвер режимов здесь не нужен:
-// выбирать между Gemini и DeepSeek не из чего, а конвейер generation.Pipeline задача не
-// использует вовсе — ей нужен только чат.
-func newArticleFixChats(ctx context.Context, profile tasks.Profile, debugDirs diagnosticsDirs,
-	logger *slog.Logger) (taskflow.ChatFactory, func() error, error) {
-	noop := func() error { return nil }
-	configs, err := loadStageConfigs(profile, logger, true)
-	if err != nil {
-		return nil, noop, err
-	}
-	scheme := configs.deepseek
-	providers := configs.providers()
-	models := configs.models()
-	used := make(map[string]struct{})
-	for _, stage := range scheme.Stages {
-		for _, target := range stage.Targets {
-			used[target.Provider] = struct{}{}
-		}
-	}
-	clients := make(map[string]llm.Client, len(used))
-	var closers []func() error
-	closeAll := func() error {
-		var errs []error
-		for _, closeClient := range closers {
-			if closeErr := closeClient(); closeErr != nil {
-				errs = append(errs, fmt.Errorf("закрыть LLM client: %w", closeErr))
-			}
-		}
-		return errors.Join(errs...)
-	}
-	for _, name := range sortedKeys(used) {
-		client, closer, clientErr := newLLMClient(ctx, name, providers[name], models[name], debugDirs.deepseek, logger)
-		if clientErr != nil {
-			return nil, closeAll, fmt.Errorf("создать LLM provider %q: %w", name, clientErr)
-		}
-		clients[name] = client
-		if closer != nil {
-			closers = append(closers, closer)
-		}
-	}
-	return taskflow.NewRouterChats(llm.NewRouter(scheme, clients, logger)), closeAll, nil
 }
 
 // printPlannedField печатает одно поле заголовка: было и, если меняется, стало.

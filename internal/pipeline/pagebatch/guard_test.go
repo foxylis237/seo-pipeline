@@ -1,4 +1,4 @@
-package articlefix
+package pagebatch
 
 import (
 	"errors"
