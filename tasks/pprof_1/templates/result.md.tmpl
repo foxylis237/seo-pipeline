@@ -129,3 +129,10 @@
 ```text
 {{.WordPressURL}}
 ```
+
+## Связанные курсы
+
+```text
+{{range $index, $item := .RelatedCourses}}{{add $index 1}}. {{$item.Name}} — {{$item.Category}}{{if $item.Neighbour}} — смежная профессия{{end}}
+   {{$item.URL}}
+{{end}}```

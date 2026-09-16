@@ -22,7 +22,7 @@ LOGIN_SERVICE := $(word 2,$(MAKECMDGOALS))
 TASK_OPERATION := $(word 2,$(MAKECMDGOALS))
 TASK_ARG := $(word 3,$(MAKECMDGOALS))
 TASK_EXTRA_ARGS := $(wordlist 4,$(words $(MAKECMDGOALS)),$(MAKECMDGOALS))
-TASK_OPERATIONS := import import-check errors keywords retry run regenerate dry-run prepare generate demo-generate article info review fix html result clear reset google-login google-publish deepseek-login wordpress-check publish mark-published
+TASK_OPERATIONS := import import-check errors keywords retry run regenerate dry-run prepare generate demo-generate article info review fix html result clear reset google-login google-publish deepseek-login wordpress-check publish mark-published catalog-sync catalog-show
 OPTIONAL_ARGUMENT_OPERATIONS := import-check errors keywords retry run regenerate clear reset google-publish prepare generate demo-generate article info review fix html result publish mark-published
 
 .PHONY: help task-1 pprof-1 pprof-2 pprof-fix-1 pprof-fix-2 pprof-fix-3 pprof-fix-4 pprof-fix-5 login docker-up docker-start docker-stop docker-down docker-restart docker-logs docker-ps
@@ -66,6 +66,8 @@ help: ## этот список
 		'make pprof-1 demo-generate [ID]'  'пересобрать каталог DEMO' \
 		'make pprof-1 google-publish [ID]' 'промпты в Google Docs' \
 		'make pprof-1 wordpress-check'     'проверка доступа к WordPress, без записи' \
+		'make pprof-1 catalog-sync'        'собрать каталог услуг сайта, без записи в блог' \
+		'make pprof-1 catalog-show ID'     'какие курсы подберутся статье, без записи' \
 		'make pprof-1 publish [ID]'        'опубликовать в WordPress; без ID — все готовые' \
 		'make pprof-1 publish plan [ID]'   'что именно уйдёт в WordPress, без записи' \
 		'make pprof-1 mark-published ID [post_id]' 'привязать к существующей записи блога' \

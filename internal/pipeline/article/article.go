@@ -85,6 +85,12 @@ type PublicationInput struct {
 	// Author — авторы статьи из книги импорта, через запятую. Публикация ищет по ним карточку
 	// на сайте и связывает с ней запись.
 	Author string
+	// Professions — похожие профессии из книги импорта, через запятую. По ним подбирается
+	// блок связанных курсов под статьёй; порядок значим, первой человек называет главную.
+	Professions string
+	// Links — программы, уже стоящие ссылками в тексте статьи. Блок связанных курсов их не
+	// повторяет: читатель эти курсы там уже видел.
+	Links string
 	// HTMLPath — путь к article.html относительно OUTPUT_DIR. Пуст, если стадия html не
 	// доходила до конца: тогда публиковать нечего.
 	HTMLPath string
@@ -204,13 +210,16 @@ type SavedGenerationInput struct {
 
 // ResultInput contains persisted fields used to assemble result.md.
 type ResultInput struct {
-	Article         Article
-	Category        string
-	Tags            string
-	TLDR            string
-	FAQ             string
-	AdditionalInfo  string
-	Professions     string
+	Article        Article
+	Category       string
+	Tags           string
+	TLDR           string
+	FAQ            string
+	AdditionalInfo string
+	Professions    string
+	// Links — программы, стоящие ссылками в тексте статьи. Нужны блоку связанных курсов:
+	// он ведёт читателя дальше и потому эти ссылки не повторяет.
+	Links           string
 	Author          string
 	Keyword         string
 	MetaDescription string

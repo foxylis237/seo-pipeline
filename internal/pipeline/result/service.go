@@ -40,12 +40,45 @@ type Service struct {
 	writer       Writer
 	logger       *slog.Logger
 	templatePath string
+	// courses — подбор связанных курсов под статью. Пусто у задачи, которой блок не нужен:
+	// раздел result.md тогда остаётся пустым, как и поле записи.
+	courses CourseSelector
 }
 
 // NewService собирает сборщик result.md. templatePath — обязательная зависимость и потому
 // обычный параметр: шаблон у каждой задачи свой.
 func NewService(repository Repository, writer Writer, logger *slog.Logger, templatePath string) *Service {
 	return &Service{repository: repository, writer: writer, logger: logger, templatePath: templatePath}
+}
+
+// RelatedCourse — одна карточка блока «Связанные курсы» под статьёй.
+//
+// Свой тип, а не тип каталога: сборщику result.md нужны четыре строки для шаблона, а не
+// модель услуги площадки. Так движок ничего не знает ни про каталог, ни про WordPress.
+type RelatedCourse struct {
+	Name     string
+	Category string
+	URL      string
+	// Neighbour — курс смежной профессии, а не той, о которой статья. Человек по этому
+	// признаку видит, насколько блок вышел за тему.
+	Neighbour bool
+}
+
+// CourseSelector подбирает курсы под уже собранные данные статьи.
+//
+// Интерфейс объявлен у потребителя и принимает готовый ResultInput: колонки professions и
+// links в нём уже есть, и второго похода в базу не нужно.
+type CourseSelector interface {
+	RelatedCourses(ctx context.Context, input article.ResultInput) ([]RelatedCourse, error)
+}
+
+// UseCourseSelector подключает подбор связанных курсов.
+//
+// Необязательная зависимость и потому сеттер, а не параметр конструктора: у задачи без блока
+// под статьёй её нет вовсе, и требовать её от всех значило бы протащить каталог услуг в
+// task_1 и в задачи правки.
+func (s *Service) UseCourseSelector(courses CourseSelector) {
+	s.courses = courses
 }
 
 // ReadingTimeMinutes calculates reading time at 180 words per minute.
@@ -66,6 +99,9 @@ type templateData struct {
 	ImageURL           string
 	ReadingTimeMinutes int
 	FAQItems           []FAQItem
+	// RelatedCourses — блок связанных курсов. Пуст у задачи без него и у статьи, которой
+	// подбор не удался: раздел листа тогда печатается пустым, как и остальные незаполненные.
+	RelatedCourses []RelatedCourse
 }
 
 // ParseFAQItems converts persisted FAQ text into question-answer pairs.
@@ -155,7 +191,7 @@ func (s *Service) BuildStaged(ctx context.Context, externalID string) (*articleo
 	if err != nil {
 		return nil, fmt.Errorf("parse FAQ for result: %w", err)
 	}
-	rendered, err := s.render(input, articleText, faqItems)
+	rendered, err := s.render(input, articleText, faqItems, s.relatedCourses(ctx, input))
 	if err != nil {
 		return nil, err
 	}
@@ -174,7 +210,24 @@ func (s *Service) BuildStaged(ctx context.Context, externalID string) (*articleo
 
 // render fills result.md.tmpl. Единственное место, где шаблон читается и исполняется:
 // боевая сборка и demo обязаны давать один и тот же файл из одних и тех же данных.
-func (s *Service) render(input article.ResultInput, articleText string, faqItems []FAQItem) (string, error) {
+// relatedCourses подбирает блок под статьёй. Отказ подбора лист не роняет: result.md нужен
+// человеку и без блока, а публикация всё равно спросит курсы заново и остановится сама.
+func (s *Service) relatedCourses(ctx context.Context, input article.ResultInput) []RelatedCourse {
+	if s.courses == nil {
+		return nil
+	}
+	courses, err := s.courses.RelatedCourses(ctx, input)
+	if err != nil {
+		s.logger.Warn("связанные курсы не подобраны", "external_id", input.Article.ExternalID,
+			"stage", "result_generation", "error", err)
+		return nil
+	}
+	return courses
+}
+
+func (s *Service) render(
+	input article.ResultInput, articleText string, faqItems []FAQItem, courses []RelatedCourse,
+) (string, error) {
 	templateText, err := os.ReadFile(s.templatePath)
 	if err != nil {
 		return "", fmt.Errorf("read result template %q: %w", s.templatePath, err)
@@ -199,6 +252,7 @@ func (s *Service) render(input article.ResultInput, articleText string, faqItems
 		ImageURL:           input.Article.Slug,
 		ReadingTimeMinutes: ReadingTimeMinutes(articleText),
 		FAQItems:           faqItems,
+		RelatedCourses:     courses,
 	}); err != nil {
 		return "", fmt.Errorf("render result template: %w", err)
 	}
@@ -232,7 +286,9 @@ func (s *Service) RenderForDemo(ctx context.Context, externalID, articleText str
 			"external_id", externalID, "stage", "result_generation", "error", err)
 		faqItems = nil
 	}
-	return s.render(input, articleText, faqItems)
+	// Блок связанных курсов DEMO собирает тем же подбором, что и боевой лист: расхождение
+	// между ними человек принял бы за ошибку подбора.
+	return s.render(input, articleText, faqItems, s.relatedCourses(ctx, input))
 }
 
 // fallback возвращает первое непустое значение. Пустая колонка и отсутствующая колонка здесь

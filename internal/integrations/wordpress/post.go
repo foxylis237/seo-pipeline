@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -28,12 +30,25 @@ const (
 
 // CustomField — одна пара postmeta.
 //
-// Значение всегда строка, даже когда по смыслу это число: репитер ACF хранит и счётчик
+// Значение обычно строка, даже когда по смыслу это число: репитер ACF хранит и счётчик
 // строк, и сами подполя текстом, и WordPress отдаёт их обратно тоже текстом. Число здесь
 // завело бы обратную сверку в сравнение int со строкой.
 type CustomField struct {
 	Key   string
 	Value string
+	// IDs — значение-список идентификаторов записей, каким его хранит связь ACF на
+	// несколько записей (related_courses). Отдельное поле, а не строка в Value, потому что
+	// уходить оно обязано XML-RPC-массивом.
+	//
+	// Готовую сериализованную строку сюда класть нельзя: WordPress пропускает значение
+	// через maybe_serialize, и уже сериализованное сериализуется повторно — измерено на
+	// записи 22215, ушло a:1:{i:0;s:5:"18220";}, легло s:22:"a:1:{…}", то есть строка
+	// вместо массива, и ACF такую связь не читает. Настоящий массив PHP получает только из
+	// XML-RPC-массива, и сериализует его уже сам.
+	//
+	// Связь на ОДНУ запись массива не требует: скаляр ACF разворачивает сама
+	// (acf_get_array) — так устроены author_link у статьи и teachers у страницы услуги.
+	IDs []int64
 }
 
 // PostPayload — всё, что уходит в WordPress одним вызовом wp.newPost.
@@ -216,6 +231,14 @@ func (p PostPayload) Verify(stored StoredPost) []Mismatch {
 	// редактирование записей пакету запрещено, — а запись без картинки в блоге видна сразу.
 	add("post_thumbnail", formatIDs([]int64{p.ThumbnailID}), formatIDs([]int64{stored.ThumbnailID}))
 	for _, field := range p.Fields {
+		// Список идентификаторов возвращается сериализованным массивом PHP, а не тем, что
+		// мы отправляли. Сверяется поэтому состав, а не строка: порядок внутри связи ACF не
+		// значим, а её запись — единственное место, где мы вообще узнаем, легло ли поле
+		// массивом или строкой.
+		if len(field.IDs) > 0 {
+			add(field.Key, formatIDs(field.IDs), formatIDs(serializedIDs(stored.Fields[field.Key])))
+			continue
+		}
 		add(field.Key, field.Value, stored.Fields[field.Key])
 	}
 	return mismatches
@@ -299,7 +322,7 @@ func (p PostPayload) content() xmlrpcStruct {
 	for _, field := range p.Fields {
 		fields = append(fields, xmlrpcStruct{
 			{Name: "key", Value: field.Key},
-			{Name: "value", Value: field.Value},
+			{Name: "value", Value: field.value()},
 		})
 	}
 	content := xmlrpcStruct{
@@ -377,6 +400,47 @@ func storedPostFromMembers(members map[string]any) StoredPost {
 	}
 	return post
 }
+
+// value — то, что уходит в custom_fields: строка или XML-RPC-массив идентификаторов.
+func (f CustomField) value() any { return customFieldValue(f.Value, f.IDs) }
+
+// customFieldValue готовит значение поля postmeta и общий он у создания записи и у её правки.
+//
+// Общий намеренно: связь ACF обязана уйти массивом в обоих случаях, а второй копии правила
+// хватило бы, чтобы правка отправила строку — и связь перестала бы читаться ровно так же,
+// как от повторной сериализации.
+func customFieldValue(value string, ids []int64) any {
+	if len(ids) == 0 {
+		return value
+	}
+	// Идентификаторы уходят строками: именно так их хранит ACF внутри сериализованного
+	// массива (s:3:"507"), и запись числами разошлась бы с тем, что уже лежит на площадке.
+	values := make(xmlrpcArray, 0, len(ids))
+	for _, id := range ids {
+		values = append(values, strconv.FormatInt(id, 10))
+	}
+	return values
+}
+
+// serializedIDs вынимает идентификаторы из сериализованного массива PHP.
+//
+// Разбор нарочно грубый и знает ровно один случай — a:N:{i:0;s:3:"507";…}: полноценный
+// разбор PHP-сериализации здесь не нужен, а нужна проверка «легло ли то, что отправляли».
+// Строка, не похожая на массив, даёт пустой набор — и сверка честно покажет расхождение.
+func serializedIDs(value string) []int64 {
+	var ids []int64
+	for _, match := range serializedStringValue.FindAllStringSubmatch(value, -1) {
+		id, err := strconv.ParseInt(match[1], 10, 64)
+		if err != nil || id <= 0 {
+			continue
+		}
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+// serializedStringValue — строковый элемент сериализованного массива PHP.
+var serializedStringValue = regexp.MustCompile(`s:\d+:"(\d+)"`)
 
 // formatIDs приводит набор идентификаторов к сравнимому виду. Порядок терминов WordPress не
 // сохраняет, и сравнивать их как последовательность было бы ложной тревогой.

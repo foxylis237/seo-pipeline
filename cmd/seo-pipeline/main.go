@@ -14,9 +14,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/foxylis237/seo-pipeline/internal/catalog"
 	"github.com/foxylis237/seo-pipeline/internal/config"
 	"github.com/foxylis237/seo-pipeline/internal/integrations/arsenkin"
 	"github.com/foxylis237/seo-pipeline/internal/integrations/google"
+	"github.com/foxylis237/seo-pipeline/internal/integrations/wordpress"
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/article"
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/demo"
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/diagnostics"
@@ -193,6 +195,14 @@ func main() {
 	// нет, и запрос, который её называет, упал бы на «column does not exist».
 	articleRepository.UseMetadataWithoutTLDR(profile.MetadataFAQOnly)
 	resultService := resultassembly.NewService(articleRepository, writer, taskLogger, profile.TemplatePath)
+	// Связанные курсы под статьёй. Признак — из профиля: у task_1, pprof_2 и задач правки
+	// такого блока нет, и каталог им не нужен вовсе. Один и тот же подборщик уходит и в лист,
+	// и в публикацию: в result.md человек смотрит затем, чтобы увидеть, что уйдёт в блог.
+	var relatedCourses *catalogCourses
+	if profile.RelatedCourses {
+		relatedCourses = newCatalogCourses(catalog.NewPostgresStore(pool))
+		resultService.UseCourseSelector(relatedCourses)
+	}
 	// Корни диагностики разводятся по задачам здесь, один раз: сами интеграции о задачах не
 	// знают и получают готовый путь.
 	debugDirs := newDiagnosticsDirs(profile)
@@ -266,6 +276,7 @@ func main() {
 			// каталогом не делятся: своя картинка у каждой статьи каждой задачи.
 			images:      newArticleImages(profile.InputDir),
 			resultBuild: resultService,
+			courses:     wordPressCourses(relatedCourses),
 			settings:    cfg.WordPress,
 			logger:      taskLogger,
 			out:         os.Stdout,
@@ -277,6 +288,33 @@ func main() {
 			withoutArticleMetadata: profile.WithoutMetadataStage,
 			metadataFAQOnly:        profile.MetadataFAQOnly,
 		}, command.Name, command.ExternalID, command.WordPressPostID, command.Plan)
+
+	// Каталог услуг: сбор с площадки и просмотр подбора. Ни LLM, ни Keys.so, ни Arsenkin;
+	// в блог не пишется ничего — сбор только читает записи, а результат ложится в общую
+	// схему site, не в схему задачи.
+	case catalogSyncOperation:
+		var client *wordpress.Client
+		if client, err = newWordPressClient(cfg.WordPress); err == nil {
+			err = runCatalogSync(ctx, catalogSource{client: client}, catalog.NewPostgresStore(pool),
+				taskLogger, os.Stdout)
+		}
+
+	case catalogShowOperation:
+		var saved article.Article
+		if saved, err = articleRepository.GetArticleByExternalID(ctx, command.ExternalID); err == nil {
+			var input article.Input
+			if input, err = articleRepository.GetArticleInput(ctx, saved.ID); err == nil {
+				err = runCatalogShow(ctx, catalog.NewPostgresStore(pool), catalog.Request{
+					Professions: input.Professions,
+					// Тема — ключевой запрос и заголовок статьи вместе: по запросу видно
+					// профессию, по заголовку — о чём именно статья внутри неё.
+					Topic: strings.TrimSpace(input.Keyword + " " + input.Header),
+					// Перелинковка статьи: блок под ней ведёт дальше и эти программы не
+					// повторяет.
+					Links: input.Links,
+				}, os.Stdout)
+			}
+		}
 
 	case "clear":
 		err = runClear(ctx, articleRepository, writer, clearOptions{
@@ -825,7 +863,9 @@ func parseCommand(args []string) (taskCommand, error) {
 // отличается путями и схемой стадий, а не составом команд.
 func availableOperations(task string) string {
 	return "available " + task + " operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, clear, reset, google-login, google-publish, deepseek-login, " +
-		wordPressCheckOperation + ", " + wordPressPublishOperation + ", " + wordPressMarkPublishedOperation
+		wordPressCheckOperation + ", " + wordPressPublishOperation + ", " +
+		wordPressMarkPublishedOperation + ", " +
+		catalogSyncOperation + ", " + catalogShowOperation
 }
 
 func parseTaskCommand(args []string) (taskCommand, error) {
@@ -851,7 +891,9 @@ func parseTaskCommand(args []string) (taskCommand, error) {
 	switch task {
 	// Позиционных аргументов ни у одной нет: вход в сервис общий для всех статей, а
 	// wordpress-check проверяет площадку задачи целиком, а не доступ к одной статье.
-	case "deepseek-login", "google-login", wordPressCheckOperation:
+	// Каталог услуг общий для задач: сбор не принимает ни статьи, ни ограничений — он
+	// заменяет каталог целиком.
+	case "deepseek-login", "google-login", wordPressCheckOperation, catalogSyncOperation:
 		if len(args) != 3 {
 			return taskCommand{}, fmt.Errorf("usage: seo-pipeline %s %s", profile.Command, task)
 		}
@@ -888,9 +930,10 @@ func parseTaskCommand(args []string) (taskCommand, error) {
 			return taskCommand{}, fmt.Errorf("usage: seo-pipeline %s run [external_id]", profile.Command)
 		}
 		return parseExternalIDCommand(profile, task, args[3])
-	// ID обязателен у всех трёх: для regenerate и clear «все статьи» означало бы reset,
-	// а колонка запросов вставляется одной статье — общей колонки не бывает.
-	case "regenerate", "clear", "keywords":
+	// ID обязателен у всех: для regenerate и clear «все статьи» означало бы reset, колонка
+	// запросов вставляется одной статье, а подбор связанных курсов показывается для той
+	// статьи, чьи профессии и тему он разбирает.
+	case "regenerate", "clear", "keywords", catalogShowOperation:
 		if len(args) != 4 {
 			return taskCommand{}, fmt.Errorf("usage: seo-pipeline %s %s <external_id>", profile.Command, task)
 		}
@@ -957,6 +1000,15 @@ func validateConfig(command string, cfg config.Config) error {
 		return cfg.ValidateReset()
 	case wordPressCheckOperation:
 		return cfg.ValidateWordPress()
+	// Сбору каталога нужны и площадка, и база: услуги читаются в блоге, а ложатся в схему
+	// site. Просмотр подбора площадку не трогает вовсе — ему хватает базы.
+	case catalogSyncOperation:
+		if err := cfg.ValidateReset(); err != nil {
+			return err
+		}
+		return cfg.ValidateWordPress()
+	case catalogShowOperation:
+		return cfg.ValidateReset()
 	case wordPressPublishOperation:
 		// Публикации нужны и база, и площадка: статья берётся из PostgreSQL, а уходит
 		// в WordPress. Проверяются обе, иначе отказ найдётся на середине.

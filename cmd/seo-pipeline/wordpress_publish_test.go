@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -211,15 +212,36 @@ func (c *fakeWPClient) CreatePost(_ context.Context, payload wordpress.PostPaylo
 		if field.Key == c.dropField {
 			continue
 		}
+		// Список идентификаторов площадка возвращает сериализованным массивом PHP, а не
+		// тем, что мы отправляли: значение проходит через maybe_serialize. Подставная
+		// площадка обязана повторять это, иначе сверка связи проверялась бы на данных,
+		// которых в жизни не бывает.
+		if len(field.IDs) > 0 {
+			stored.Fields[field.Key] = serializePHPIDs(field.IDs)
+			continue
+		}
 		stored.Fields[field.Key] = field.Value
 	}
 	c.stored = stored
 	return stored.ID, nil
 }
 
+// serializePHPIDs собирает то, что вернул бы WordPress, сериализовав массив строк.
+func serializePHPIDs(ids []int64) string {
+	var builder strings.Builder
+	fmt.Fprintf(&builder, "a:%d:{", len(ids))
+	for index, id := range ids {
+		value := strconv.FormatInt(id, 10)
+		fmt.Fprintf(&builder, `i:%d;s:%d:"%s";`, index, len(value), value)
+	}
+	builder.WriteString("}")
+	return builder.String()
+}
+
 func (c *fakeWPClient) GetPost(context.Context, int64) (wordpress.StoredPost, error) {
 	return c.stored, c.getErr
 }
+
 
 type fakeWPWriter struct {
 	files map[string]string
@@ -287,9 +309,14 @@ func readyWPPublicationInput() article.PublicationInput {
 		Keyword:         "разряды газосварщиков",
 		MetaDescription: "Какие категории существуют.",
 		Header:          "Разряды газосварщиков: какие бывают",
-		TLDR:            "От разряда зависит сложность работ.",
-		FAQ:             "Вопрос: Сколько разрядов?\nОтвет: Пять — со 2-го по 6-й.\nВопрос: Где работает?\nОтвет: В нефтегазовой отрасли.",
-		HTMLPath:        testWPHTMLPath,
+		// Профессии и перелинковка — то, по чему подбирается блок связанных курсов под
+		// статьёй: колонки книги импорта, у статьи блога заполнены обе.
+		Professions: "газосварщик, сварщик, газорезчик, монтажник",
+		Links: "https://dpoprof.ru/obuchenie/jelektrogazosvarshhik/\n" +
+			"https://dpoprof.ru/obuchenie/distancionnoe-obuchenie-na-gazosvarshika/",
+		TLDR:     "От разряда зависит сложность работ.",
+		FAQ:      "Вопрос: Сколько разрядов?\nОтвет: Пять — со 2-го по 6-й.\nВопрос: Где работает?\nОтвет: В нефтегазовой отрасли.",
+		HTMLPath: testWPHTMLPath,
 	}
 }
 

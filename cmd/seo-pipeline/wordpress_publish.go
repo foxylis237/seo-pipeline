@@ -7,9 +7,11 @@ import (
 	"html"
 	"io"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/foxylis237/seo-pipeline/internal/catalog"
 	"github.com/foxylis237/seo-pipeline/internal/config"
 	"github.com/foxylis237/seo-pipeline/internal/integrations/wordpress"
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/article"
@@ -84,6 +86,15 @@ type wordPressResultBuilder interface {
 	Build(ctx context.Context, externalID string) (articleoutput.ArticlePaths, error)
 }
 
+// wordPressCourseSelector — подбор связанных курсов под статью.
+//
+// Интерфейс объявлен у потребителя и держится узким: публикации нужен ровно один вопрос —
+// какие три услуги показать под статьёй. Правило подбора живёт в internal/catalog, каталог —
+// в схеме site, и ни то ни другое публикацию не касается.
+type wordPressCourseSelector interface {
+	SelectRelated(ctx context.Context, request catalog.Request) ([]catalog.Related, error)
+}
+
 type wordPressPublishDeps struct {
 	client wordPressPublishClient
 	// mapping — раскладка данных статьи по полям площадки. Единственное, чем задачи
@@ -93,6 +104,10 @@ type wordPressPublishDeps struct {
 	writer      wordPressPublishWriter
 	images      wordPressImageSource
 	resultBuild wordPressResultBuilder
+	// courses — подбор связанных курсов по каталогу услуг площадки. nil означает прежнее
+	// поведение: поле related_courses не отправляется, и блок под статьёй тема заполняет
+	// сама по совпадению рубрики и меток.
+	courses     wordPressCourseSelector
 	logger      *slog.Logger
 	out         io.Writer
 	assumeYes   bool
@@ -392,6 +407,7 @@ func buildWordPressPayload(
 		Tags:             mapped.Tags,
 		ReadingTime:      readingTime,
 		FAQItems:         len(faqItems),
+		RelatedCourses:   mapped.RelatedCourses,
 		HTMLPath:         input.HTMLPath,
 		ContentRunes:     len([]rune(contentHTML)),
 	}
@@ -477,11 +493,23 @@ type wordPressPayloadContext struct {
 	// Tags — метки статьи в том порядке, в каком они перечислены в Excel. Нулевой
 	// идентификатор бывает только в сухом прогоне и означает метку, которой на площадке
 	// пока нет.
-	Tags         []wordpress.Tag
-	ReadingTime  string
-	FAQItems     int
-	HTMLPath     string
-	ContentRunes int
+	Tags        []wordpress.Tag
+	ReadingTime string
+	FAQItems    int
+	// RelatedCourses — три услуги блока под статьёй. В нагрузке от них остаются одни
+	// идентификаторы, а человеку перед необратимой командой надо видеть названия.
+	RelatedCourses []catalog.Related
+	HTMLPath       string
+	ContentRunes   int
+}
+
+// formatPlanIDs печатает идентификаторы связи в том порядке, в каком они уйдут.
+func formatPlanIDs(ids []int64) string {
+	parts := make([]string, 0, len(ids))
+	for _, id := range ids {
+		parts = append(parts, strconv.FormatInt(id, 10))
+	}
+	return strings.Join(parts, ", ")
 }
 
 // resultSectionValue достаёт готовое значение раздела result.md.
@@ -658,6 +686,8 @@ type wordPressCommandDeps struct {
 	writer      wordPressPublishWriter
 	images      wordPressImageSource
 	resultBuild wordPressResultBuilder
+	// courses — подбор связанных курсов; nil у задачи без блока под статьёй.
+	courses     wordPressCourseSelector
 	settings    config.WordPressConfig
 	logger      *slog.Logger
 	out         io.Writer
@@ -682,6 +712,7 @@ func wordPressPublishDepsFrom(deps wordPressCommandDeps, client wordPressPublish
 		repository:             deps.repository,
 		writer:                 deps.writer,
 		images:                 deps.images,
+		courses:                deps.courses,
 		resultBuild:            deps.resultBuild,
 		logger:                 deps.logger,
 		out:                    deps.out,
@@ -824,8 +855,31 @@ func runWordPressPublishPlan(ctx context.Context, deps wordPressPublishDeps, ext
 
 	fmt.Fprintf(out, "\ncustom_fields (%d):\n", len(payload.Fields))
 	for _, field := range payload.Fields {
+		// Поле-связь уходит списком идентификаторов, и в Value у него пусто. Печатаются
+		// именно идентификаторы: по ним человек найдёт запись в админке.
+		if len(field.IDs) > 0 {
+			fmt.Fprintf(out, "  %-22s = %s\n", field.Key, formatPlanIDs(field.IDs))
+			continue
+		}
 		value := strings.ReplaceAll(strings.TrimSpace(field.Value), "\n", " ")
 		fmt.Fprintf(out, "  %-22s = %s\n", field.Key, truncateForPlan(value, fieldValuePreview))
+	}
+
+	if len(plan.RelatedCourses) > 0 {
+		fmt.Fprintf(out, "\nСвязанные курсы (%d, смежных %d):\n",
+			len(plan.RelatedCourses), catalog.CountNeighbours(plan.RelatedCourses))
+		for _, item := range plan.RelatedCourses {
+			mark := "профессия статьи"
+			if item.Neighbour {
+				mark = "смежная профессия"
+			}
+			if item.Widened {
+				mark = "расширенный подбор — проверьте глазами"
+			}
+			fmt.Fprintf(out, "  %-46s %-22s %s\n",
+				truncateForPlan(item.Program.Name, 46), item.Program.Category, mark)
+			fmt.Fprintf(out, "  %-46s %s\n", "", item.Program.URL)
+		}
 	}
 
 	switch {

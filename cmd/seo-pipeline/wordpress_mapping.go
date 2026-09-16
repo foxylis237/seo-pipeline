@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/foxylis237/seo-pipeline/internal/catalog"
 	"github.com/foxylis237/seo-pipeline/internal/integrations/wordpress"
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/article"
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/result"
@@ -44,6 +45,10 @@ type wordPressMappedPost struct {
 	ImageTitle string
 	// Fields — ACF и Yoast одним списком.
 	Fields []wordpress.CustomField
+	// RelatedCourses — услуги блока под статьёй, уже подобранные. Нужны сухому прогону:
+	// в нагрузке лежат идентификаторы, а человеку перед необратимой командой надо видеть,
+	// какие курсы увидит читатель.
+	RelatedCourses []catalog.Related
 }
 
 // wordPressMapping — раскладка одной задачи.
@@ -74,6 +79,16 @@ type wordPressMapping interface {
 // profBlueValue — содержимое синего блока со стоимостью у блоговой статьи. Значение одно на
 // все статьи и задано человеком; из данных статьи оно не выводится и моделью не генерируется.
 const profBlueValue = "от 7 000 р"
+
+// blogFieldRelatedCourses — связь записи с курсами блока под статьёй (ACF, значение — список
+// идентификаторов записей услуг).
+//
+// В отличие от author_link здесь именно список, а не скаляр, и уходит он XML-RPC-массивом:
+// сериализованную строку WordPress сериализует повторно, и связь перестаёт читаться.
+//
+// Пустым поле не отправляется вовсе: у темы это законное состояние — «курсы не заданы», и
+// тогда она подбирает их сама по совпадению рубрики и меток.
+const blogFieldRelatedCourses = "related_courses"
 
 // blogWordPressMapping — раскладка полей темы dpoprof для статьи блога.
 //
@@ -108,21 +123,70 @@ func (m blogWordPressMapping) Build(
 		return wordPressMappedPost{}, err
 	}
 	fields := blogCustomFields(input, faqItems, readingTime, tagNames, !deps.withoutArticleMetadata)
+	// Связанные курсы подбираются по каталогу услуг площадки. Каталога может не быть вовсе —
+	// тогда поле не отправляется, и блок под статьёй тема заполняет сама, как и раньше.
+	related, err := selectRelatedCourses(ctx, deps, input)
+	if err != nil {
+		return wordPressMappedPost{}, err
+	}
+	if len(related) > 0 {
+		fields = append(fields, wordpress.CustomField{
+			Key: blogFieldRelatedCourses, IDs: catalog.RelatedPostIDs(related),
+		})
+	}
 	if authorID := resolveBlogAuthor(ctx, deps, externalID, input.Author); authorID != 0 {
 		fields = append(fields, wordpress.CustomField{
 			Key: blogFieldAuthor, Value: strconv.FormatInt(authorID, 10),
 		})
 	}
 	return wordPressMappedPost{
-		CategoryID:   categoryID,
-		CategoryName: strings.TrimSpace(input.Category),
-		Tags:         tags,
+		CategoryID:     categoryID,
+		CategoryName:   strings.TrimSpace(input.Category),
+		Tags:           tags,
+		RelatedCourses: related,
 		// alt — заголовок H1 статьи, title — слаг картинки. Оба значения приходят из
 		// PostgreSQL как есть и из загруженного файла не выводятся.
 		ImageAlt:   strings.TrimSpace(input.Header),
 		ImageTitle: strings.TrimSpace(input.Article.Slug),
 		Fields:     fields,
 	}, nil
+}
+
+// selectRelatedCourses подбирает три курса блока под статьёй.
+//
+// Правило «ровно три» — требование вёрстки темы, а не пожелание: столько карточек рисует
+// блок, и неполный ряд выглядит ошибкой. Поэтому подбор либо даёт три, либо останавливает
+// публикацию этой статьи — до единого запроса в блог, как и все остальные проверки.
+//
+// Отсутствие подборщика (nil) — прежнее поведение: поле не отправляется, курсы подбирает
+// тема. Так работают задачи, которым каталог не подключён.
+func selectRelatedCourses(
+	ctx context.Context, deps wordPressPublishDeps, input article.PublicationInput,
+) ([]catalog.Related, error) {
+	if deps.courses == nil {
+		return nil, nil
+	}
+	externalID := input.Article.ExternalID
+	related, err := deps.courses.SelectRelated(ctx, catalog.Request{
+		Professions: input.Professions,
+		// Тема — ключевой запрос и заголовок вместе: по запросу видно профессию, по
+		// заголовку — о чём именно статья внутри неё.
+		Topic: strings.TrimSpace(input.Keyword + " " + input.Header),
+		Links: input.Links,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("подобрать связанные курсы статьи %s: %w", externalID, err)
+	}
+	if len(related) < catalog.RelatedLimit {
+		return nil, fmt.Errorf(
+			"статье %s подобрано %d связанных курсов из %d — блок под статьёй рисует три карточки; "+
+				"проверьте колонку professions и соберите каталог заново (catalog-sync)",
+			externalID, len(related), catalog.RelatedLimit)
+	}
+	deps.logger.Info("связанные курсы подобраны", "external_id", externalID,
+		"stage", "wordpress_publish", "courses", catalog.DescribeRelated(related),
+		"neighbours", catalog.CountNeighbours(related))
+	return related, nil
 }
 
 // blogFieldAuthor — связь записи блога с карточкой автора (ACF, значение — идентификатор

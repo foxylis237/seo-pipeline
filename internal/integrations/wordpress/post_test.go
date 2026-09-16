@@ -485,3 +485,60 @@ func TestVerifyReportsReplacedSlug(t *testing.T) {
 		t.Fatal("подменённый площадкой слаг не попал в расхождения")
 	}
 }
+
+// Связь на несколько записей уходит XML-RPC-массивом, а не строкой: сериализованную строку
+// WordPress сериализует повторно, и ACF такую связь не читает (измерено на записи 22215).
+func TestCreatePostSendsIDListAsArray(t *testing.T) {
+	var body string
+	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		body = string(raw)
+		w.Header().Set("Content-Type", "text/xml")
+		fmt.Fprint(w, methodResponse(`<value><string>22300</string></value>`))
+	})
+
+	payload := PostPayload{
+		Title: "Разряды газосварщиков", ContentHTML: "<p>текст</p>", Status: PostStatusPublish,
+		CategoryID: 2575,
+		Fields: []CustomField{
+			{Key: "related_courses", IDs: []int64{507, 16122, 15941}},
+		},
+	}
+	if _, err := client.CreatePost(context.Background(), payload); err != nil {
+		t.Fatalf("CreatePost: %v", err)
+	}
+	want := `<member><name>value</name><value><array><data>` +
+		`<value><string>507</string></value>` +
+		`<value><string>16122</string></value>` +
+		`<value><string>15941</string></value>` +
+		`</data></array></value></member>`
+	if !strings.Contains(body, want) {
+		t.Fatalf("в запросе нет массива идентификаторов:\n%s", body)
+	}
+}
+
+// Обратно связь приходит сериализованным массивом PHP. Сверяется состав, а не строка.
+func TestVerifyComparesSerializedIDList(t *testing.T) {
+	payload := PostPayload{
+		Title: "Разряды газосварщиков", ContentHTML: "<p>текст</p>", Status: PostStatusPublish,
+		CategoryID: 2575,
+		Fields:     []CustomField{{Key: "related_courses", IDs: []int64{507, 16122, 15941}}},
+	}
+	stored := StoredPost{
+		Title: payload.Title, ContentHTML: payload.ContentHTML, Status: payload.Status,
+		TermIDs: map[string][]int64{"category": {2575}},
+		Fields:  map[string]string{"related_courses": `a:3:{i:0;s:3:"507";i:1;s:5:"16122";i:2;s:5:"15941";}`},
+	}
+	if mismatches := payload.Verify(stored); len(mismatches) != 0 {
+		t.Fatalf("сверка не сошлась: %v", mismatches)
+	}
+
+	// Строка вместо массива — ровно тот отказ, ради которого сверка и нужна: поле в записи
+	// есть, но связь не читается.
+	stored.Fields["related_courses"] = `s:44:"a:3:{i:0;s:3:"507";i:1;s:5:"16122";i:2;s:5:"15941";}"`
+	stored.Fields["related_courses"] = `сломанное значение`
+	mismatches := payload.Verify(stored)
+	if len(mismatches) != 1 || mismatches[0].Field != "related_courses" {
+		t.Fatalf("ожидалось расхождение по related_courses, получено %v", mismatches)
+	}
+}

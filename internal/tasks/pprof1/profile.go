@@ -49,12 +49,15 @@ var Stages = []string{
 // между ними не из чего.
 func Profile() tasks.Profile {
 	return tasks.Profile{
-		Name:             Name,
-		Command:          Command,
-		InputDir:         "input/pprof_1",
-		OutputDir:        "tasks/pprof_1/output",
-		PromptsDir:       "tasks/pprof_1/prompts",
-		TemplatePath:     "tasks/pprof_1/templates/result.md.tmpl",
+		Name:         Name,
+		Command:      Command,
+		InputDir:     "input/pprof_1",
+		OutputDir:    "tasks/pprof_1/output",
+		PromptsDir:   "tasks/pprof_1/prompts",
+		TemplatePath: "tasks/pprof_1/templates/result.md.tmpl",
+		// Под статьёй блога есть блок связанных курсов, и заполняем его мы: три услуги
+		// подбираются по каталогу площадки (схема site).
+		RelatedCourses:   true,
 		LLMConfigPath:    "config/pprof_1.yaml",
 		LLMOverlayPath:   "",
 		ImportReportsDir: "output/pprof_1/import-reports",
