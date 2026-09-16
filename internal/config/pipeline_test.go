@@ -68,9 +68,9 @@ func TestLoadPipelineConfigReadsBothSwitches(t *testing.T) {
 func TestTaskConfigsDeclarePipelineSection(t *testing.T) {
 	cases := map[string]bool{
 		filepath.Join("..", "..", "config", "config.yaml"): false,
-		// pprof_1 после прогона не публикует — выключено по просьбе владельца задачи, пока
-		// промпты и регламент переписываются: первые статьи смотрят глазами.
-		filepath.Join("..", "..", "config", "pprof_1.yaml"): false,
+		// pprof_1 публикует статью сразу после прогона — включено по просьбе владельца задачи
+		// после того, как переписанные промпты проверили на статье 2.
+		filepath.Join("..", "..", "config", "pprof_1.yaml"): true,
 		// pprof_2 публикует страницу сразу после прогона — включено по просьбе владельца задачи.
 		filepath.Join("..", "..", "config", "pprof_2.yaml"): true,
 	}
