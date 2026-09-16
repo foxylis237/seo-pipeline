@@ -12,7 +12,7 @@ DRY_RUN_DATABASE_URL ?= postgres://seo:seo@localhost:5433/seo_dry_run?sslmode=di
 #
 # Задачи различаются только именем: набор операций, разбор аргументов и рецепт у них общие,
 # а пути, схему стадий и схему PostgreSQL выбирает профиль внутри CLI.
-TASK_NAMES := task-1 pprof-1 pprof-2 pprof-fix-1 pprof-fix-2 pprof-fix-3 pprof-fix-4 pprof-fix-5
+TASK_NAMES := task-1 pprof-1 pprof-2 pprof-template-1 pprof-fix-1 pprof-fix-2 pprof-fix-3 pprof-fix-4 pprof-fix-5
 TASK_NAME := $(firstword $(MAKECMDGOALS))
 CLI = $(GO) run ./cmd/seo-pipeline $(TASK_NAME)
 
@@ -25,7 +25,7 @@ TASK_EXTRA_ARGS := $(wordlist 4,$(words $(MAKECMDGOALS)),$(MAKECMDGOALS))
 TASK_OPERATIONS := import import-check errors keywords retry run regenerate dry-run prepare generate demo-generate article info review fix html result clear reset google-login google-publish deepseek-login wordpress-check publish mark-published catalog-sync catalog-show
 OPTIONAL_ARGUMENT_OPERATIONS := import-check errors keywords retry run regenerate clear reset google-publish prepare generate demo-generate article info review fix html result publish mark-published
 
-.PHONY: help task-1 pprof-1 pprof-2 pprof-fix-1 pprof-fix-2 pprof-fix-3 pprof-fix-4 pprof-fix-5 login docker-up docker-start docker-stop docker-down docker-restart docker-logs docker-ps
+.PHONY: help task-1 pprof-1 pprof-2 pprof-template-1 pprof-fix-1 pprof-fix-2 pprof-fix-3 pprof-fix-4 pprof-fix-5 login docker-up docker-start docker-stop docker-down docker-restart docker-logs docker-ps
 .PHONY: test test-race fmt vet lint lint-fix build
 
 # ----------------------------------------------------
@@ -100,6 +100,14 @@ help: ## этот список
 		'make pprof-2 dry-run'             'офлайн-прогон без сервисов' \
 		'make pprof-2 clear ID'            'страницу к состоянию импорта' \
 		'make pprof-2 reset [ID]'          'страницу или всю pprof_2 к нулю' \
+		'' '' \
+		'pprof-template-1 — статьи по эталону, четыре чата:' '' \
+		'make pprof-template-1 import'     'импорт статей из Excel [limit]' \
+		'make pprof-template-1 prepare'    'research Keys.so и Arsenkin [ID]' \
+		'make pprof-template-1 run'        'полный прогон, возобновляемый [ID]' \
+		'make pprof-template-1 article'    'чат 2 и чат 3: статья и редактура [ID]' \
+		'make pprof-template-1 html'       'чат 4: HTML и перелинковка [ID]' \
+		'make pprof-template-1 dry-run'    'офлайн-прогон без сервисов' \
 		'' '' \
 		'pprof-fix-1…5 — правка уже опубликованных статей:' '' \
 		'make pprof-fix-1 import'          'индексы и ссылки из файла в input/pprof_fix_1' \
@@ -211,6 +219,9 @@ pprof-1: ## Run a pprof_1 operation
 	$(run_task_operation)
 
 pprof-2: ## Run a pprof_2 operation
+	$(run_task_operation)
+
+pprof-template-1: ## Run a pprof_template_1 operation
 	$(run_task_operation)
 
 pprof-fix-1: ## Run a pprof_fix_1 operation

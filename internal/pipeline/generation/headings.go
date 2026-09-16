@@ -43,3 +43,19 @@ func heading(level int, title string) string {
 	title = strings.TrimSpace(strings.Trim(strings.TrimSpace(title), "*"))
 	return "H" + string(rune('0'+level)) + " - " + title
 }
+
+// CountHeadings считает заголовки разделов в тексте статьи.
+//
+// Считаются строки в каноническом виде «H2 - Название», поэтому вызывать имеет смысл после
+// NormalizeHeadings. Нужно это сверке двух версий одного текста: стадия, которая возвращает
+// статью целиком, обрывается неотличимо от готового ответа, и потерянные разделы — один из
+// двух доступных признаков обрыва (второй — длина).
+func CountHeadings(text string) int {
+	count := 0
+	for _, line := range strings.Split(text, "\n") {
+		if headingLabelRE.MatchString(strings.TrimSuffix(line, "\r")) {
+			count++
+		}
+	}
+	return count
+}

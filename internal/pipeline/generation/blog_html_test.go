@@ -1,6 +1,7 @@
 package generation
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -377,10 +378,105 @@ func TestInsertBeforeMiddleHeadingPicksMiddleSection(t *testing.T) {
 	}
 }
 
-// Разметка без заголовков — законный случай: блок уходит в конец, потерять его хуже.
-func TestInsertBeforeMiddleHeadingWithoutHeadings(t *testing.T) {
-	got := InsertBeforeMiddleHeading("<p>только абзац</p>", `<img src="a.webp" />`)
-	if !strings.HasSuffix(got, `<img src="a.webp" />`) {
-		t.Fatalf("блок потерян или встал не в конец: %s", got)
+// Перелинковку расставляет код: сгрудившиеся ссылки уезжают со своим предложением в разделы
+// без ссылок, недостающие дописываются предложением с названием программы. Случай со статей 4
+// и 3: пять ссылок в финальном разделе и пять пропущенных.
+func TestSpreadInternalLinksMovesCrowdedSentences(t *testing.T) {
+	links := "Наладчик — https://dpoprof.ru/a/\nСтанки с ЧПУ — https://dpoprof.ru/b/"
+	markup := `<h2>Что даёт разряд</h2>` + "\n" + `<p>Разряд определяет допуск.</p>` + "\n" +
+		`<h2>Записаться на обучение</h2>` + "\n" +
+		`<p>Оставьте заявку. Помогает <a href="https://dpoprof.ru/a/">курс наладчика</a>. Также есть <a href="https://dpoprof.ru/b/">курс по ЧПУ</a>.</p>`
+
+	got, moved := SpreadInternalLinks(markup, links)
+	if moved != 1 {
+		t.Fatalf("перенесено %d ссылок, ожидалась одна", moved)
+	}
+	if len(CrowdedLinks(got, links)) != 0 {
+		t.Fatalf("ссылки всё ещё в одном разделе: %q", got)
+	}
+	if len(MissingInternalLinks(got, links)) != 0 {
+		t.Fatalf("ссылка потерялась при переносе: %q", got)
+	}
+	if !strings.Contains(got, "Оставьте заявку.") {
+		t.Fatalf("текст абзаца-донора пострадал: %q", got)
+	}
+	if !strings.Contains(got, "Разряд определяет допуск.") {
+		t.Fatalf("текст раздела-приёмника пострадал: %q", got)
+	}
+}
+
+func TestSpreadInternalLinksAddsMissingLinkWithProgramName(t *testing.T) {
+	links := "Дистанционное обучение наладчика — https://dpoprof.ru/a/"
+	markup := `<h2>Что даёт разряд</h2>` + "\n" + `<p>Разряд определяет допуск.</p>`
+
+	got, moved := SpreadInternalLinks(markup, links)
+	if moved != 1 {
+		t.Fatalf("вставлено %d ссылок, ожидалась одна", moved)
+	}
+	if len(MissingInternalLinks(got, links)) != 0 {
+		t.Fatalf("ссылка так и не появилась: %q", got)
+	}
+	if !strings.Contains(got, "Дистанционное обучение наладчика</a>") {
+		t.Fatalf("анкором стало не название программы: %q", got)
+	}
+}
+
+func TestSpreadInternalLinksKeepsMarkupWhenNoFreeSections(t *testing.T) {
+	links := "Наладчик — https://dpoprof.ru/a/\nЧПУ — https://dpoprof.ru/b/"
+	markup := `<h2>Единственный раздел</h2>` + "\n" +
+		`<p>Текст. Есть <a href="https://dpoprof.ru/a/">курс</a>. И <a href="https://dpoprof.ru/b/">второй</a>.</p>`
+
+	got, moved := SpreadInternalLinks(markup, links)
+	if moved != 0 {
+		t.Fatalf("перенос состоялся, хотя свободных разделов нет: %d", moved)
+	}
+	if got != markup {
+		t.Fatalf("разметка изменилась без нужды: %q", got)
+	}
+}
+
+// Ссылки расходятся по всей длине статьи, а не занимают первые же свободные разделы подряд:
+// пять ссылок в первых 38% страницы — та же кучка, что и пять в конце (статья 1).
+func TestSpreadInternalLinksSpacesLinksAcrossArticle(t *testing.T) {
+	links := ""
+	markup := ""
+	for i := 1; i <= 3; i++ {
+		links += fmt.Sprintf("Программа %d — https://dpoprof.ru/p%d/\n", i, i)
+	}
+	for i := 1; i <= 9; i++ {
+		markup += fmt.Sprintf("<h2>Раздел %d</h2>\n<p>Текст раздела %d.</p>\n", i, i)
+	}
+
+	got, placed := SpreadInternalLinks(markup, links)
+	if placed != 3 {
+		t.Fatalf("расставлено %d ссылок из трёх", placed)
+	}
+	var sections []int
+	for index, part := range strings.Split(got, "<h2>") {
+		if strings.Contains(part, "dpoprof.ru") {
+			sections = append(sections, index)
+		}
+	}
+	if len(sections) != 3 {
+		t.Fatalf("ссылки попали в %d разделов, ожидалось три: %v", len(sections), sections)
+	}
+	if sections[2]-sections[0] < 4 {
+		t.Fatalf("ссылки стоят кучно, разделы %v из девяти", sections)
+	}
+}
+
+// Повтор одной программы промпт запрещает, но в статье 2 ссылка пришла дважды. Второй тег
+// снимает код: текст предложения остаётся, ссылка остаётся одна.
+func TestSpreadInternalLinksDropsRepeatedLink(t *testing.T) {
+	links := "Сантехник — https://dpoprof.ru/santehnik/"
+	markup := `<h2>Первый</h2>` + "\n" + `<p>Есть <a href="https://dpoprof.ru/santehnik/">обучение сантехника</a>.</p>` + "\n" +
+		`<h2>Второй</h2>` + "\n" + `<p>Снова <a href="https://dpoprof.ru/santehnik/">обучение сантехника</a> тут.</p>`
+
+	got, _ := SpreadInternalLinks(markup, links)
+	if strings.Count(got, `href="https://dpoprof.ru/santehnik/"`) != 1 {
+		t.Fatalf("повтор ссылки не снят: %q", got)
+	}
+	if strings.Count(got, "обучение сантехника") != 2 {
+		t.Fatalf("текст второго предложения потерян: %q", got)
 	}
 }

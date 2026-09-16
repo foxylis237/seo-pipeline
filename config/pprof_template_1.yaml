@@ -1,0 +1,150 @@
+# Схема стадий pprof_template_1.
+#
+# Задача DeepSeek-only: провайдер один, наложения нет, выбирать между схемами не из чего.
+# Файл самостоятельный, а не наложение на конфиг соседа: задачи должны расходиться свободно,
+# и правка одной не имеет права менять другую.
+#
+# Форму статьи задаёт эталон — образцовая статья из input/pprof_template_1/reference/article.
+# Она приходит документом к стадиям structure и expert; в самих промптах осталось то, чего
+# один пример не доказывает: входные данные, числовые нормы, формы записи блоков и запреты.
+#
+# Поток генерации — четыре чата, границы между ними значимы:
+#
+#   чат 1: structure       — каркас разделов
+#   чат 2: expert_seo      — текст статьи вместе с SEO
+#   чат 3: review → info   — правка смысла и метаданные по её результату
+#   чат 4: html            — разметка и перелинковка
+#
+# Ревью вынесено из чата, который писал текст: в своей же беседе модель правит собственную
+# работу и меняет в ней доли процента. Статью чат 3 получает текстом, историей она не придёт.
+llm:
+  providers:
+    deepseek_web:
+      type: deepseek_web
+      chat_url: https://chat.deepseek.com/
+      login_url: https://chat.deepseek.com/sign_in
+      profile_dir: data/browser/deepseek
+      headless: true
+      # Один диалог на статью: без него браузерный клиент открывал бы новую беседу на каждое
+      # сообщение, и история внутри чата 3 терялась бы — info пишет метаданные по тексту,
+      # который вернуло ревью, и повторно этот текст не передаётся.
+      single_chat_per_article: true
+
+  # Режим ответа DeepSeek: значение сверяется с data-model-type переключателя над полем
+  # ввода — expert («Expert») рассуждает, default («Instant») отвечает сразу.
+  #
+  # Вложение доступно только в режиме default: в Expert DeepSeek не рисует поле загрузки
+  # файла вовсе. Поэтому стадии с эталоном идут в default.
+  #
+  # Два бюджета времени у каждой стадии. timeout — общий на все попытки, attempt_timeout —
+  # на одну.
+  stages:
+    # keywords — резервный источник исходных запросов для prepare, а не стадия генерации.
+    # Вызывается, только когда Keys.so не нашёл у конкурента ни одного запроса.
+    keywords:
+      targets:
+        - { provider: deepseek_web, model: deepseek-web }
+      prompt: tasks/pprof_template_1/prompts/keywords.txt
+      mode: expert
+      temperature: 0.2
+      max_tokens: 3000
+      timeout: 600s
+      attempt_timeout: 180s
+
+    # article — базовый промпт статьи. В модель НЕ отправляется: поток собирает его из
+    # входных данных и research, кладёт в prompts/article_prompt.txt и отдаёт в выгрузку.
+    # Текст статьи пишет стадия expert. Файл промпта — копия pprof_1 и меняться не должен:
+    # это документ для человека, а не задание модели.
+    article:
+      targets:
+        - { provider: deepseek_web, model: deepseek-web }
+      prompt: tasks/pprof_template_1/prompts/article.txt
+      temperature: 0.7
+      max_tokens: 10000
+      timeout: 300s
+
+    # Чат 1: каркас разделов по теме и структуре конкурентов, с оглядкой на эталон.
+    structure:
+      targets:
+        - { provider: deepseek_web, model: deepseek-web }
+      prompt: tasks/pprof_template_1/prompts/structure.txt
+      attachments_dir: input/pprof_template_1/reference/article
+      mode: default
+      temperature: 0.3
+      max_tokens: 3000
+      timeout: 600s
+      attempt_timeout: 180s
+
+    # Чат 2: статью пишет практикующий специалист по структуре из чата 1 и по эталону.
+    #
+    # Имя стадии называет слияние: у pprof_1 текст пишет expert, а запросы расставляет
+    # отдельная SEO-редактура. Здесь это одно сообщение — ключи и LSI приходят тому, кто
+    # пишет, а редактура после него занимается только смыслом.
+    expert_seo:
+      targets:
+        - { provider: deepseek_web, model: deepseek-web }
+      prompt: tasks/pprof_template_1/prompts/1_expert_seo.txt
+      attachments_dir: input/pprof_template_1/reference/article
+      mode: default
+      # Поиск включён только здесь: текст статьи пишет эта стадия, и источник под таблицей
+      # заработка обязан быть тем сайтом, который модель действительно открыла. Остальным
+      # стадиям искать нечего — они работают с написанным.
+      search: true
+      temperature: 0.7
+      max_tokens: 12000
+      timeout: 900s
+      attempt_timeout: 420s
+
+    # Чат 3, сообщение 1: правка смысла. Свежий чат — модель видит статью как чужую и правит
+    # то, что и правда плохо, а не переписывает собственную работу ради переписывания.
+    # Эталон сюда не прикрепляется: форма уже задана, редактура её не касается.
+    review:
+      targets:
+        - { provider: deepseek_web, model: deepseek-web }
+      prompt: tasks/pprof_template_1/prompts/2_review.txt
+      mode: expert
+      temperature: 0.4
+      max_tokens: 12000
+      timeout: 900s
+      attempt_timeout: 420s
+
+    # Чат 3, сообщение 2: метаданные по тексту из этого же чата. Идут после ревью — TL;DR и
+    # FAQ обязаны описывать опубликованный текст, а не черновик до правки.
+    info:
+      targets:
+        - { provider: deepseek_web, model: deepseek-web }
+      prompt: tasks/pprof_template_1/prompts/3_info.txt
+      mode: expert
+      temperature: 0.2
+      max_tokens: 4000
+      timeout: 780s
+      attempt_timeout: 300s
+
+    # Чат 4: разметка и перелинковка. Начинается с чистой истории, поэтому статью получает
+    # явно. Регламент вёрстки приходит документом; в каталоге должен лежать ровно один файл.
+    html:
+      targets:
+        - { provider: deepseek_web, model: deepseek-web }
+      prompt: tasks/pprof_template_1/prompts/4_html.txt
+      attachments_dir: input/pprof_template_1/regulations/html
+      mode: default
+      temperature: 0.1
+      max_tokens: 14000
+      timeout: 900s
+      attempt_timeout: 420s
+
+# Чем прогон занимается помимо генерации текста.
+#
+# Здесь выключаются шаги, которые уходят наружу: в блог и в чужой Google Drive. Сами стадии
+# генерации отсюда не управляются — их порядок раннер выводит из сохранённых артефактов.
+pipeline:
+  # Публикация в WordPress сразу после прогона. Выключена: задача проверяет новую механику,
+  # и первые прогоны нужно посмотреть глазами, прежде чем текст уйдёт в живой блог. Отменить
+  # публикацию приложение не умеет. Накопленное выкладывается командой
+  # `make pprof-template-1 publish <id>`.
+  publish_after_run: false
+  # Выгрузка промпта статьи в Google Docs. Выключена, пока у задачи нет своей папки Drive:
+  # документ ищется по имени «Промт: <заголовок>», а заголовки статей совпадают с pprof_1 —
+  # общая папка означала бы перезапись чужого промпта. Появится папка (Profile.GoogleFolderURL)
+  # — включается сменой на true.
+  google_docs: false

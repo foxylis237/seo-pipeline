@@ -12,6 +12,7 @@ import (
 	"github.com/foxylis237/seo-pipeline/internal/tasks"
 	"github.com/foxylis237/seo-pipeline/internal/tasks/pprof1"
 	"github.com/foxylis237/seo-pipeline/internal/tasks/pprof2"
+	"github.com/foxylis237/seo-pipeline/internal/tasks/pproftemplate1"
 )
 
 // taskFlow — поток генерации задачи, у которой он свой.
@@ -48,6 +49,8 @@ func newTaskFlow(profile tasks.Profile, deps taskFlowDeps) (taskFlow, error) {
 		return newPProf1Flow(deps)
 	case pprof2.Name:
 		return newPProf2Flow(deps)
+	case pproftemplate1.Name:
+		return newPProfTemplate1Flow(deps)
 	default:
 		return nil, nil
 	}
