@@ -324,12 +324,23 @@ const (
 func buildWordPressPayload(
 	ctx context.Context, deps wordPressPublishDeps, externalID string, createMissingTags bool,
 ) (wordpress.PostPayload, wordPressPayloadContext, error) {
+	return buildWordPressPayloadFor(ctx, deps, externalID, createMissingTags, repository.ValidatePublicationInput)
+}
+
+// buildWordPressPayloadFor собирает нагрузку под конкретную команду. Отличается у команд ровно
+// одно — проверка годности статьи: публикация требует, чтобы записи ещё не было, а перезапись
+// тела — чтобы она уже была. Всё остальное, от чтения артефактов до раскладки полей, общее, и
+// расходиться этим двум сборкам нельзя.
+func buildWordPressPayloadFor(
+	ctx context.Context, deps wordPressPublishDeps, externalID string, createMissingTags bool,
+	validate func(article.PublicationInput) error,
+) (wordpress.PostPayload, wordPressPayloadContext, error) {
 	var plan wordPressPayloadContext
 	input, err := deps.repository.GetPublicationInput(ctx, externalID)
 	if err != nil {
 		return wordpress.PostPayload{}, plan, err
 	}
-	if err := repository.ValidatePublicationInput(input); err != nil {
+	if err := validate(input); err != nil {
 		return wordpress.PostPayload{}, plan, err
 	}
 	// Своё требование задачи: у блоговой статьи это метки, у страницы услуги — SEO-заголовок
@@ -770,6 +781,14 @@ func runWordPressCommand(
 		ctx, cancel := context.WithTimeout(ctx, wordPressRequestTimeout*3)
 		defer cancel()
 		return runWordPressMarkPublished(ctx, publishDeps, externalID, postID)
+	}
+
+	// Перезапись тела идёт только по одной названной статье: массовая правка живого блога
+	// стоила бы одного неверного ключа, а отменяющей команды нет.
+	if operation == wordPressRepublishOperation {
+		ctx, cancel := context.WithTimeout(ctx, wordPressPublishDeadline)
+		defer cancel()
+		return runWordPressRepublish(ctx, publishDeps, client, externalID)
 	}
 
 	// Бюджет ставится на статью и ровно один раз: у массового прогона он свой на каждую,

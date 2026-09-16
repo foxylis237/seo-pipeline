@@ -90,6 +90,9 @@ type fakeWPClient struct {
 	teacherErr    error
 	dropField     string
 	dropThumbnail bool
+	// edited — правки, ушедшие в блог, в порядке отправки.
+	edited  []wordpress.PostUpdate
+	editErr error
 }
 
 func (c *fakeWPClient) FindCategoryID(context.Context, string) (int64, error) {
@@ -242,6 +245,31 @@ func (c *fakeWPClient) GetPost(context.Context, int64) (wordpress.StoredPost, er
 	return c.stored, c.getErr
 }
 
+// EditPost повторяет за площадкой то, что важно правке: заголовок и тело заменяются,
+// названные поля postmeta обновляются или заводятся впервые, а всё неназванное остаётся у
+// записи прежним. Отброшенный ключ имитируется тем же dropField, что и у создания записи.
+func (c *fakeWPClient) EditPost(_ context.Context, update wordpress.PostUpdate) error {
+	c.edited = append(c.edited, update)
+	if c.editErr != nil {
+		return c.editErr
+	}
+	c.stored.Title = update.Title
+	c.stored.ContentHTML = update.ContentHTML
+	if c.stored.Fields == nil {
+		c.stored.Fields = map[string]string{}
+	}
+	for _, field := range update.Fields {
+		if field.Key == c.dropField {
+			continue
+		}
+		if len(field.IDs) > 0 {
+			c.stored.Fields[field.Key] = serializePHPIDs(field.IDs)
+			continue
+		}
+		c.stored.Fields[field.Key] = field.Value
+	}
+	return nil
+}
 
 type fakeWPWriter struct {
 	files map[string]string

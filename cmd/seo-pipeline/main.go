@@ -266,7 +266,7 @@ func main() {
 		)
 		err = runGooglePublish(ctx, articleRepository, writer, publisher.Publish, taskLogger, os.Stdout, profile.Command, command.ExternalID)
 
-	case wordPressPublishOperation, wordPressMarkPublishedOperation:
+	case wordPressPublishOperation, wordPressMarkPublishedOperation, wordPressRepublishOperation:
 		// Ни LLM, ни Keys.so, ни Arsenkin: команда берёт готовые данные и артефакты статьи.
 		err = runWordPressCommand(ctx, wordPressCommandDeps{
 			mapping:    newWordPressMapping(profile.CommercialPages),
@@ -864,7 +864,7 @@ func parseCommand(args []string) (taskCommand, error) {
 // отличается путями и схемой стадий, а не составом команд.
 func availableOperations(task string) string {
 	return "available " + task + " operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, clear, reset, google-login, google-publish, deepseek-login, " +
-		wordPressCheckOperation + ", " + wordPressPublishOperation + ", " +
+		wordPressCheckOperation + ", " + wordPressPublishOperation + ", " + wordPressRepublishOperation + ", " +
 		wordPressMarkPublishedOperation + ", " +
 		catalogSyncOperation + ", " + catalogShowOperation
 }
@@ -932,9 +932,10 @@ func parseTaskCommand(args []string) (taskCommand, error) {
 		}
 		return parseExternalIDCommand(profile, task, args[3])
 	// ID обязателен у всех: для regenerate и clear «все статьи» означало бы reset, колонка
-	// запросов вставляется одной статье, а подбор связанных курсов показывается для той
-	// статьи, чьи профессии и тему он разбирает.
-	case "regenerate", "clear", "keywords", catalogShowOperation:
+	// запросов вставляется одной статье, подбор связанных курсов показывается для той статьи,
+	// чьи профессии и тему он разбирает, а republish переписывает живую запись блога — массовая
+	// правка стоила бы одной ошибки, и отменяющей команды нет.
+	case "regenerate", "clear", "keywords", catalogShowOperation, wordPressRepublishOperation:
 		if len(args) != 4 {
 			return taskCommand{}, fmt.Errorf("usage: seo-pipeline %s %s <external_id>", profile.Command, task)
 		}
@@ -1010,7 +1011,7 @@ func validateConfig(command string, cfg config.Config) error {
 		return cfg.ValidateWordPress()
 	case catalogShowOperation:
 		return cfg.ValidateReset()
-	case wordPressPublishOperation:
+	case wordPressPublishOperation, wordPressRepublishOperation:
 		// Публикации нужны и база, и площадка: статья берётся из PostgreSQL, а уходит
 		// в WordPress. Проверяются обе, иначе отказ найдётся на середине.
 		if err := cfg.ValidateReset(); err != nil {

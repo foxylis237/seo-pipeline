@@ -16,10 +16,9 @@ const slugScanPages = 30
 
 // PostUpdate — то, что меняется у уже опубликованной записи.
 //
-// Полей ровно два, и это объявление, а не заготовка: задача pprof_fix_1 правит заголовок и
-// тело, всё остальное у записи остаётся прежним. Слаг, дата, рубрики, метки, обложка и поля
-// ACF не называются вовсе — не отправленное поле WordPress не трогает, и адрес статьи
-// вместе с накопленными позициями не меняется.
+// Меняется названное и только оно: заголовок, тело и перечисленные поля postmeta. Слаг,
+// дата, рубрики, метки и обложка не называются вовсе — не отправленное поле WordPress не
+// трогает, и адрес статьи вместе с накопленными позициями не меняется.
 type PostUpdate struct {
 	PostID      int64
 	Title       string
@@ -34,13 +33,27 @@ type PostUpdate struct {
 
 // FieldUpdate — одно поле postmeta существующей записи.
 //
-// ID обязателен: без него wp.editPost не обновляет поле, а добавляет второе с тем же
-// ключом. Идентификатор приходит из чтения записи (StoredPost.FieldIDs), то есть поле
-// сначала должно существовать — заводить новые поля правка не умеет и не должна.
+// ID приходит из чтения записи (StoredPost.FieldIDs): без него wp.editPost не обновляет
+// поле, а добавляет второе с тем же ключом, и какое из двух достанется get_field(), решал бы
+// порядок в базе.
 type FieldUpdate struct {
 	ID    string
 	Key   string
 	Value string
+	// IDs — значение-список идентификаторов записей, каким его хранит связь ACF.
+	//
+	// Отдельным полем по той же причине, что и у CustomField: готовую сериализованную
+	// строку WordPress пропускает через maybe_serialize второй раз, и связь перестаёт
+	// читаться. Непустой список вытесняет Value.
+	IDs []int64
+	// Create разрешает завести поле, которого у записи ещё нет.
+	//
+	// Без него пустой ID — ошибка, и это главная защита правки от второго поля с тем же
+	// ключом. Но у записи, созданной раньше самого поля, его нет вовсе: так связь
+	// related_courses отсутствует у статей, опубликованных до появления блока курсов, — и
+	// завести её правкой единственный способ. Признак ставит тот, кто прочитал запись и
+	// потому знает, что ключа в ней нет.
+	Create bool
 }
 
 // EditPost переписывает заголовок и тело существующей записи.
@@ -67,14 +80,24 @@ func (c *Client) EditPost(ctx context.Context, update PostUpdate) error {
 	if len(update.Fields) > 0 {
 		fields := make(xmlrpcArray, 0, len(update.Fields))
 		for _, field := range update.Fields {
-			if strings.TrimSpace(field.ID) == "" {
+			if strings.TrimSpace(field.Key) == "" {
+				return fmt.Errorf("поле записи названо пустым ключом")
+			}
+			id := strings.TrimSpace(field.ID)
+			if id == "" && !field.Create {
 				return fmt.Errorf("поле %q без идентификатора: правка завела бы второе поле с тем же ключом", field.Key)
 			}
-			fields = append(fields, xmlrpcStruct{
-				{Name: "id", Value: field.ID},
-				{Name: "key", Value: field.Key},
-				{Name: "value", Value: field.Value},
-			})
+			// Поле без id WordPress заводит впервые, с id — обновляет. Пустой id поэтому не
+			// отправляется вовсе: он означал бы «postmeta номер ноль», а не «нового поля».
+			member := make(xmlrpcStruct, 0, 3)
+			if id != "" {
+				member = append(member, xmlrpcMember{Name: "id", Value: id})
+			}
+			member = append(member,
+				xmlrpcMember{Name: "key", Value: field.Key},
+				xmlrpcMember{Name: "value", Value: field.value()},
+			)
+			fields = append(fields, member)
 		}
 		content = append(content, xmlrpcMember{Name: "custom_fields", Value: fields})
 	}
@@ -90,6 +113,30 @@ func (c *Client) EditPost(ctx context.Context, update PostUpdate) error {
 		return err
 	}
 	return nil
+}
+
+// value — то, что уходит в custom_fields этого поля. Правило одно с созданием записи.
+func (f FieldUpdate) value() any { return customFieldValue(f.Value, f.IDs) }
+
+// VerifyFields сверяет поля, ушедшие правкой, с тем, что вернуло чтение записи.
+//
+// Причина та же, что и у PostPayload.Verify: ключ бывает отброшен молча — так уходят все
+// защищённые ключи с ведущим подчёркиванием, — и ответ «200 OK» о содержимом postmeta не
+// говорит ничего. Связь сверяется составом идентификаторов, а не строкой: WordPress
+// возвращает её сериализованным массивом PHP, и это единственное место, где вообще видно,
+// легло ли поле массивом или строкой.
+func VerifyFields(updates []FieldUpdate, stored StoredPost) []Mismatch {
+	var mismatches []Mismatch
+	for _, field := range updates {
+		expected, actual := field.Value, stored.Fields[field.Key]
+		if len(field.IDs) > 0 {
+			expected, actual = formatIDs(field.IDs), formatIDs(serializedIDs(actual))
+		}
+		if expected != actual {
+			mismatches = append(mismatches, Mismatch{Field: field.Key, Expected: expected, Actual: actual})
+		}
+	}
+	return mismatches
 }
 
 // FoundPost — запись, найденная по адресу.

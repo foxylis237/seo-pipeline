@@ -176,6 +176,30 @@ func ValidatePublicationInput(input article.PublicationInput) error {
 		return fmt.Errorf("статья %s уже есть в WordPress (%s)%s — повторная публикация создала бы дубль",
 			input.Article.ExternalID, input.Publication.Status, publishedPostSuffix(input.Publication))
 	}
+	return validatePublicationFields(input)
+}
+
+// ValidateRepublishInput решает, годна ли статья к перезаписи тела уже существующей записи.
+//
+// Требования те же, кроме одного, и оно перевёрнуто: запись обязана существовать. Перезапись
+// ничего не создаёт, поэтому опубликованная статья для неё — не препятствие, а условие.
+func ValidateRepublishInput(input article.PublicationInput) error {
+	if input.Article.Status != "completed" {
+		return fmt.Errorf("статья %s не прошла пайплайн: статус %q, а переписываются только completed",
+			input.Article.ExternalID, input.Article.Status)
+	}
+	if input.Article.ErrorMessage != nil && strings.TrimSpace(*input.Article.ErrorMessage) != "" {
+		return fmt.Errorf("на статье %s висит ошибка: %s", input.Article.ExternalID, *input.Article.ErrorMessage)
+	}
+	if !input.Publication.InWordPress() || input.Publication.PostID == nil {
+		return fmt.Errorf("статья %s в блоге не опубликована — переписывать нечего: её выкладывает publish",
+			input.Article.ExternalID)
+	}
+	return validatePublicationFields(input)
+}
+
+// validatePublicationFields — общая часть обеих проверок: поля, без которых записи не собраться.
+func validatePublicationFields(input article.PublicationInput) error {
 	required := []struct {
 		name  string
 		value string
