@@ -2,7 +2,9 @@
 .env
 .env.local
 data/keysso-storage-state.json
-data/keysso-browser-profile/
+# Профиль браузера Keys.so и копии, которые оставляет за собой неудавшийся вход
+# (.failed): живые куки, им в репозитории не место.
+data/keysso-browser-profile*/
 data/arsenkin-browser-profile/
 data/browser/deepseek/
 data/browser/google/
@@ -21,6 +23,10 @@ input/**/images/*
 !input/**/images/.gitkeep
 !input/**/images/README.md
 tasks/*/input/**/*.xlsx
+
+# Готовые правки pprof_fix_6: копии страниц, их поля и снимки, по которым правку
+# готовили. Данные прогона, а не код — как книги импорта и обложки статей.
+input/pprof_fix_6/prepared/
 
 # macOS
 .DS_Store
