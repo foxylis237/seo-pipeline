@@ -32,6 +32,7 @@ func (c *Client) sendPrompt(ctx context.Context, page playwright.Page, composer 
 		return c.browserError(ctx, "send DeepSeek prompt", err)
 	}
 	if c.promptAccepted(composer) {
+		c.rememberSentText(request.Prompt)
 		c.stage("send_prompt", "length", len([]rune(request.Prompt)), "model", request.Model, "sent_by", "enter")
 		return nil
 	}
@@ -46,6 +47,7 @@ func (c *Client) sendPrompt(ctx context.Context, page playwright.Page, composer 
 		return c.browserError(ctx, "confirm DeepSeek prompt was sent",
 			fmt.Errorf("промпт остался в поле ввода спустя %s после отправки", promptSentTimeout))
 	}
+	c.rememberSentText(request.Prompt)
 	c.stage("send_prompt", "length", len([]rune(request.Prompt)), "model", request.Model, "sent_by", "button")
 	return nil
 }

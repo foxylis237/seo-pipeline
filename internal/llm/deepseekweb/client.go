@@ -25,6 +25,11 @@ type Client struct {
 	// openArticleID — статья, диалог которой сейчас открыт в браузере. Ноль означает, что
 	// открытой беседы нет и следующий запрос должен начать новую.
 	openArticleID int64
+
+	// sent — тексты, отправленные в открытую беседу. Нужны распознаванию состояния
+	// страницы: наши же слова не должны приниматься за плашку площадки (см. noticeTextJS).
+	// Живут ровно столько, сколько живёт беседа, и обнуляются вместе с ней.
+	sent []string
 }
 
 func NewClient(cfg Config, logger *slog.Logger) (*Client, error) {
@@ -373,6 +378,23 @@ func (c *Client) markChatOpened(articleID int64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.openArticleID = articleID
+	// Новая беседа — новая страница: прежние сообщения на ней не отрисованы, и помнить их
+	// значило бы вырезать из текста куски, которых там нет.
+	c.sent = nil
+}
+
+// rememberSentText запоминает отправленное в открытую беседу сообщение.
+func (c *Client) rememberSentText(prompt string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.sent = append(c.sent, prompt)
+}
+
+// sentTexts отдаёт копию отправленного: срез уходит в браузер и не должен меняться под ним.
+func (c *Client) sentTexts() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]string(nil), c.sent...)
 }
 
 func (c *Client) ensureSession() (*browserSession, error) {

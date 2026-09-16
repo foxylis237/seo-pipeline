@@ -157,7 +157,7 @@ func TestPromptSentTimeoutIsShort(t *testing.T) {
 }
 
 func TestBlockedStateOptionsMatchScript(t *testing.T) {
-	passed := blockedStateOptions()
+	passed := blockedStateOptions(nil)
 	goNames := make([]string, 0, len(passed))
 	for name := range passed {
 		goNames = append(goNames, name)

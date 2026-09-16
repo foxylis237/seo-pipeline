@@ -88,17 +88,21 @@ func (c *Client) blockAccount(reason string) error {
 
 // blockedStateOptions собирает параметры blockedStateJS в одном месте: имена ключей должны
 // совпадать с options.* внутри скрипта, иначе сравнение молча пойдёт с undefined.
-func blockedStateOptions() map[string]any {
+func blockedStateOptions(sentTexts []string) map[string]any {
 	return map[string]any{
 		"blockedSelector": blockedSelector,
 		"answerSelector":  answerSelector,
+		// Отправленное в этой беседе: его текст на странице наш, и состоянием площадки не
+		// является. Без него промпт стадии html объявлял блокировкой любую статью, где
+		// встретилась фраза-маркер, — см. noticeTextJS.
+		"sentTexts": sentTexts,
 	}
 }
 
 // detectBlocked ищет на открытой странице признаки блокировки, проверки Cloudflare или капчи.
 // Это только распознавание состояния: ничего не обходит и не подменяет.
 func (c *Client) detectBlocked(page playwright.Page) (string, bool) {
-	value, err := page.Evaluate(blockedStateJS, blockedStateOptions())
+	value, err := page.Evaluate(blockedStateJS, blockedStateOptions(c.sentTexts()))
 	if err != nil {
 		return "", false
 	}
