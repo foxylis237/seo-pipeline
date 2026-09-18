@@ -290,7 +290,7 @@ func main() {
 	case wordPressPublishOperation, wordPressMarkPublishedOperation, wordPressRepublishOperation:
 		// Ни LLM, ни Keys.so, ни Arsenkin: команда берёт готовые данные и артефакты статьи.
 		err = runWordPressCommand(ctx, wordPressCommandDeps{
-			mapping:    newWordPressMapping(profile.CommercialPages),
+			mapping:    newWordPressMapping(profile),
 			repository: articleRepository,
 			writer:     writer,
 			// Обложки — входные данные задачи, они лежат рядом с её книгой импорта и
@@ -314,14 +314,19 @@ func main() {
 	// в блог не пишется ничего — сбор только читает записи, а результат ложится в общую
 	// схему site, не в схему задачи.
 	case catalogSyncOperation:
-		var client *wordpress.Client
-		if client, err = newWordPressClient(cfg.WordPress); err == nil {
-			err = runCatalogSync(ctx, catalogSource{client: client}, catalog.NewPostgresStore(pool),
-				taskLogger, os.Stdout)
+		if err = ensureOwnSiteCatalog(profile); err == nil {
+			var client *wordpress.Client
+			if client, err = newWordPressClient(cfg.WordPress); err == nil {
+				err = runCatalogSync(ctx, catalogSource{client: client}, catalog.NewPostgresStore(pool),
+					taskLogger, os.Stdout)
+			}
 		}
 
 	case catalogShowOperation:
 		var saved article.Article
+		if err = ensureOwnSiteCatalog(profile); err != nil {
+			break
+		}
 		if saved, err = articleRepository.GetArticleByExternalID(ctx, command.ExternalID); err == nil {
 			var input article.Input
 			if input, err = articleRepository.GetArticleInput(ctx, saved.ID); err == nil {
@@ -581,7 +586,7 @@ func main() {
 			// выключатель у выкладки один (`pipeline.publish_after_run`). Двух ответов на
 			// вопрос «выкладываем ли мы эту задачу» быть не должно.
 			publisher := newRunPublisherFor(wordPressCommandDeps{
-				mapping:                newWordPressMapping(profile.CommercialPages),
+				mapping:                newWordPressMapping(profile),
 				repository:             articleRepository,
 				writer:                 writer,
 				images:                 newArticleImages(profile.InputDir),

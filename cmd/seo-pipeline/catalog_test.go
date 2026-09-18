@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/foxylis237/seo-pipeline/internal/catalog"
+	"github.com/foxylis237/seo-pipeline/internal/tasks/obuch1"
 )
 
 type stubSource struct {
@@ -83,5 +84,38 @@ func TestRunCatalogShowRequiresCollectedCatalog(t *testing.T) {
 	err := runCatalogShow(context.Background(), &stubStore{}, catalog.Request{Professions: "сантехник"}, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "catalog-sync") {
 		t.Fatalf("ошибка = %v", err)
+	}
+}
+
+// Каталог услуг в схеме site собран для одной площадки, и сбор начинается с удаления всех
+// услуг. Значит команды каталога у задачи с другим сайтом обязаны отказывать: один запуск
+// стёр бы каталог соседей вместе с их подбором связанных курсов.
+func TestCatalogCommandsRefuseForForeignSite(t *testing.T) {
+	foreign, err := lookupTask(obuch1.Command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !foreign.WithoutSiteCatalog {
+		t.Fatal("у задачи с другой площадкой снят признак WithoutSiteCatalog")
+	}
+	err = ensureOwnSiteCatalog(foreign)
+	if err == nil {
+		t.Fatal("команда каталога разрешена задаче с другой площадкой")
+	}
+	if !strings.Contains(err.Error(), foreign.Command) {
+		t.Fatalf("отказ не называет задачу: %v", err)
+	}
+}
+
+// Задачам своей площадки команды каталога остаются доступны: нулевое значение признака —
+// прежнее поведение, и появление соседа с другим сайтом его не меняет.
+func TestCatalogCommandsStayOpenForOwnSite(t *testing.T) {
+	for _, profile := range taskRegistry() {
+		if profile.WithoutSiteCatalog {
+			continue
+		}
+		if err := ensureOwnSiteCatalog(profile); err != nil {
+			t.Fatalf("задаче %s закрыт каталог своей площадки: %v", profile.Command, err)
+		}
 	}
 }

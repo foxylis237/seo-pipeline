@@ -87,11 +87,17 @@ func TestRepublishSendsRelatedCourses(t *testing.T) {
 		t.Fatalf("правок ушло %d", len(client.edited))
 	}
 	fields := client.edited[0].Fields
-	if len(fields) != 1 || fields[0].Key != blogFieldRelatedCourses {
-		t.Fatalf("правка отправила поля %+v", fields)
+	var courses *wordpress.FieldUpdate
+	for index := range fields {
+		if fields[index].Key == blogFieldRelatedCourses {
+			courses = &fields[index]
+		}
 	}
-	if len(fields[0].IDs) != 3 {
-		t.Fatalf("в связь ушло %v", fields[0].IDs)
+	if courses == nil {
+		t.Fatalf("правка не отправила связь курсов: %+v", fields)
+	}
+	if len(courses.IDs) != 3 {
+		t.Fatalf("в связь ушло %v", courses.IDs)
 	}
 	// Курсы печатаются поимённо: человек смотрит в вывод затем, чтобы убедиться, что под
 	// статьёй встали именно они.
@@ -149,17 +155,25 @@ func TestRepublishFailsWhenRelatedCoursesDropped(t *testing.T) {
 	}
 }
 
-// Задаче без каталога правка остаётся прежней: пустое поле означало бы «снять курсы», а не
-// «оставить как есть».
-func TestRepublishWithoutCatalogSendsNoFields(t *testing.T) {
+// Задаче без каталога связь курсов не отправляется: пустое поле означало бы «снять курсы», а
+// не «оставить как есть». Краткое содержание и время чтения уходят всё равно — их пишет
+// стадия info по тому самому тексту, который правка и заливает.
+func TestRepublishWithoutCatalogSendsMetadataButNoCourses(t *testing.T) {
 	deps, client, _ := newWPRepublishDeps(map[string]string{})
 	deps.courses = nil
 
 	if err := runWordPressRepublish(context.Background(), deps, client, "16"); err != nil {
 		t.Fatalf("перезапись: %v", err)
 	}
-	if len(client.edited[0].Fields) != 0 {
-		t.Fatalf("правка отправила поля %+v", client.edited[0].Fields)
+	keys := make(map[string]bool, len(client.edited[0].Fields))
+	for _, field := range client.edited[0].Fields {
+		keys[field.Key] = true
+	}
+	if keys[blogFieldRelatedCourses] {
+		t.Fatalf("без каталога ушла связь курсов: %+v", client.edited[0].Fields)
+	}
+	if !keys[blogFieldTLDR] || !keys[blogFieldReadTime] {
+		t.Fatalf("правка не отправила метаданные статьи: %+v", client.edited[0].Fields)
 	}
 }
 

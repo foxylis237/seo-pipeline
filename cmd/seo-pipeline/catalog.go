@@ -13,6 +13,7 @@ import (
 	"github.com/foxylis237/seo-pipeline/internal/integrations/wordpress"
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/article"
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/result"
+	"github.com/foxylis237/seo-pipeline/internal/tasks"
 )
 
 // Каталог услуг площадки: сбор и просмотр.
@@ -21,10 +22,34 @@ import (
 // Площадка одна на все задачи, но доступ к ней у каждой свой (PPROF_1_WORDPRESS_*), и
 // собрать каталог можно только чьими-то учётными данными. Чьими именно — неважно: каталог
 // от этого не меняется, потому что читаются публичные страницы услуг.
+//
+// «Площадка одна» перестало быть правдой с появлением задачи на другом сайте, и отсюда
+// ensureOwnSiteCatalog.
 const (
 	catalogSyncOperation = "catalog-sync"
 	catalogShowOperation = "catalog-show"
 )
+
+// ensureOwnSiteCatalog запрещает команды каталога задаче с другой площадкой.
+//
+// Схема site рассчитана на один сайт: признака площадки в её таблицах нет, а
+// catalog.PostgresStore.Sync начинается с `DELETE FROM site.programs`. Значит `catalog-sync`
+// задачи, работающей с другим сайтом, стёр бы собранный каталог и записал на его место чужие
+// программы — а сломалось бы это не у неё, а у соседей: подбор связанных курсов молча начал бы
+// ставить под статьи dpoprof программы другого сайта.
+//
+// Отказ стоит здесь, в composition root, и по признаку профиля, а не по имени задачи: движок
+// про площадки не знает, а список задач известен ровно тут.
+func ensureOwnSiteCatalog(profile tasks.Profile) error {
+	if !profile.WithoutSiteCatalog {
+		return nil
+	}
+	return fmt.Errorf(
+		"каталог услуг в схеме site собран для другой площадки, а задача %s работает со своей: "+
+			"команды каталога ей недоступны, иначе сбор стёр бы чужой каталог. "+
+			"Понадобится свой — заводится отдельной схемой, а не пересбором общей",
+		profile.Command)
+}
 
 // catalogSource — клиент WordPress в роли источника каталога.
 //

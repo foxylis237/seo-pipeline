@@ -168,8 +168,13 @@ func runWordPressPublish(ctx context.Context, deps wordPressPublishDeps, externa
 	// Картинка в тело статьи ставится здесь, а не на стадии вёрстки: её адрес известен только
 	// после загрузки в медиабиблиотеку. Сохранённый article.html остаётся без неё намеренно —
 	// он описывает работу модели, а не то, что собрала публикация.
-	if block := bodyImageBlock(media, plan.ImageAlt); block != "" {
-		payload.ContentHTML = generation.InsertBeforeMiddleHeading(payload.ContentHTML, block)
+	//
+	// Площадка, у которой картинок в теле нет вовсе, снимает этот шаг признаком раскладки.
+	// Нулевое значение признака — прежнее поведение, картинка вставляется.
+	if !plan.WithoutBodyImage {
+		if block := bodyImageBlock(media, plan.ImageAlt); block != "" {
+			payload.ContentHTML = generation.InsertBeforeMiddleHeading(payload.ContentHTML, block)
+		}
 	}
 
 	postID, err := deps.client.CreatePost(ctx, payload)
@@ -419,6 +424,7 @@ func buildWordPressPayloadFor(
 		ReadingTime:      readingTime,
 		FAQItems:         len(faqItems),
 		RelatedCourses:   mapped.RelatedCourses,
+		WithoutBodyImage: mapped.WithoutBodyImage,
 		HTMLPath:         input.HTMLPath,
 		ContentRunes:     len([]rune(contentHTML)),
 	}
@@ -510,8 +516,11 @@ type wordPressPayloadContext struct {
 	// RelatedCourses — три услуги блока под статьёй. В нагрузке от них остаются одни
 	// идентификаторы, а человеку перед необратимой командой надо видеть названия.
 	RelatedCourses []catalog.Related
-	HTMLPath       string
-	ContentRunes   int
+	// WithoutBodyImage — картинка в тело этой площадки не вставляется. Видно и в сухом
+	// прогоне: человек перед необратимой командой обязан знать, что уйдёт в запись.
+	WithoutBodyImage bool
+	HTMLPath         string
+	ContentRunes     int
 }
 
 // formatPlanIDs печатает идентификаторы связи в том порядке, в каком они уйдут.

@@ -315,3 +315,129 @@ func TestBlogMappingKeepsDefaultTypeAndTaxonomy(t *testing.T) {
 		t.Fatalf("метки статьи блога = %v", payload.TagIDs)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Раскладка площадки без ACF: obuch_1.
+// ---------------------------------------------------------------------------
+
+// newPlainBlogPublishDeps — те же зависимости, что у статьи блога, но с раскладкой площадки
+// без полей ACF. Вход намеренно общий: различаться обязана только раскладка.
+func newPlainBlogPublishDeps() (wordPressPublishDeps, *fakeWPRepository, *fakeWPClient) {
+	deps, repository, client, _, _ := newWPPublishDeps()
+	deps.mapping = plainBlogWordPressMapping{}
+	return deps, repository, client
+}
+
+// Главное требование раскладки: в запись уходят три ключа Yoast и ни одного поля ACF.
+//
+// Проверяются обе стороны — и что нужное есть, и что лишнего нет. Вторая половина важнее:
+// поле, которого на площадке не существует, уходит молча и живёт в записи навсегда.
+func TestPlainBlogMappingSendsOnlyYoastFields(t *testing.T) {
+	deps, _, _ := newPlainBlogPublishDeps()
+
+	payload, _, err := buildWordPressPayload(context.Background(), deps, "16", true)
+	if err != nil {
+		t.Fatalf("нагрузка не собрана: %v", err)
+	}
+
+	fields := make(map[string]string, len(payload.Fields))
+	for _, field := range payload.Fields {
+		fields[field.Key] = field.Value
+	}
+	want := map[string]string{
+		"_yoast_wpseo_focuskw":  "разряды газосварщиков",
+		"_yoast_wpseo_title":    "Разряды газосварщиков: категории и зарплата",
+		"_yoast_wpseo_metadesc": "Какие категории существуют.",
+	}
+	for key, value := range want {
+		if fields[key] != value {
+			t.Fatalf("поле %s = %q, ожидалось %q", key, fields[key], value)
+		}
+	}
+	if len(payload.Fields) != len(want) {
+		t.Fatalf("полей в нагрузке %d, ожидалось %d: %v", len(payload.Fields), len(want), fields)
+	}
+	for _, absent := range []string{
+		"prof_title", "prof_blue", "prof_name",
+		"blog_tldr", "blog_read", "blog_faq", "blog_faq_1_question",
+		"related_courses", "author_link",
+	} {
+		if _, found := fields[absent]; found {
+			t.Fatalf("на площадку без ACF ушло поле %q", absent)
+		}
+	}
+}
+
+// Рубрика, метки, ярлык и подписи обложки остаются: без них статья на площадке не находится.
+func TestPlainBlogMappingKeepsCategoryTagsAndImage(t *testing.T) {
+	deps, _, client := newPlainBlogPublishDeps()
+
+	payload, plan, err := buildWordPressPayload(context.Background(), deps, "16", true)
+	if err != nil {
+		t.Fatalf("нагрузка не собрана: %v", err)
+	}
+
+	if payload.PostType != "" || payload.CategoryTaxonomy != "" {
+		t.Fatalf("у статьи блога появились свои тип и таксономия: %q / %q",
+			payload.PostType, payload.CategoryTaxonomy)
+	}
+	if payload.CategoryID != 2575 || len(payload.TagIDs) != 2 {
+		t.Fatalf("рубрика %d, метки %v", payload.CategoryID, payload.TagIDs)
+	}
+	if payload.Slug != "razryady-gazosvarshchikov" {
+		t.Fatalf("ярлык записи = %q", payload.Slug)
+	}
+	if plan.ImageAlt != "Разряды газосварщиков: какие бывают" || plan.ImageTitle != "razryady-gazosvarshchikov" {
+		t.Fatalf("подписи обложки: alt=%q title=%q", plan.ImageAlt, plan.ImageTitle)
+	}
+	// Карточка автора и связь с преподавателем на площадке не ищутся: типов записи нет.
+	if len(client.postLookups) != 0 {
+		t.Fatalf("раскладка ходила в блог за записями: %v", client.postLookups)
+	}
+}
+
+// Картинка в тело не вставляется: на этой площадке её нет ни у одной статьи.
+func TestPlainBlogMappingSkipsBodyImage(t *testing.T) {
+	deps, _, _ := newPlainBlogPublishDeps()
+
+	_, plan, err := buildWordPressPayload(context.Background(), deps, "16", true)
+	if err != nil {
+		t.Fatalf("нагрузка не собрана: %v", err)
+	}
+
+	if !plan.WithoutBodyImage {
+		t.Fatal("раскладка не сняла вставку картинки в тело статьи")
+	}
+}
+
+// Признак картинки в теле по умолчанию выключен: у соседних задач она обязана остаться.
+func TestBlogMappingKeepsBodyImage(t *testing.T) {
+	deps, _, _, _, _ := newWPPublishDeps()
+
+	_, plan, err := buildWordPressPayload(context.Background(), deps, "16", true)
+	if err != nil {
+		t.Fatalf("нагрузка не собрана: %v", err)
+	}
+
+	if plan.WithoutBodyImage {
+		t.Fatal("у статьи блога dpoprof пропала картинка в теле")
+	}
+}
+
+// Статья без меток не уходит на площадку, где их и так не ставят: иначе она там не находится.
+func TestPlainBlogMappingRequiresTags(t *testing.T) {
+	deps, repository, client := newPlainBlogPublishDeps()
+	repository.input.Tags = "  "
+
+	_, _, err := buildWordPressPayload(context.Background(), deps, "16", true)
+
+	if err == nil {
+		t.Fatal("нагрузка собрана без меток")
+	}
+	if !strings.Contains(err.Error(), "метки") {
+		t.Fatalf("ошибка не называет причину: %v", err)
+	}
+	if len(client.termLookups) != 0 || len(client.postLookups) != 0 {
+		t.Fatalf("непригодная статья успела сходить в блог: %v / %v", client.termLookups, client.postLookups)
+	}
+}

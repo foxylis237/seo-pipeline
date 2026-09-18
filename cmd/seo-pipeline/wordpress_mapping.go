@@ -10,6 +10,7 @@ import (
 	"github.com/foxylis237/seo-pipeline/internal/integrations/wordpress"
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/article"
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/result"
+	"github.com/foxylis237/seo-pipeline/internal/tasks"
 )
 
 // Раскладка данных статьи по полям площадки.
@@ -49,6 +50,14 @@ type wordPressMappedPost struct {
 	// в нагрузке лежат идентификаторы, а человеку перед необратимой командой надо видеть,
 	// какие курсы увидит читатель.
 	RelatedCourses []catalog.Related
+	// WithoutBodyImage снимает вставку обложки в середину тела статьи.
+	//
+	// Имя отрицательное намеренно: нулевое значение обязано означать прежнее поведение —
+	// картинка с подписью «Источник изображения» встаёт перед серединным заголовком, как это
+	// было у всех задач до появления площадки без картинок в теле. Решение принадлежит
+	// раскладке, а не признаку публикации: картинка в теле — часть того, как выглядит запись
+	// на конкретной площадке, и сухой прогон обязан её видеть.
+	WithoutBodyImage bool
 }
 
 // wordPressMapping — раскладка одной задачи.
@@ -89,6 +98,17 @@ const profBlueValue = "от 7 000 р"
 // Пустым поле не отправляется вовсе: у темы это законное состояние — «курсы не заданы», и
 // тогда она подбирает их сама по совпадению рубрики и меток.
 const blogFieldRelatedCourses = "related_courses"
+
+// blogFieldTLDR и blogFieldReadTime — краткое содержание статьи и время чтения (ACF).
+//
+// Константами, а не литералами по месту: ключи знает не только сборщик нагрузки — правка уже
+// опубликованной записи обновляет эти поля вместе с текстом (republishFields). Разойдись
+// написание, блок «Кратко о статье» молча остался бы прежним, а увидеть это можно только
+// глазами на самой странице.
+const (
+	blogFieldTLDR     = "blog_tldr"
+	blogFieldReadTime = "blog_read"
+)
 
 // blogWordPressMapping — раскладка полей темы dpoprof для статьи блога.
 //
@@ -255,8 +275,8 @@ func blogCustomFields(
 	// он пустой», и у страницы, которая этих блоков не имеет, их не должно быть вовсе.
 	if withBlogMetadata {
 		fields = append(fields,
-			wordpress.CustomField{Key: "blog_tldr", Value: strings.TrimSpace(input.TLDR)},
-			wordpress.CustomField{Key: "blog_read", Value: readingTime},
+			wordpress.CustomField{Key: blogFieldTLDR, Value: strings.TrimSpace(input.TLDR)},
+			wordpress.CustomField{Key: blogFieldReadTime, Value: readingTime},
 		)
 	}
 	// Счётчик строк репитера идёт вместе с самими вопросами, а не с полями блога: у задачи,
@@ -494,11 +514,100 @@ func courseCustomFields(
 // newWordPressMapping выбирает раскладку по профилю задачи.
 //
 // Признак берётся из профиля, а не из имени задачи: движок имён задач не знает, а
-// composition root уже держит их список. Задача без своей раскладки публикуется как статья
-// блога — так работали task_1 и pprof_1 до появления второй раскладки.
-func newWordPressMapping(commercial bool) wordPressMapping {
-	if commercial {
+// composition root уже держит их список. Задача без своих признаков публикуется как статья
+// блога с полями темы dpoprof — так работали task_1 и pprof_1 до появления второй раскладки,
+// и нулевые значения обязаны означать именно это.
+//
+// Профиль передаётся целиком, а не булевым признаком: раскладок стало три, и второй булев
+// параметр рядом с первым читался бы как «commercial и plain одновременно» — состояние,
+// которого не бывает.
+func newWordPressMapping(profile tasks.Profile) wordPressMapping {
+	switch {
+	case profile.CommercialPages:
 		return courseWordPressMapping{}
+	case profile.PlainBlogPages:
+		return plainBlogWordPressMapping{}
+	default:
+		return blogWordPressMapping{}
 	}
-	return blogWordPressMapping{}
 }
+
+// ---------------------------------------------------------------------------
+// Статья блога площадки без ACF: obuch_1.
+// ---------------------------------------------------------------------------
+
+// plainBlogWordPressMapping — раскладка для площадки, у которой полей ACF нет вовсе.
+//
+// Проверено на 37 опубликованных статьях obuchim-specialista.ru: у записи заполнены только
+// рубрика, название, ярлык, обложка, тело и три ключа Yoast; `acf` у неё пуст. Блоговая
+// раскладка отправила бы туда prof_title, prof_blue, prof_name, blog_tldr, blog_read и
+// репитер blog_faq_* — десяток полей, которых на площадке не существует, и связь author_link,
+// для которой там нет даже типа записи.
+//
+// Поэтому blogCustomFields здесь не вызывается вовсе: свои три поля собираются рядом, а не
+// вычитаются из чужого набора.
+type plainBlogWordPressMapping struct{}
+
+func (plainBlogWordPressMapping) Validate(input article.PublicationInput) error {
+	// Метки нужны так же, как блоговой статье: на площадке их не ставят, и поиск по меткам
+	// остаётся единственным способом собрать статьи одной темы.
+	if strings.TrimSpace(input.Tags) == "" {
+		return fmt.Errorf("у статьи %s не заполнено обязательное для публикации поле: метки",
+			input.Article.ExternalID)
+	}
+	return nil
+}
+
+func (plainBlogWordPressMapping) Build(
+	ctx context.Context, deps wordPressPublishDeps, input article.PublicationInput,
+	_ []result.FAQItem, _ string, createMissingTerms bool,
+) (wordPressMappedPost, error) {
+	externalID := input.Article.ExternalID
+	categoryID, err := deps.client.FindCategoryID(ctx, input.Category)
+	if err != nil {
+		return wordPressMappedPost{}, fmt.Errorf("рубрика статьи %s: %w", externalID, err)
+	}
+	tagNames := wordpress.SplitTermNames(input.Tags)
+	if len(tagNames) == 0 {
+		return wordPressMappedPost{}, fmt.Errorf("у статьи %s не разобраны метки: %q", externalID, input.Tags)
+	}
+	tags, err := resolveWordPressTags(ctx, deps, externalID, tagNames, createMissingTerms)
+	if err != nil {
+		return wordPressMappedPost{}, err
+	}
+	return wordPressMappedPost{
+		CategoryID:   categoryID,
+		CategoryName: strings.TrimSpace(input.Category),
+		Tags:         tags,
+		// alt — заголовок H1 статьи, title — слаг картинки: так же, как у блоговой раскладки.
+		ImageAlt:   strings.TrimSpace(input.Header),
+		ImageTitle: strings.TrimSpace(input.Article.Slug),
+		Fields:     yoastFields(input),
+		// Картинка в тело не вставляется: на этой площадке в теле статьи нет ни одного
+		// изображения у всех 37 просмотренных записей — единственная картинка записи это
+		// обложка, и её выводит тема.
+		WithoutBodyImage: true,
+	}, nil
+}
+
+// yoastFields собирает три ключа Yoast, общие у всех раскладок.
+//
+// Отдельная функция появилась вместе с третьей раскладкой: одни и те же имена ключей,
+// записанные литералами в трёх местах, расходятся молча, а увидеть расхождение можно только
+// в выдаче — то есть недели спустя.
+func yoastFields(input article.PublicationInput) []wordpress.CustomField {
+	return []wordpress.CustomField{
+		{Key: yoastFocusKeyword, Value: strings.TrimSpace(input.Keyword)},
+		// Заголовок выдачи — своя колонка книги, а не название статьи: поиск режет заголовок
+		// примерно на 60 знаках. Пустая колонка — прежнее поведение, в выдачу идёт название.
+		{Key: yoastTitle, Value: firstNonEmpty(input.SEOTitle, input.Article.Title)},
+		{Key: yoastMetaDescription, Value: strings.TrimSpace(input.MetaDescription)},
+	}
+}
+
+// Ключи Yoast. Константами, а не литералами по месту: их называют три раскладки сразу.
+const (
+	yoastFocusKeyword    = "_yoast_wpseo_focuskw"
+	yoastTitle           = "_yoast_wpseo_title"
+	yoastMetaDescription = "_yoast_wpseo_metadesc"
+)
