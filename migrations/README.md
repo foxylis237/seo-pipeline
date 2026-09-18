@@ -8,6 +8,7 @@
 | `migrations/task_1/` | `public` | docker-entrypoint при первой инициализации volume; руками для уже существующей базы |
 | `migrations/pprof_1/` | `pprof_1` | только руками, только к своей схеме |
 | `migrations/pprof_2/` | `pprof_2` | только руками, только к своей схеме |
+| `migrations/obuch_1/` | `obuch_1` | только руками, только к своей схеме |
 | `migrations/pprof_fix_1/` | `pprof_fix_1` | только руками, только к своей схеме |
 | `migrations/pprof_fix_2/` | `pprof_fix_2` | только руками, только к своей схеме |
 | `migrations/pprof_fix_3/` | `pprof_fix_3` | только руками, только к своей схеме |

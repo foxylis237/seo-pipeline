@@ -10,6 +10,7 @@ import (
 	articleoutput "github.com/foxylis237/seo-pipeline/internal/pipeline/output"
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/repository"
 	"github.com/foxylis237/seo-pipeline/internal/tasks"
+	"github.com/foxylis237/seo-pipeline/internal/tasks/obuch1"
 	"github.com/foxylis237/seo-pipeline/internal/tasks/pprof1"
 	"github.com/foxylis237/seo-pipeline/internal/tasks/pprof2"
 	"github.com/foxylis237/seo-pipeline/internal/tasks/pproftemplate1"
@@ -49,6 +50,8 @@ func newTaskFlow(profile tasks.Profile, deps taskFlowDeps) (taskFlow, error) {
 		return newPProf1Flow(deps)
 	case pprof2.Name:
 		return newPProf2Flow(deps)
+	case obuch1.Name:
+		return newObuch1Flow(deps)
 	case pproftemplate1.Name:
 		return newPProfTemplate1Flow(deps)
 	default:

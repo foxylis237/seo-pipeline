@@ -1,0 +1,119 @@
+## Название
+
+```text
+{{.Title}}
+```
+
+## Рубрика
+
+```text
+{{.Category}}
+```
+
+## Метки
+
+```text
+{{.Tags}}
+```
+
+## Время чтения
+
+```text
+{{.ReadingTimeMinutes}} мин
+```
+
+## TL;DR
+
+```text
+{{.TLDR}}
+```
+{{if .AdditionalInfo}}
+
+## Допинфо
+
+```text
+{{.AdditionalInfo}}
+```
+{{end}}
+{{range $index, $item := .FAQItems}}
+
+## Вопрос {{add $index 1}}
+
+### Вопрос
+
+```text
+{{$item.Question}}
+```
+
+### Ответ
+
+```text
+{{$item.Answer}}
+```
+{{end}}
+
+## Фокусное ключевое слово
+
+```text
+{{.Keyword}}
+```
+
+## SEO-заголовок
+
+```text
+{{.SEOTitle}}
+```
+
+## Мета-описание
+
+```text
+{{.MetaDescription}}
+```
+
+## Заголовок (H1)
+
+```text
+{{.Header}}
+```
+
+## Название профессии
+
+```text
+{{.ProfessionName}}
+```
+
+## Название картинки
+
+```text
+{{.ImageName}}
+```
+
+## URL картинки
+
+```text
+{{.ImageURL}}
+```
+
+## Файл статьи
+
+```text
+{{.ArticlePath}}
+```
+
+## HTML
+
+```text
+{{.HTMLPath}}
+```
+
+## Гугл Док
+
+```text
+{{.GoogleDocURL}}
+```
+
+## Ссылка на статью
+
+```text
+{{.WordPressURL}}
+```
