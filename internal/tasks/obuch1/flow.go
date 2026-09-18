@@ -54,19 +54,19 @@ const (
 //
 //	Чат 1: structure
 //	Чат 2: expert → review → info
-//	Чат 3: html + тексты карточки призыва
+//	Чат 3: html + надпись и адрес кнопки призыва
 //
 // Порядок стадий тот же, что у pprof_1, а расходится третий чат: площадка другая, у неё
-// другая вёрстка и под статьёй стоит карточка призыва, которой у pprof_1 нет вовсе. Общий
+// другая вёрстка, а раздел призыва заканчивается кнопкой, которой у pprof_1 нет вовсе. Общий
 // поток на две площадки означал бы флаг внутри чистки разметки, поэтому у задачи свой.
 type Flow struct {
 	*taskflow.Base
 	repository Repository
 	writer     Writer
 	names      LinkNames
-	// ctaCardPath — шаблон карточки призыва. Поле, а не константа по месту: тест подставляет
-	// временный файл, а прогон — CTACardPath.
-	ctaCardPath string
+	// ctaButtonPath — шаблон кнопки призыва. Поле, а не константа по месту: тест подставляет
+	// временный файл, а прогон — CTAButtonPath.
+	ctaButtonPath string
 	// programs — каталог услуг площадки. Нужен ровно затем, чтобы адрес кнопки призыва вёл
 	// на существующую страницу; nil означает прежнее поведение.
 	programs ProgramCatalog
@@ -77,11 +77,11 @@ func NewFlow(repository Repository, writer Writer, chats taskflow.ChatFactory,
 	prompts taskflow.PromptRenderer, logger *slog.Logger, publisher taskflow.PromptPublisher,
 	names LinkNames) *Flow {
 	return &Flow{
-		Base:        taskflow.NewBase(repository, writer, chats, prompts, logger, publisher),
-		repository:  repository,
-		writer:      writer,
-		names:       names,
-		ctaCardPath: CTACardPath,
+		Base:          taskflow.NewBase(repository, writer, chats, prompts, logger, publisher),
+		repository:    repository,
+		writer:        writer,
+		names:         names,
+		ctaButtonPath: CTAButtonPath,
 	}
 }
 
@@ -337,9 +337,9 @@ func (f *Flow) saveArticleChat(ctx context.Context, logger *slog.Logger, input a
 	return nil
 }
 
-// RunHTML выполняет чат 3: разметку, перелинковку и тексты карточки призыва.
+// RunHTML выполняет чат 3: разметку, перелинковку, надпись и адрес кнопки призыва.
 //
-// Шаблон карточки читается первым, до перехода этапа и до единого сообщения модели: отказ
+// Шаблон кнопки читается первым, до перехода этапа и до единого сообщения модели: отказ
 // файла обязан стоить нисколько, а не оплаченный ответ разметки. Так же устроена кнопка
 // заявки у pprof_2.
 func (f *Flow) RunHTML(ctx context.Context, externalID string) error {
@@ -348,7 +348,7 @@ func (f *Flow) RunHTML(ctx context.Context, externalID string) error {
 		return taskflow.StageFailure(externalID, "load_generation_data", err)
 	}
 	logger := f.ArticleLogger(input.Article)
-	card, err := readCTACard(f.ctaCardPath)
+	button, err := readCTAButton(f.ctaButtonPath)
 	if err != nil {
 		return f.Fail(ctx, logger, input.Article, "load_article_data", err)
 	}
@@ -380,7 +380,7 @@ func (f *Flow) RunHTML(ctx context.Context, externalID string) error {
 	// стадий ему названо при создании.
 	//
 	// Сверх первого ответа с продолжениями — два сообщения: одно на доспрос перелинковки,
-	// второе на тексты карточки призыва. Оба ответа короткие, по строке на слот, и обрываться
+	// второе на надпись и адрес кнопки призыва. Оба ответа короткие, по строке на слот, и обрываться
 	// им не на чем.
 	htmlStages := append(generation.HTMLChatStages(StageHTML), StageHTML, StageHTML)
 	chat, err := f.NewChat(ctx, input.Article.ID, htmlStages...)
@@ -409,7 +409,7 @@ func (f *Flow) RunHTML(ctx context.Context, externalID string) error {
 		return f.Fail(ctx, logger, input.Article, "html_generation", err)
 	}
 	html = f.completeLinks(ctx, logger, chat, named, f.completeHTMLPage(logger, finalText, html))
-	html = f.appendCTA(ctx, logger, chat, card, input.Article.Title, html)
+	html = f.appendCTA(ctx, logger, chat, button, input.Article.Title, html)
 	pending, err := f.writer.StageHTML(input.Article.ExternalID, input.Article.Slug, prompt, html)
 	if err != nil {
 		return f.Fail(ctx, logger, input.Article, "save_html", err)
@@ -447,42 +447,46 @@ func (f *Flow) completeHTMLPage(logger *slog.Logger, page, markup string) string
 	return markup
 }
 
-// appendCTA дописывает карточку призыва в конец разметки.
+// appendCTA дописывает кнопку призыва в конец разметки.
 //
-// Тексты спрашиваются у модели отдельным коротким сообщением в том же чате: страница уже в
-// истории, и второй раз её передавать нельзя. Отказ доспроса стадию не роняет — карточка
-// собирается на умолчаниях: статья без призыва выбивается из блога сильнее, чем статья с
-// типовым.
+// Заголовок раздела и абзац перед кнопкой модель уже написала — они часть статьи и стоят в
+// её структуре. Кодом ставится только кнопка: у неё фиксированные инлайновые стили и класс,
+// за который цепляется оформление площадки.
+//
+// Надпись и адрес спрашиваются отдельным коротким сообщением в том же чате: страница уже в
+// истории, и второй раз её передавать нельзя. Отказ доспроса стадию не роняет — кнопка
+// собирается на умолчаниях: раздел призыва без кнопки обрывается на абзаце, за которым
+// читателю некуда нажать.
 func (f *Flow) appendCTA(ctx context.Context, logger *slog.Logger, chat taskflow.Chat,
 	tmpl *template.Template, title, markup string) string {
 	var slots map[string]string
 	answer, err := f.Answer(ctx, chat.Continue, ctaSlotsPrompt(title), StageHTML)
 	if err != nil {
-		logger.Warn("тексты карточки призыва не получены, карточка соберётся на умолчаниях",
+		logger.Warn("надпись и адрес кнопки призыва не получены, кнопка соберётся на умолчаниях",
 			"stage", "html_generation", "error", err)
 	} else {
 		slots = parseCTASlots(answer)
 	}
 	f.dropUnknownCTAURL(ctx, logger, slots)
-	card, missing := buildCTACard(slots, ctaFallbackURL)
+	button, missing := buildCTAButton(slots, ctaFallbackURL)
 	if len(missing) > 0 {
-		logger.Warn("часть текстов карточки призыва заменена умолчаниями",
+		logger.Warn("часть слотов кнопки призыва заменена умолчаниями",
 			"stage", "html_generation", "slots", strings.Join(missing, ", "))
 	}
-	rendered, err := renderCTACard(tmpl, card)
+	rendered, err := renderCTAButton(tmpl, button)
 	if err != nil {
-		logger.Warn("карточка призыва не собрана, статья уходит без неё",
+		logger.Warn("кнопка призыва не собрана, статья уходит без неё",
 			"stage", "html_generation", "error", err)
 		return markup
 	}
-	result, added := appendCTACard(markup, rendered)
+	result, added := appendCTAButton(markup, rendered)
 	if !added {
-		logger.Warn("в разметке уже есть карточка призыва — свою не дописываем",
+		logger.Warn("в разметке уже есть кнопка призыва — свою не дописываем",
 			"stage", "html_generation")
 		return result
 	}
-	logger.Info("карточка призыва дописана кодом", "stage", "html_generation",
-		"button_url", card.ButtonURL)
+	logger.Info("кнопка призыва дописана кодом", "stage", "html_generation",
+		"button_url", button.ButtonURL)
 	return result
 }
 

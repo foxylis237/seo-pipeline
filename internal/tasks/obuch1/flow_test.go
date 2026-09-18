@@ -21,7 +21,7 @@ type fakeChats struct {
 	chats   [][]string
 	answers map[string]string
 	// queue отдаёт ответы стадии по порядку: у стадии html их два — разметка и тексты
-	// карточки призыва.
+	// кнопки призыва.
 	queue map[string][]string
 }
 
@@ -47,7 +47,7 @@ func (c *fakeChat) Continue(_ context.Context, prompt string) (string, error) {
 
 // record повторяет ограничение боевого чата: сообщений принимается ровно столько, сколько
 // стадий названо при создании. Иначе тест пропустил бы в прод чат, которому не хватает
-// сообщения на карточку.
+// сообщения на кнопку.
 func (c *fakeChat) record(prompt string) (string, error) {
 	if c.sent >= len(c.stages) {
 		return "", fmt.Errorf("чату не хватило стадий: сообщение %d при %d стадиях", c.sent+1, len(c.stages))
@@ -154,30 +154,22 @@ func (p *recordingPublisher) PublishArticlePrompt(job generation.ArticlePromptJo
 const htmlWithLink = `<h2 class="wp-block-heading">Заголовок</h2>` +
 	`<p class="wp-block-paragraph">текст со ссылкой на <a href="https://example.test/logoped">логопеда</a></p>`
 
-// ctaAnswer — ответ модели на доспрос текстов карточки, в том виде, в каком он приходит:
-// с вступлением и нумерацией, которые разбор обязан пережить.
-const ctaAnswer = `Вот тексты:
-1. пилюля ;; Профстандарты • 273-ФЗ • Дистанционно
-заголовок ;; Обучение на логопеда с нуля
-лид ;; Освойте профессию логопеда и получите документ установленного образца.
-плашка1 ;; Документ | Диплом о переподготовке
-плашка2 ;; ФИС ФРДО | Сведения вносятся в реестр
-плашка3 ;; Формат | Дистанционно, 3 месяца
-адрес ;; https://example.test/logoped
-кнопка ;; Выбрать программу
-примечание ;; Консультация методиста за 15 минут`
+// ctaAnswer — ответ модели на доспрос надписи и адреса кнопки, в том виде, в каком он
+// приходит: с вступлением и нумерацией, которые разбор обязан пережить.
+const ctaAnswer = `Вот они:
+1. кнопка ;; Выбрать программу
+адрес ;; https://example.test/logoped`
 
-// writeTestCTACard кладёт шаблон карточки во временный файл и возвращает путь.
+// writeTestCTAButton кладёт шаблон кнопки во временный файл и возвращает путь.
 //
 // Плейсхолдеры — те же, что в боевом файле: разойдутся имена полей структуры и шаблона —
 // шаблон молча подставит пустую строку, и тест обязан это поймать.
-func writeTestCTACard(t *testing.T) string {
+func writeTestCTAButton(t *testing.T) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "cta_card.html")
-	card := `<div class="sp-cta-card"><span>{{.Badge}}</span><h3>{{.Title}}</h3><p>{{.Lead}}</p>` +
-		`<div>{{.Tile1Caption}}:{{.Tile1Value}}|{{.Tile2Caption}}:{{.Tile2Value}}|{{.Tile3Caption}}:{{.Tile3Value}}</div>` +
-		`<a href="{{.ButtonURL}}">{{.ButtonText}}</a><span>{{.Note}}</span></div>`
-	if err := os.WriteFile(path, []byte(card), 0o600); err != nil {
+	path := filepath.Join(t.TempDir(), "cta_button.html")
+	button := `<p class="wp-block-paragraph">` +
+		`<a href="{{.ButtonURL}}" class="sp-cta-button" style="background:#ff7500;">{{.ButtonText}}</a></p>`
+	if err := os.WriteFile(path, []byte(button), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	return path
@@ -203,7 +195,7 @@ func newFlowFixture(t *testing.T) (*Flow, *fakeChats, *fakeRepository, *recordin
 	}
 	publisher := &recordingPublisher{}
 	flow := NewFlow(repository, writer, chats, &fakeRenderer{}, nil, publisher, nil)
-	flow.ctaCardPath = writeTestCTACard(t)
+	flow.ctaButtonPath = writeTestCTAButton(t)
 	return flow, chats, repository, publisher
 }
 
@@ -224,7 +216,7 @@ func runToHTML(t *testing.T, flow *Flow, repository *fakeRepository) {
 }
 
 // Границы чатов — главный контракт потока. Третий чат принимает два сообщения: разметку и
-// тексты карточки призыва; бюджет чата обязан их вместить.
+// надпись и адрес кнопки призыва; бюджет чата обязан их вместить.
 func TestFlowUsesThreeChats(t *testing.T) {
 	flow, chats, repository, _ := newFlowFixture(t)
 
@@ -245,58 +237,54 @@ func TestFlowUsesThreeChats(t *testing.T) {
 	}
 }
 
-// Карточка стоит последним блоком статьи и собрана из текстов модели, а не из умолчаний.
-func TestHTMLEndsWithCTACard(t *testing.T) {
+// Кнопка стоит последним элементом статьи, сразу за абзацем раздела с призывом, и собрана
+// из ответа модели, а не из умолчаний.
+func TestHTMLEndsWithCTAButton(t *testing.T) {
 	flow, _, repository, _ := newFlowFixture(t)
 
 	runToHTML(t, flow, repository)
 
 	html := readArtifact(t, flow, repository.htmlPath)
-	if !strings.HasSuffix(strings.TrimSpace(html), "</div>") || !strings.Contains(html, ctaCardMarker) {
-		t.Fatalf("карточка призыва не дописана в конец разметки:\n%s", html)
+	if !strings.HasSuffix(strings.TrimSpace(html), "</p>") || !strings.Contains(html, ctaButtonMarker) {
+		t.Fatalf("кнопка призыва не дописана в конец разметки:\n%s", html)
 	}
-	if index := strings.Index(html, ctaCardMarker); index < strings.Index(html, "<h2") {
-		t.Fatalf("карточка стоит выше текста статьи:\n%s", html)
+	if index := strings.Index(html, ctaButtonMarker); index < strings.Index(html, "<h2") {
+		t.Fatalf("кнопка стоит выше текста статьи:\n%s", html)
 	}
-	for _, want := range []string{
-		"Обучение на логопеда с нуля",
-		"Диплом о переподготовке",
-		`href="https://example.test/logoped"`,
-		"Выбрать программу",
-	} {
+	for _, want := range []string{`href="https://example.test/logoped"`, "Выбрать программу"} {
 		if !strings.Contains(html, want) {
-			t.Fatalf("в карточке нет текста модели %q:\n%s", want, html)
+			t.Fatalf("в кнопке нет ответа модели %q:\n%s", want, html)
 		}
 	}
 }
 
-// Карточку, нарисованную моделью вопреки промпту, не дублируем: двух подряд быть не должно.
-func TestHTMLKeepsSingleCTACard(t *testing.T) {
+// Кнопку, нарисованную моделью вопреки промпту, не дублируем: двух подряд быть не должно.
+func TestHTMLKeepsSingleCTAButton(t *testing.T) {
 	flow, chats, repository, _ := newFlowFixture(t)
 	chats.queue[StageHTML] = []string{
-		htmlWithLink + `<div class="sp-cta-card">своя карточка модели</div>`,
+		htmlWithLink + `<p class="wp-block-paragraph"><a class="sp-cta-button" href="https://example.test/a">своя кнопка модели</a></p>`,
 		ctaAnswer,
 	}
 
 	runToHTML(t, flow, repository)
 
 	html := readArtifact(t, flow, repository.htmlPath)
-	if got := strings.Count(html, ctaCardMarker); got != 1 {
-		t.Fatalf("карточек в разметке %d, ожидалась одна:\n%s", got, html)
+	if got := strings.Count(html, ctaButtonMarker); got != 1 {
+		t.Fatalf("кнопок в разметке %d, ожидалась одна:\n%s", got, html)
 	}
 }
 
-// Недостающие тексты заменяются умолчаниями, а не роняют стадию: за разметку уже заплачено.
-func TestHTMLFallsBackToDefaultCTATexts(t *testing.T) {
+// Недостающие слоты заменяются умолчаниями, а не роняют стадию: за разметку уже заплачено.
+func TestHTMLFallsBackToDefaultCTAButton(t *testing.T) {
 	flow, chats, repository, _ := newFlowFixture(t)
 	chats.queue[StageHTML] = []string{htmlWithLink, "не могу ответить"}
 
 	runToHTML(t, flow, repository)
 
 	html := readArtifact(t, flow, repository.htmlPath)
-	defaults := defaultCTACard(ctaFallbackURL)
+	defaults := defaultCTAButton(ctaFallbackURL)
 	if !strings.Contains(html, defaults.ButtonText) || !strings.Contains(html, ctaFallbackURL) {
-		t.Fatalf("карточка не собралась на умолчаниях:\n%s", html)
+		t.Fatalf("кнопка не собралась на умолчаниях:\n%s", html)
 	}
 }
 
@@ -304,7 +292,7 @@ func TestHTMLFallsBackToDefaultCTATexts(t *testing.T) {
 // нисколько, а не оплаченный ответ разметки.
 func TestHTMLFailsBeforeModelWithoutCTAFile(t *testing.T) {
 	flow, chats, repository, _ := newFlowFixture(t)
-	flow.ctaCardPath = filepath.Join(t.TempDir(), "нет-такого-файла.html")
+	flow.ctaButtonPath = filepath.Join(t.TempDir(), "нет-такого-файла.html")
 
 	ctx := context.Background()
 	if err := flow.RunStructure(ctx, "7"); err != nil {
@@ -319,7 +307,7 @@ func TestHTMLFailsBeforeModelWithoutCTAFile(t *testing.T) {
 	err := flow.RunHTML(ctx, "7")
 
 	if err == nil {
-		t.Fatal("стадия html прошла без шаблона карточки")
+		t.Fatal("стадия html прошла без шаблона кнопки")
 	}
 	if len(chats.chats) != chatsBefore {
 		t.Fatalf("чат разметки открыт при отсутствующем шаблоне: %v", chats.chats)
@@ -329,14 +317,14 @@ func TestHTMLFailsBeforeModelWithoutCTAFile(t *testing.T) {
 	}
 }
 
-// Пустой файл шаблона — тоже отказ: пустая карточка означала бы статью без призыва.
+// Пустой файл шаблона — тоже отказ: без кнопки раздел призыва обрывается на абзаце.
 func TestHTMLFailsOnEmptyCTAFile(t *testing.T) {
 	flow, _, repository, _ := newFlowFixture(t)
-	empty := filepath.Join(t.TempDir(), "cta_card.html")
+	empty := filepath.Join(t.TempDir(), "cta_button.html")
 	if err := os.WriteFile(empty, []byte("   \n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	flow.ctaCardPath = empty
+	flow.ctaButtonPath = empty
 
 	ctx := context.Background()
 	if err := flow.RunStructure(ctx, "7"); err != nil {
@@ -348,7 +336,7 @@ func TestHTMLFailsOnEmptyCTAFile(t *testing.T) {
 	repository.saved.FixedArticlePath = repository.finalArticlePath
 
 	if err := flow.RunHTML(ctx, "7"); err == nil {
-		t.Fatal("стадия html прошла с пустым шаблоном карточки")
+		t.Fatal("стадия html прошла с пустым шаблоном кнопки")
 	}
 }
 
@@ -363,7 +351,7 @@ func TestHTMLIsCleanedForPlainBlog(t *testing.T) {
 	runToHTML(t, flow, repository)
 
 	html := readArtifact(t, flow, repository.htmlPath)
-	body, _, _ := strings.Cut(html, `<div class="`+ctaCardMarker)
+	body, _, _ := strings.Cut(html, `<p class="wp-block-paragraph"><a href=`)
 	if strings.Contains(body, "style=") || strings.Contains(body, "<div") {
 		t.Fatalf("в теле статьи остались стили или обёртки:\n%s", body)
 	}
@@ -372,21 +360,21 @@ func TestHTMLIsCleanedForPlainBlog(t *testing.T) {
 	}
 }
 
-// Набор полей карточки и набор плейсхолдеров боевого шаблона обязаны совпадать: расхождение
-// даёт пустую строку в опубликованной статье, а не ошибку.
-func TestLiveCTATemplateMatchesCardFields(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join(projectRoot, filepath.FromSlash(CTACardPath)))
+// Набор полей кнопки и набор плейсхолдеров боевого шаблона обязаны совпадать: расхождение
+// даёт пустую строку в опубликованной статье, а не ошибку. Класс проверяется там же: по нему
+// код узнаёт кнопку, нарисованную моделью, и не ставит вторую.
+func TestLiveCTATemplateMatchesButtonFields(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join(projectRoot, filepath.FromSlash(CTAButtonPath)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, field := range []string{
-		"Badge", "Title", "Lead",
-		"Tile1Caption", "Tile1Value", "Tile2Caption", "Tile2Value", "Tile3Caption", "Tile3Value",
-		"ButtonURL", "ButtonText", "Note",
-	} {
+	for _, field := range []string{"ButtonURL", "ButtonText"} {
 		if !strings.Contains(string(raw), "{{."+field+"}}") {
-			t.Fatalf("в шаблоне карточки нет плейсхолдера {{.%s}}", field)
+			t.Fatalf("в шаблоне кнопки нет плейсхолдера {{.%s}}", field)
 		}
+	}
+	if !strings.Contains(string(raw), ctaButtonMarker) {
+		t.Fatalf("в шаблоне кнопки нет класса %s", ctaButtonMarker)
 	}
 }
 
@@ -429,12 +417,12 @@ func TestCTAURLOutsideCatalogFallsBackToSection(t *testing.T) {
 
 	// Смотрим на саму карточку, а не на страницу: тот же адрес стоит ссылкой в тексте, и
 	// перелинковку сверка адреса кнопки трогать не должна.
-	card := cardMarkup(t, readArtifact(t, flow, repository.htmlPath))
-	if strings.Contains(card, "https://example.test/logoped") {
-		t.Fatalf("в карточку ушёл адрес вне каталога:\n%s", card)
+	button := buttonMarkup(t, readArtifact(t, flow, repository.htmlPath))
+	if strings.Contains(button, "https://example.test/logoped") {
+		t.Fatalf("в кнопку ушёл адрес вне каталога:\n%s", button)
 	}
-	if !strings.Contains(card, ctaFallbackURL) {
-		t.Fatalf("кнопка не увела в раздел рабочих профессий:\n%s", card)
+	if !strings.Contains(button, ctaFallbackURL) {
+		t.Fatalf("кнопка не увела в раздел рабочих профессий:\n%s", button)
 	}
 	if len(programs.asked) != 1 {
 		t.Fatalf("каталог спрошен %d раз", len(programs.asked))
@@ -449,17 +437,23 @@ func TestCTAURLFromCatalogIsKept(t *testing.T) {
 
 	runToHTML(t, flow, repository)
 
-	if card := cardMarkup(t, readArtifact(t, flow, repository.htmlPath)); !strings.Contains(card, "https://example.test/logoped") {
-		t.Fatalf("адрес из каталога заменён разделом:\n%s", card)
+	if button := buttonMarkup(t, readArtifact(t, flow, repository.htmlPath)); !strings.Contains(button, "https://example.test/logoped") {
+		t.Fatalf("адрес из каталога заменён разделом:\n%s", button)
 	}
 }
 
-// cardMarkup вырезает карточку призыва из готовой страницы.
-func cardMarkup(t *testing.T, html string) string {
+// buttonMarkup вырезает кнопку призыва из готовой страницы.
+//
+// От начала абзаца, а не от класса: класс стоит после href, и срез по нему потерял бы адрес —
+// ровно то, что эти тесты и проверяют.
+func buttonMarkup(t *testing.T, html string) string {
 	t.Helper()
-	at := strings.Index(html, ctaCardMarker)
+	at := strings.Index(html, ctaButtonMarker)
 	if at < 0 {
-		t.Fatalf("в разметке нет карточки призыва:\n%s", html)
+		t.Fatalf("в разметке нет кнопки призыва:\n%s", html)
+	}
+	if start := strings.LastIndex(html[:at], "<p"); start >= 0 {
+		at = start
 	}
 	return html[at:]
 }
@@ -480,8 +474,8 @@ func TestCTAURLKeptWhenCatalogUnavailable(t *testing.T) {
 
 			runToHTML(t, flow, repository)
 
-			if card := cardMarkup(t, readArtifact(t, flow, repository.htmlPath)); !strings.Contains(card, "https://example.test/logoped") {
-				t.Fatalf("адрес заменён без ответа каталога:\n%s", card)
+			if button := buttonMarkup(t, readArtifact(t, flow, repository.htmlPath)); !strings.Contains(button, "https://example.test/logoped") {
+				t.Fatalf("адрес заменён без ответа каталога:\n%s", button)
 			}
 		})
 	}
