@@ -67,6 +67,9 @@ type Flow struct {
 	// ctaCardPath — шаблон карточки призыва. Поле, а не константа по месту: тест подставляет
 	// временный файл, а прогон — CTACardPath.
 	ctaCardPath string
+	// programs — каталог услуг площадки. Нужен ровно затем, чтобы адрес кнопки призыва вёл
+	// на существующую страницу; nil означает прежнее поведение.
+	programs ProgramCatalog
 }
 
 // NewFlow собирает поток. publisher необязателен и может быть nil.
@@ -81,6 +84,21 @@ func NewFlow(repository Repository, writer Writer, chats taskflow.ChatFactory,
 		ctaCardPath: CTACardPath,
 	}
 }
+
+// ProgramCatalog отвечает, есть ли такая страница программы в каталоге площадки.
+//
+// Интерфейс объявлен здесь, у потребителя: потоку нужен один ответ «да/нет», а откуда он —
+// из PostgreSQL или из подмены в тесте — его не касается. nil означает прежнее поведение:
+// адрес кнопки принимается таким, каким его назвала модель.
+type ProgramCatalog interface {
+	HasProgram(ctx context.Context, url string) (bool, error)
+}
+
+// UseProgramCatalog включает сверку адреса кнопки призыва с каталогом услуг.
+//
+// Не аргумент конструктора, а отдельный вызов: зависимость необязательная, и задача без
+// собранного каталога обязана работать ровно как раньше.
+func (f *Flow) UseProgramCatalog(programs ProgramCatalog) { f.programs = programs }
 
 // LinkNames отдаёт название программы по адресу её страницы.
 //
@@ -445,6 +463,7 @@ func (f *Flow) appendCTA(ctx context.Context, logger *slog.Logger, chat taskflow
 	} else {
 		slots = parseCTASlots(answer)
 	}
+	f.dropUnknownCTAURL(ctx, logger, slots)
 	card, missing := buildCTACard(slots, ctaFallbackURL)
 	if len(missing) > 0 {
 		logger.Warn("часть текстов карточки призыва заменена умолчаниями",
@@ -465,6 +484,34 @@ func (f *Flow) appendCTA(ctx context.Context, logger *slog.Logger, chat taskflow
 	logger.Info("карточка призыва дописана кодом", "stage", "html_generation",
 		"button_url", card.ButtonURL)
 	return result
+}
+
+// dropUnknownCTAURL убирает адрес кнопки, которого нет в каталоге услуг площадки.
+//
+// ctaURL проверяет только префикс http — значит модель вправе собрать правдоподобный адрес
+// несуществующей программы, и он уйдёт в опубликованную статью ссылкой в никуда. Каталог
+// отвечает на это без единого запроса к модели.
+//
+// Убранный слот дальше проходит общим путём: buildCTACard подставит раздел рабочих профессий
+// и отметит слот заменённым. Молчащий или пустой каталог адрес не трогает — отменять
+// возможно верную ссылку из-за недоступной базы хуже, чем оставить её как есть.
+func (f *Flow) dropUnknownCTAURL(ctx context.Context, logger *slog.Logger, slots map[string]string) {
+	url, named := slots["адрес"]
+	if f.programs == nil || !named || strings.TrimSpace(url) == "" {
+		return
+	}
+	known, err := f.programs.HasProgram(ctx, url)
+	if err != nil {
+		logger.Warn("адрес кнопки призыва не сверен с каталогом услуг",
+			"stage", "html_generation", "button_url", url, "error", err)
+		return
+	}
+	if known {
+		return
+	}
+	logger.Warn("адрес кнопки призыва не найден в каталоге услуг — кнопка ведёт в раздел",
+		"stage", "html_generation", "button_url", url)
+	delete(slots, "адрес")
 }
 
 // enoughInternalLinks — столько ссылок перелинковки в тексте достаточно: недостающие к ним уже

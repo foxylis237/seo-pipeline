@@ -2,6 +2,7 @@ package obuch1
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -399,4 +400,89 @@ func readArtifact(t *testing.T, flow *Flow, path string) string {
 		t.Fatal(err)
 	}
 	return content
+}
+
+// stubPrograms — каталог услуг площадки в тесте: знает ровно перечисленные адреса.
+type stubPrograms struct {
+	known map[string]bool
+	err   error
+	asked []string
+}
+
+func (s *stubPrograms) HasProgram(_ context.Context, url string) (bool, error) {
+	s.asked = append(s.asked, url)
+	if s.err != nil {
+		return false, s.err
+	}
+	return s.known[url], nil
+}
+
+// Адрес, которого нет в каталоге, в карточку не попадает: ctaURL проверяет только префикс
+// http, и правдоподобный выдуманный адрес ушёл бы в опубликованную статью ссылкой в никуда.
+func TestCTAURLOutsideCatalogFallsBackToSection(t *testing.T) {
+	flow, chats, repository, _ := newFlowFixture(t)
+	chats.queue[StageHTML] = []string{htmlWithLink, ctaAnswer}
+	programs := &stubPrograms{known: map[string]bool{}}
+	flow.UseProgramCatalog(programs)
+
+	runToHTML(t, flow, repository)
+
+	// Смотрим на саму карточку, а не на страницу: тот же адрес стоит ссылкой в тексте, и
+	// перелинковку сверка адреса кнопки трогать не должна.
+	card := cardMarkup(t, readArtifact(t, flow, repository.htmlPath))
+	if strings.Contains(card, "https://example.test/logoped") {
+		t.Fatalf("в карточку ушёл адрес вне каталога:\n%s", card)
+	}
+	if !strings.Contains(card, ctaFallbackURL) {
+		t.Fatalf("кнопка не увела в раздел рабочих профессий:\n%s", card)
+	}
+	if len(programs.asked) != 1 {
+		t.Fatalf("каталог спрошен %d раз", len(programs.asked))
+	}
+}
+
+// Адрес из каталога остаётся как есть: сверка нужна против выдумки, а не против модели.
+func TestCTAURLFromCatalogIsKept(t *testing.T) {
+	flow, chats, repository, _ := newFlowFixture(t)
+	chats.queue[StageHTML] = []string{htmlWithLink, ctaAnswer}
+	flow.UseProgramCatalog(&stubPrograms{known: map[string]bool{"https://example.test/logoped": true}})
+
+	runToHTML(t, flow, repository)
+
+	if card := cardMarkup(t, readArtifact(t, flow, repository.htmlPath)); !strings.Contains(card, "https://example.test/logoped") {
+		t.Fatalf("адрес из каталога заменён разделом:\n%s", card)
+	}
+}
+
+// cardMarkup вырезает карточку призыва из готовой страницы.
+func cardMarkup(t *testing.T, html string) string {
+	t.Helper()
+	at := strings.Index(html, ctaCardMarker)
+	if at < 0 {
+		t.Fatalf("в разметке нет карточки призыва:\n%s", html)
+	}
+	return html[at:]
+}
+
+// Молчащий каталог адрес не трогает: отменять возможно верную ссылку из-за недоступной базы
+// хуже, чем оставить её. Прежнее поведение задачи без каталога — то же самое.
+func TestCTAURLKeptWhenCatalogUnavailable(t *testing.T) {
+	for name, programs := range map[string]ProgramCatalog{
+		"каталог отвечает ошибкой": &stubPrograms{err: errors.New("база недоступна")},
+		"каталога нет вовсе":       nil,
+	} {
+		t.Run(name, func(t *testing.T) {
+			flow, chats, repository, _ := newFlowFixture(t)
+			chats.queue[StageHTML] = []string{htmlWithLink, ctaAnswer}
+			if programs != nil {
+				flow.UseProgramCatalog(programs)
+			}
+
+			runToHTML(t, flow, repository)
+
+			if card := cardMarkup(t, readArtifact(t, flow, repository.htmlPath)); !strings.Contains(card, "https://example.test/logoped") {
+				t.Fatalf("адрес заменён без ответа каталога:\n%s", card)
+			}
+		})
+	}
 }
