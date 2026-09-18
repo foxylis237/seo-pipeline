@@ -16,7 +16,10 @@
 // отличается: где лежат её файлы и в каком порядке идут её стадии.
 package obuch1
 
-import "github.com/foxylis237/seo-pipeline/internal/tasks"
+import (
+	"github.com/foxylis237/seo-pipeline/internal/catalog"
+	"github.com/foxylis237/seo-pipeline/internal/tasks"
+)
 
 // Имя задачи в двух формах: подчёркнутая идёт в логи, каталоги и схему PostgreSQL,
 // дефисная — то, что человек пишет в CLI и в make.
@@ -76,26 +79,27 @@ func Profile() tasks.Profile {
 		OutputDir:    "tasks/obuch_1/output",
 		PromptsDir:   "tasks/obuch_1/prompts",
 		TemplatePath: "tasks/obuch_1/templates/result.md.tmpl",
-		// Блок связанных курсов выключен, и это решение, а не пропуск: каталог услуг живёт
-		// в схеме site и описывает одну площадку — ту, для которой его собирает catalog-sync.
-		// Включить признак здесь значило бы подставить под статьи нового сайта карточки
-		// чужих программ. Появится каталог этой площадки — признак включается тут.
+		// Блок связанных курсов выключен, и это решение, а не пропуск: под статьёй этой
+		// площадки его нет вовсе — там стоит карточка призыва, и её адрес ведёт на одну
+		// программу, а не на три карточки. Каталог у задачи при этом свой и собранный:
+		// он нужен перелинковке в тексте и проверке адреса кнопки, а не блоку под статьёй.
 		RelatedCourses: false,
 		// У площадки нет ни одного поля ACF: в запись уходят рубрика, метки, ярлык, обложка,
 		// тело и три ключа Yoast. Без признака задача получила бы блоговую раскладку и
 		// отправила бы десяток несуществующих полей, включая связь с типом записи `author`,
 		// которого на площадке тоже нет.
 		PlainBlogPages: true,
-		// Каталог услуг в схеме site собран для dpoprof, а у этой задачи своя площадка.
-		// Признак закрывает ей команды каталога: `catalog-sync` начинается с удаления всех
-		// услуг, и один запуск отсюда стёр бы каталог соседей вместе с их подбором курсов.
-		WithoutSiteCatalog: true,
-		LLMConfigPath:      "config/obuch_1.yaml",
-		LLMOverlayPath:     "",
-		ImportReportsDir:   "output/obuch_1/import-reports",
-		DiagnosticsDir:     "output/obuch_1/debug",
-		DBSchema:           Name,
-		EnvPrefix:          "OBUCH_1_",
+		// Своя площадка — свой каталог услуг, в своей схеме PostgreSQL. Названа здесь
+		// площадка, а не схема: пару сводит composition root, и «сайт obuchim со схемой
+		// site» выразить нельзя — сбор начинается с удаления всех услуг, и такая пара
+		// стёрла бы каталог dpoprof вместе с подбором курсов у соседей.
+		CatalogSite:      catalog.SiteObuchim,
+		LLMConfigPath:    "config/obuch_1.yaml",
+		LLMOverlayPath:   "",
+		ImportReportsDir: "output/obuch_1/import-reports",
+		DiagnosticsDir:   "output/obuch_1/debug",
+		DBSchema:         Name,
+		EnvPrefix:        "OBUCH_1_",
 		// Папка Google Drive своя, но выгрузка пока выключена секцией pipeline конфига:
 		// документ ищется по имени «Промт: <заголовок>», а заголовки статей этой задачи
 		// совпадают с заголовками pprof_1, и общая папка означала бы перезапись чужого

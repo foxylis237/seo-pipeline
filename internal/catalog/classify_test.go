@@ -93,3 +93,45 @@ func TestTopicKeysTakesEveryWord(t *testing.T) {
 		t.Fatalf("TopicKeys = %q, ожидалось %q", got, want)
 	}
 }
+
+// Рубрика второй площадки становится профессией как есть: слаг у неё уже латинский, имя
+// написано людьми. Своя транслитерация разошлась бы с тем, что человек видит на сайте.
+func TestProfessionFromIndustryTakesTermAsIs(t *testing.T) {
+	got := ProfessionFromIndustry(Industry{
+		Taxonomy: "cat_rabprof", TermID: 3062,
+		Slug: "apparatchik-avtoklavhiki", Name: "Аппаратчики и автоклавщики",
+	})
+	if got.Slug != "apparatchik-avtoklavhiki" {
+		t.Fatalf("слаг = %q", got.Slug)
+	}
+	if got.Name != "Аппаратчики и автоклавщики" {
+		t.Fatalf("имя = %q", got.Name)
+	}
+}
+
+// Имя рубрики называет одну профессию или две через «и». Каждая обязана дать свой синоним:
+// иначе половина рубрики осталась бы ненайденной — «наладчик» не нашёлся бы в «Слесарь и
+// наладчик». Таких имён 58 из 184.
+func TestProfessionFromIndustrySplitsPairedNames(t *testing.T) {
+	cases := map[string][]string{
+		"Слесарь и наладчик": {"слесарь", "наладчик"},
+		"Повар":              {"повар"},
+		"Кузнец и литейщик":  {"кузнец", "литейщик"},
+	}
+	for name, want := range cases {
+		got := ProfessionFromIndustry(Industry{Slug: "slug", Name: name}).Aliases
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("синонимы %q = %v, ожидались %v", name, got, want)
+		}
+	}
+}
+
+// Пустая рубрика даёт пустую профессию, и такая услуга в каталог не попадает: предлагать
+// читателю услугу без профессии хуже, чем не предлагать ничего.
+func TestProfessionFromIndustryEmptyWithoutTerm(t *testing.T) {
+	for _, industry := range []Industry{{}, {Slug: "slug"}, {Name: "Повар"}} {
+		if got := ProfessionFromIndustry(industry); got.Slug != "" {
+			t.Errorf("рубрика %+v дала профессию %q", industry, got.Slug)
+		}
+	}
+}

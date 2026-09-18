@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/foxylis237/seo-pipeline/internal/catalog"
+	"github.com/foxylis237/seo-pipeline/internal/tasks"
 	"github.com/foxylis237/seo-pipeline/internal/tasks/obuch1"
 )
 
@@ -44,7 +45,7 @@ func TestRunCatalogSyncReportsCounts(t *testing.T) {
 		},
 	}}
 	var out bytes.Buffer
-	err := runCatalogSync(context.Background(), source, &stubStore{},
+	err := runCatalogSync(context.Background(), catalog.DPOProf(), source, &stubStore{},
 		slog.New(slog.NewTextHandler(&out, nil)), &out)
 	if err != nil {
 		t.Fatalf("runCatalogSync: %v", err)
@@ -60,7 +61,7 @@ func TestRunCatalogSyncReportsCounts(t *testing.T) {
 // Просмотр показывает не голые идентификаторы, а то, что читатель увидит под статьёй.
 func TestRunCatalogShowPrintsSelection(t *testing.T) {
 	store := &stubStore{}
-	if _, err := catalog.Sync(context.Background(), stubSource{posts: map[string][]catalog.SourcePost{
+	if _, err := catalog.Sync(context.Background(), catalog.DPOProf(), stubSource{posts: map[string][]catalog.SourcePost{
 		"obuch": {{PostID: 504, Slug: "santehnik", Title: "Сантехник", Link: "https://dpoprof.ru/a/", Terms: industryTerm()}},
 	}}, store); err != nil {
 		t.Fatal(err)
@@ -87,35 +88,72 @@ func TestRunCatalogShowRequiresCollectedCatalog(t *testing.T) {
 	}
 }
 
-// Каталог услуг в схеме site собран для одной площадки, и сбор начинается с удаления всех
-// услуг. Значит команды каталога у задачи с другим сайтом обязаны отказывать: один запуск
-// стёр бы каталог соседей вместе с их подбором связанных курсов.
-func TestCatalogCommandsRefuseForForeignSite(t *testing.T) {
+// Каталог принадлежит площадке, и схема у каждой своя. Держится это одной таблицей: профиль
+// называет площадку, схему по ней выбирает composition root. Тест закрывает то, ради чего
+// таблица и заведена, — сбор начинается с `DELETE FROM <схема>.programs`, и две площадки,
+// сошедшиеся в одной схеме, стёрли бы каталог друг друга молча.
+func TestEachTaskGetsCatalogOfItsOwnSite(t *testing.T) {
+	schemas := make(map[string]string)
+	for _, profile := range taskRegistry() {
+		site, schema, err := catalogSiteFor(profile)
+		if err != nil {
+			t.Fatalf("задаче %s не выбран каталог: %v", profile.Command, err)
+		}
+		if schema == "" {
+			t.Fatalf("задаче %s досталась пустая схема каталога", profile.Command)
+		}
+		if seen, found := schemas[schema]; found && seen != site.Key() {
+			t.Fatalf("схему %s делят площадки %s и %s — сбор одной сотрёт каталог другой",
+				schema, seen, site.Key())
+		}
+		schemas[schema] = site.Key()
+	}
+}
+
+// Задача второй площадки получает свой каталог, а не общий: именно этого отказывал прежний
+// признак WithoutSiteCatalog, и именно это теперь обязано выполняться, когда он снят.
+func TestForeignSiteTaskGetsOwnCatalogSchema(t *testing.T) {
 	foreign, err := lookupTask(obuch1.Command)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !foreign.WithoutSiteCatalog {
-		t.Fatal("у задачи с другой площадкой снят признак WithoutSiteCatalog")
+	site, schema, err := catalogSiteFor(foreign)
+	if err != nil {
+		t.Fatal(err)
 	}
-	err = ensureOwnSiteCatalog(foreign)
-	if err == nil {
-		t.Fatal("команда каталога разрешена задаче с другой площадкой")
+	if site.Key() != catalog.SiteObuchim {
+		t.Fatalf("площадка задачи %s = %q", foreign.Command, site.Key())
 	}
-	if !strings.Contains(err.Error(), foreign.Command) {
-		t.Fatalf("отказ не называет задачу: %v", err)
+	if schema == "site" {
+		t.Fatal("задача второй площадки собирает каталог в схему первой")
 	}
 }
 
-// Задачам своей площадки команды каталога остаются доступны: нулевое значение признака —
-// прежнее поведение, и появление соседа с другим сайтом его не меняет.
-func TestCatalogCommandsStayOpenForOwnSite(t *testing.T) {
+// Задачи своей площадки остаются на прежней схеме: нулевое значение признака — прежнее
+// поведение, и появление соседа с другим сайтом его не меняет.
+func TestOwnSiteTasksStayOnDefaultCatalog(t *testing.T) {
 	for _, profile := range taskRegistry() {
-		if profile.WithoutSiteCatalog {
+		if profile.CatalogSite != "" {
 			continue
 		}
-		if err := ensureOwnSiteCatalog(profile); err != nil {
+		site, schema, err := catalogSiteFor(profile)
+		if err != nil {
 			t.Fatalf("задаче %s закрыт каталог своей площадки: %v", profile.Command, err)
 		}
+		if site.Key() != catalog.SiteDPOProf || schema != "site" {
+			t.Fatalf("задача %s съехала с прежнего каталога: %s / %s", profile.Command, site.Key(), schema)
+		}
+	}
+}
+
+// Неизвестная площадка останавливает команду, а не берёт умолчание: молчаливый откат к
+// схеме site означал бы, что программы нового сайта легли поверх старого.
+func TestUnknownCatalogSiteRefused(t *testing.T) {
+	_, _, err := catalogSiteFor(tasks.Profile{Command: "new-1", CatalogSite: "unknown"})
+	if err == nil {
+		t.Fatal("неизвестная площадка каталога принята")
+	}
+	if !strings.Contains(err.Error(), "new-1") {
+		t.Fatalf("отказ не называет задачу: %v", err)
 	}
 }

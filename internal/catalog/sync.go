@@ -48,28 +48,25 @@ type Stats struct {
 	SkippedNoIndustry []string
 }
 
-// industryTaxonomy — таксономия рубрик у типа записи.
+// Sync собирает каталог площадки из источника и заменяет им сохранённый.
 //
-// Правило площадки: у типа obuch рубрики лежат в obuch-cat, у perepod — в perepod-cat, и
-// так у всех шести. Проверено по картам сайта: обратных примеров нет.
-func industryTaxonomy(postType string) string {
-	return postType + "-cat"
-}
-
-// Sync собирает каталог из источника и заменяет им сохранённый.
+// Площадка приходит параметром, а не берётся из пакетной переменной: сайтов у проекта два,
+// и типы услуг, имя таксономии рубрик и способ определить профессию у них разные. Хранилище
+// при этом обязано быть хранилищем той же площадки — Replace начинает с удаления всех услуг,
+// и перепутанная пара стёрла бы чужой каталог. Сводит их composition root по профилю задачи.
 //
 // Записи без рубрики площадки отбрасываются: у настоящей услуги рубрика есть всегда, а без
 // неё приходят общие страницы и остатки вроде «Тестового курса». Их список возвращается —
 // пропуск обязан быть виден человеку, а не растворяться в разнице чисел.
-func Sync(ctx context.Context, source Source, store Store) (Stats, error) {
+func Sync(ctx context.Context, site Site, source Source, store Store) (Stats, error) {
 	stats := Stats{ByType: make(map[string]int)}
 	var programs []Program
-	for _, item := range programTypes {
+	for _, item := range site.types {
 		posts, err := source.ListPrograms(ctx, item.postType)
 		if err != nil {
 			return Stats{}, fmt.Errorf("прочитать услуги типа %s: %w", item.postType, err)
 		}
-		taxonomy := industryTaxonomy(item.postType)
+		taxonomy := site.taxonomy(item.postType)
 		for _, post := range posts {
 			industry, found := pickIndustry(post.Terms, taxonomy)
 			if !found {
@@ -77,10 +74,10 @@ func Sync(ctx context.Context, source Source, store Store) (Stats, error) {
 					fmt.Sprintf("%d %s", post.PostID, ShortName(post.Title)))
 				continue
 			}
-			profession := ProfessionOf(post.Title)
+			profession := site.profession(post, industry)
 			if profession.Slug == "" {
 				stats.SkippedNoIndustry = append(stats.SkippedNoIndustry,
-					fmt.Sprintf("%d %s (название не разобрано)", post.PostID, post.Title))
+					fmt.Sprintf("%d %s (профессия не определена)", post.PostID, post.Title))
 				continue
 			}
 			programs = append(programs, Program{

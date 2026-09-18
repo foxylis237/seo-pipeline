@@ -251,3 +251,60 @@ func transliterate(word string) string {
 	}
 	return strings.Trim(builder.String(), "-")
 }
+
+// industrySeparator — что разделяет две профессии в имени рубрики площадки: «Слесарь и
+// наладчик», «Кузнец и литейщик». Пробелы вокруг «и» обязательны — иначе разрез попал бы
+// внутрь слова.
+var industrySeparator = regexp.MustCompile(`\s+и\s+|\s*[,/]\s*`)
+
+// ProfessionFromIndustry берёт профессию прямо из рубрики площадки.
+//
+// Так устроена вторая площадка проекта: её собственные рубрики уже дробные — 184 термина на
+// 1528 услуг, медиана четыре программы на рубрику, — и выводить профессию из названия услуги
+// там не нужно и вредно. Измерено: ProfessionOf на тех же названиях даёт 953 группы, 820 из
+// которых состоят из одной услуги.
+//
+// Слаг берётся у термина как есть: он уже латинский («apparatchik-avtoklavhiki»), и своя
+// транслитерация разошлась бы с тем, что человек видит на сайте. Имя — тоже, оно написано
+// людьми и читается в отчёте.
+//
+// Пустая рубрика даёт пустую профессию: такая услуга в подбор не попадает, как и услуга с
+// неразобранным названием у соседа.
+func ProfessionFromIndustry(industry Industry) Profession {
+	slug := strings.TrimSpace(industry.Slug)
+	name := strings.TrimSpace(html.UnescapeString(industry.Name))
+	if slug == "" || name == "" {
+		return Profession{}
+	}
+	return Profession{Slug: slug, Name: name, Aliases: industryAliases(name)}
+}
+
+// industryAliases — слова, по которым рубрика узнаётся во входных данных статьи.
+//
+// Имя рубрики называет одну профессию («Повар») или две через «и» («Слесарь и наладчик»);
+// каждая даёт свой синоним, иначе половина рубрики осталась бы ненайденной. Форма синонима
+// та же, что у MatchKeys, — основы значимых слов через пробел, — потому что сравниваются
+// они друг с другом напрямую.
+func industryAliases(name string) []string {
+	var aliases []string
+	seen := make(map[string]struct{})
+	for _, part := range industrySeparator.Split(name, -1) {
+		words := significantWords(part)
+		stems := make([]string, 0, len(words))
+		for _, word := range words {
+			if stem := Stem(word); stem != "" {
+				stems = append(stems, stem)
+			}
+		}
+		if len(stems) == 0 {
+			continue
+		}
+		alias := strings.Join(stems, " ")
+		if _, found := seen[alias]; found {
+			continue
+		}
+		seen[alias] = struct{}{}
+		aliases = append(aliases, alias)
+	}
+	return aliases
+}

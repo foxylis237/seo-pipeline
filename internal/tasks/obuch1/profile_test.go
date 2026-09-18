@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/foxylis237/seo-pipeline/internal/catalog"
 	"github.com/foxylis237/seo-pipeline/internal/config"
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/repository"
 	"github.com/foxylis237/seo-pipeline/internal/tasks/pprof1"
@@ -167,11 +168,11 @@ func TestProfileDeclaresForeignSite(t *testing.T) {
 	if profile.CommercialPages {
 		t.Fatal("выставлен CommercialPages: задача пишет статьи блога, а не страницы услуг")
 	}
-	if !profile.WithoutSiteCatalog {
-		t.Fatal("снят WithoutSiteCatalog: catalog-sync сотрёт каталог соседней площадки")
+	if profile.CatalogSite != catalog.SiteObuchim {
+		t.Fatalf("площадка каталога %q: catalog-sync соберёт услуги не того сайта", profile.CatalogSite)
 	}
 	if profile.RelatedCourses {
-		t.Fatal("включены RelatedCourses: каталог описывает другую площадку, под статьёй встанут чужие программы")
+		t.Fatal("включены RelatedCourses: блока связанных курсов под статьёй площадки нет вовсе")
 	}
 	// Метаданные остаются: стадия info у задачи есть и пишет TL;DR с FAQ в result.md.
 	// Признаки сняли бы требование метаданных с раннера, и сорванный чат 2 прошёл бы молча.

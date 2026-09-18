@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/foxylis237/seo-pipeline/internal/catalog"
 	"github.com/foxylis237/seo-pipeline/internal/integrations/wordpress"
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/article"
@@ -18,37 +20,59 @@ import (
 
 // Каталог услуг площадки: сбор и просмотр.
 //
-// Операции объявлены у задачи, а данные лежат в общей схеме site — и это не противоречие.
-// Площадка одна на все задачи, но доступ к ней у каждой свой (PPROF_1_WORDPRESS_*), и
-// собрать каталог можно только чьими-то учётными данными. Чьими именно — неважно: каталог
-// от этого не меняется, потому что читаются публичные страницы услуг.
+// Операции объявлены у задачи, а данные лежат в схеме площадки — и это не противоречие.
+// Каталог принадлежит сайту, а не задаче: доступ к сайту у каждой задачи свой
+// (PPROF_1_WORDPRESS_*, OBUCH_1_WORDPRESS_*), но каталог от этого не меняется, потому что
+// читаются публичные страницы услуг.
 //
-// «Площадка одна» перестало быть правдой с появлением задачи на другом сайте, и отсюда
-// ensureOwnSiteCatalog.
+// Площадок у проекта две, и у каждой свой каталог в своей схеме. Пару «описание площадки —
+// схема» сводит catalogSiteFor, и только он: схема начинает сбор с удаления всех услуг, и
+// перепутанная пара стёрла бы чужой каталог.
 const (
 	catalogSyncOperation = "catalog-sync"
 	catalogShowOperation = "catalog-show"
 )
 
-// ensureOwnSiteCatalog запрещает команды каталога задаче с другой площадкой.
+// catalogSites — площадки проекта и схемы их каталогов.
 //
-// Схема site рассчитана на один сайт: признака площадки в её таблицах нет, а
-// catalog.PostgresStore.Sync начинается с `DELETE FROM site.programs`. Значит `catalog-sync`
-// задачи, работающей с другим сайтом, стёр бы собранный каталог и записал на его место чужие
-// программы — а сломалось бы это не у неё, а у соседей: подбор связанных курсов молча начал бы
-// ставить под статьи dpoprof программы другого сайта.
+// Таблица одна на приложение, и другого места, где схема каталога называется, нет. Профиль
+// задачи называет только площадку: пара сводится здесь, поэтому «сайт obuchim со схемой
+// site» невыразим — а именно он стёр бы каталог dpoprof вместе с подбором курсов у соседей.
+var catalogSites = map[string]struct {
+	site   catalog.Site
+	schema string
+}{
+	catalog.SiteDPOProf: {site: catalog.DPOProf(), schema: "site"},
+	catalog.SiteObuchim: {site: catalog.Obuchim(), schema: "site_obuchim"},
+}
+
+// catalogSiteFor отвечает, чей каталог читает задача и где он лежит.
 //
-// Отказ стоит здесь, в composition root, и по признаку профиля, а не по имени задачи: движок
-// про площадки не знает, а список задач известен ровно тут.
-func ensureOwnSiteCatalog(profile tasks.Profile) error {
-	if !profile.WithoutSiteCatalog {
-		return nil
+// Пустая площадка профиля — прежнее поведение (dpoprof, схема site): так остаются все задачи
+// первой площадки, включая те, что каталогом не пользуются. Неизвестная останавливает
+// команду: молча взять умолчание значило бы записать программы нового сайта поверх старого.
+func catalogSiteFor(profile tasks.Profile) (catalog.Site, string, error) {
+	key := strings.TrimSpace(profile.CatalogSite)
+	if key == "" {
+		key = catalog.SiteDPOProf
 	}
-	return fmt.Errorf(
-		"каталог услуг в схеме site собран для другой площадки, а задача %s работает со своей: "+
-			"команды каталога ей недоступны, иначе сбор стёр бы чужой каталог. "+
-			"Понадобится свой — заводится отдельной схемой, а не пересбором общей",
-		profile.Command)
+	known, found := catalogSites[key]
+	if !found {
+		return catalog.Site{}, "", fmt.Errorf(
+			"задача %s объявила площадку каталога %q, а такой у проекта нет: "+
+				"каталог новой площадки заводится своей схемой и строкой в catalogSites, "+
+				"а не пересбором чужой", profile.Command, key)
+	}
+	return known.site, known.schema, nil
+}
+
+// catalogStoreFor открывает каталог той площадки, с которой работает задача.
+func catalogStoreFor(profile tasks.Profile, pool *pgxpool.Pool) (*catalog.PostgresStore, error) {
+	_, schema, err := catalogSiteFor(profile)
+	if err != nil {
+		return nil, err
+	}
+	return catalog.NewPostgresStore(pool, schema)
 }
 
 // catalogSource — клиент WordPress в роли источника каталога.
@@ -147,16 +171,45 @@ func (c *catalogCourses) RelatedCourses(
 	return courses, nil
 }
 
+// HasProgram отвечает потоку obuch_1: есть ли такая страница программы в каталоге площадки.
+//
+// Тот же прочитанный один раз каталог, что и у подбора: спрашивают его на статью один раз, и
+// второго запроса в базу за этим не стоит. Пустой каталог — ошибка, а не «нет такой
+// программы»: поток обязан отличать несобранный каталог от выдуманного моделью адреса.
+func (c *catalogCourses) HasProgram(ctx context.Context, url string) (bool, error) {
+	programs, err := c.load(ctx)
+	if err != nil {
+		return false, err
+	}
+	wanted := normalizedProgramURL(url)
+	if wanted == "" {
+		return false, nil
+	}
+	for _, program := range programs {
+		if normalizedProgramURL(program.URL) == wanted {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// normalizedProgramURL приводит адрес к виду, в котором два написания одной страницы
+// совпадают: завершающий слеш площадка ставит сама, а модель его роняет.
+func normalizedProgramURL(url string) string {
+	return strings.TrimSuffix(strings.ToLower(strings.TrimSpace(url)), "/")
+}
+
 // runCatalogSync собирает каталог заново.
 //
 // Команда читающая для площадки и переписывающая для нашей базы: в блог она не пишет ничего,
 // а таблицу услуг заменяет целиком. Занимает около двух десятков запросов — по восемь
 // страниц на самый крупный тип и по одной на самый мелкий.
 func runCatalogSync(
-	ctx context.Context, source catalog.Source, store catalog.Store, logger *slog.Logger, out io.Writer,
+	ctx context.Context, site catalog.Site, source catalog.Source, store catalog.Store,
+	logger *slog.Logger, out io.Writer,
 ) error {
-	logger.Info("сбор каталога услуг начат", "stage", "catalog_sync")
-	stats, err := catalog.Sync(ctx, source, store)
+	logger.Info("сбор каталога услуг начат", "stage", "catalog_sync", "site", site.Key())
+	stats, err := catalog.Sync(ctx, site, source, store)
 	if err != nil {
 		return err
 	}
@@ -178,7 +231,7 @@ func runCatalogSync(
 			fmt.Fprintf(out, "  %s\n", skipped)
 		}
 	}
-	logger.Info("сбор каталога услуг завершён", "stage", "catalog_sync",
+	logger.Info("сбор каталога услуг завершён", "stage", "catalog_sync", "site", site.Key(),
 		"programs", stats.Programs, "professions", stats.Professions,
 		"skipped", len(stats.SkippedNoIndustry))
 	return nil

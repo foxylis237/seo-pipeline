@@ -219,9 +219,18 @@ func main() {
 	// Связанные курсы под статьёй. Признак — из профиля: у task_1, pprof_2 и задач правки
 	// такого блока нет, и каталог им не нужен вовсе. Один и тот же подборщик уходит и в лист,
 	// и в публикацию: в result.md человек смотрит затем, чтобы увидеть, что уйдёт в блог.
+	catalogStore, storeErr := catalogStoreFor(profile, pool)
+	if storeErr != nil {
+		taskLogger.Error("каталог услуг задачи не открыт", "error", storeErr)
+		os.Exit(1)
+	}
+	// Каталог читается лениво и стоит нисколько, пока о нём не спросили, поэтому строится он
+	// всем задачам: кроме блока связанных курсов по нему сверяется адрес кнопки призыва у
+	// obuch_1. А вот в сборку result.md и в публикацию он уходит только по признаку профиля.
+	siteCatalog := newCatalogCourses(catalogStore)
 	var relatedCourses *catalogCourses
 	if profile.RelatedCourses {
-		relatedCourses = newCatalogCourses(catalog.NewPostgresStore(pool))
+		relatedCourses = siteCatalog
 		resultService.UseCourseSelector(relatedCourses)
 	}
 	// Корни диагностики разводятся по задачам здесь, один раз: сами интеграции о задачах не
@@ -311,26 +320,31 @@ func main() {
 		}, command.Name, command.ExternalID, command.WordPressPostID, command.Plan)
 
 	// Каталог услуг: сбор с площадки и просмотр подбора. Ни LLM, ни Keys.so, ни Arsenkin;
-	// в блог не пишется ничего — сбор только читает записи, а результат ложится в общую
-	// схему site, не в схему задачи.
+	// в блог не пишется ничего — сбор только читает записи, а результат ложится в схему
+	// каталога своей площадки, не в схему задачи.
 	case catalogSyncOperation:
-		if err = ensureOwnSiteCatalog(profile); err == nil {
-			var client *wordpress.Client
-			if client, err = newWordPressClient(cfg.WordPress); err == nil {
-				err = runCatalogSync(ctx, catalogSource{client: client}, catalog.NewPostgresStore(pool),
-					taskLogger, os.Stdout)
+		var catalogSite catalog.Site
+		var catalogStore *catalog.PostgresStore
+		if catalogSite, _, err = catalogSiteFor(profile); err == nil {
+			if catalogStore, err = catalogStoreFor(profile, pool); err == nil {
+				var client *wordpress.Client
+				if client, err = newWordPressClient(cfg.WordPress); err == nil {
+					err = runCatalogSync(ctx, catalogSite, catalogSource{client: client}, catalogStore,
+						taskLogger, os.Stdout)
+				}
 			}
 		}
 
 	case catalogShowOperation:
 		var saved article.Article
-		if err = ensureOwnSiteCatalog(profile); err != nil {
+		var catalogStore *catalog.PostgresStore
+		if catalogStore, err = catalogStoreFor(profile, pool); err != nil {
 			break
 		}
 		if saved, err = articleRepository.GetArticleByExternalID(ctx, command.ExternalID); err == nil {
 			var input article.Input
 			if input, err = articleRepository.GetArticleInput(ctx, saved.ID); err == nil {
-				err = runCatalogShow(ctx, catalog.NewPostgresStore(pool), catalog.Request{
+				err = runCatalogShow(ctx, catalogStore, catalog.Request{
 					Professions: input.Professions,
 					// Тема — ключевой запрос и заголовок статьи вместе: по запросу видно
 					// профессию, по заголовку — о чём именно статья внутри неё.
@@ -457,6 +471,7 @@ func main() {
 			router:     mode.routers[schemeDeepSeek],
 			logger:     taskLogger,
 			publisher:  promptPublisher,
+			programs:   siteCatalog,
 		}); err != nil {
 			break
 		}

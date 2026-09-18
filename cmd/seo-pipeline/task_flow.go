@@ -36,6 +36,10 @@ type taskFlowDeps struct {
 	router     *llm.Router
 	logger     *slog.Logger
 	publisher  *googlePublisher
+	// programs — каталог услуг площадки задачи. Нужен пока одному потоку (obuch_1 сверяет по
+	// нему адрес кнопки призыва), читается лениво, и задаче без собранного каталога ничего не
+	// стоит: List зовётся только тогда, когда о каталоге спросили.
+	programs *catalogCourses
 }
 
 // newTaskFlow собирает поток задачи. nil без ошибки означает «у задачи своего потока нет» —

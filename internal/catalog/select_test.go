@@ -6,7 +6,7 @@ import (
 )
 
 func program(id int64, postType, title string) Program {
-	category, priority, _ := describeType(postType)
+	category, priority, _ := DPOProf().describe(postType)
 	return Program{
 		PostID: id, PostType: postType, Category: category, Priority: priority,
 		Slug: "slug", URL: "https://dpoprof.ru/x", Title: title, Name: ShortName(title),
