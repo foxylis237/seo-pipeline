@@ -125,6 +125,7 @@ const auditTemplate = `# Аудит: {{.Score}}
 Тема: {{.Topic}}
 Запись: {{.PostID}} ({{.PostType}})
 Обязательные поля: {{.RequiredFields}}
+Внутренних ссылок: {{.InternalLinks}}
 
 ## Критические ошибки
 {{.Critical}}
@@ -137,7 +138,7 @@ const auditTemplate = `# Аудит: {{.Score}}
 `
 
 func newTestFlow(t *testing.T, articles Articles, blog Blog, chats taskflow.ChatFactory,
-	required []string) (*Flow, string) {
+	required []string, minLinks int) (*Flow, string) {
 	t.Helper()
 	root := t.TempDir()
 	promptPath := filepath.Join(root, "audit.txt")
@@ -149,7 +150,8 @@ func newTestFlow(t *testing.T, articles Articles, blog Blog, chats taskflow.Chat
 	if err := os.WriteFile(templatePath, []byte(auditTemplate), 0o644); err != nil {
 		t.Fatalf("подготовить шаблон: %v", err)
 	}
-	flow, err := NewFlow(articles, blog, chats, NewArtifacts(root), promptPath, templatePath, required, nil)
+	flow, err := NewFlow(articles, blog, chats, NewArtifacts(root), promptPath, templatePath,
+		Options{Required: required, MinInternalLinks: minLinks}, nil)
 	if err != nil {
 		t.Fatalf("NewFlow: %v", err)
 	}
@@ -182,7 +184,7 @@ func TestFlowAuditsPageEndToEnd(t *testing.T) {
 	blog := &fakeBlog{post: testPost()}
 	chat := &fakeChat{answers: []string{fullAnswer}}
 	chats := &fakeChats{chat: chat}
-	flow, root := newTestFlow(t, articles, blog, chats, []string{"prof_name", "docs_title", "price_now"})
+	flow, root := newTestFlow(t, articles, blog, chats, []string{"prof_name", "docs_title", "price_now"}, 0)
 
 	if err := flow.Run(context.Background(), "2"); err != nil {
 		t.Fatalf("Run: %v", err)
@@ -260,7 +262,7 @@ func TestFlowAuditsPageEndToEnd(t *testing.T) {
 func TestFlowNeverWritesToBlog(t *testing.T) {
 	articles := &fakeArticles{article: testArticle()}
 	blog := &fakeBlog{post: testPost()}
-	flow, _ := newTestFlow(t, articles, blog, &fakeChats{chat: &fakeChat{answers: []string{fullAnswer}}}, nil)
+	flow, _ := newTestFlow(t, articles, blog, &fakeChats{chat: &fakeChat{answers: []string{fullAnswer}}}, nil, 0)
 
 	if err := flow.Run(context.Background(), "2"); err != nil {
 		t.Fatalf("Run: %v", err)
@@ -279,7 +281,7 @@ func TestFlowSkipsSearchWhenPostIDKnown(t *testing.T) {
 	article.PostID = 22314
 	articles := &fakeArticles{article: article}
 	blog := &fakeBlog{post: testPost()}
-	flow, _ := newTestFlow(t, articles, blog, &fakeChats{chat: &fakeChat{answers: []string{fullAnswer}}}, nil)
+	flow, _ := newTestFlow(t, articles, blog, &fakeChats{chat: &fakeChat{answers: []string{fullAnswer}}}, nil, 0)
 
 	if err := flow.Run(context.Background(), "2"); err != nil {
 		t.Fatalf("Run: %v", err)
@@ -298,7 +300,7 @@ func TestFlowSkipsSearchWhenPostIDKnown(t *testing.T) {
 func TestFlowFindsBySlugWithoutPostID(t *testing.T) {
 	articles := &fakeArticles{article: testArticle()}
 	blog := &fakeBlog{post: testPost(), found: Post{ID: 22314, Link: "https://dpoprof.ru/obuchenie-medpersonala/logoped/"}}
-	flow, _ := newTestFlow(t, articles, blog, &fakeChats{chat: &fakeChat{answers: []string{fullAnswer}}}, nil)
+	flow, _ := newTestFlow(t, articles, blog, &fakeChats{chat: &fakeChat{answers: []string{fullAnswer}}}, nil, 0)
 
 	if err := flow.Run(context.Background(), "2"); err != nil {
 		t.Fatalf("Run: %v", err)
@@ -318,7 +320,7 @@ func TestFlowRejectsPostIDPointingElsewhere(t *testing.T) {
 	other.ID, other.Slug = 22315, "sanitar"
 	blog := &fakeBlog{post: other}
 	chat := &fakeChat{answers: []string{fullAnswer}}
-	flow, _ := newTestFlow(t, articles, blog, &fakeChats{chat: chat}, nil)
+	flow, _ := newTestFlow(t, articles, blog, &fakeChats{chat: chat}, nil, 0)
 
 	err := flow.Run(context.Background(), "2")
 	if err == nil {
@@ -345,7 +347,7 @@ func TestFlowSkipsAuditedPage(t *testing.T) {
 	articles := &fakeArticles{article: article}
 	blog := &fakeBlog{post: testPost()}
 	chat := &fakeChat{answers: []string{fullAnswer}}
-	flow, _ := newTestFlow(t, articles, blog, &fakeChats{chat: chat}, nil)
+	flow, _ := newTestFlow(t, articles, blog, &fakeChats{chat: chat}, nil, 0)
 
 	if err := flow.Run(context.Background(), "2"); err != nil {
 		t.Fatalf("Run: %v", err)
@@ -362,7 +364,7 @@ func TestFlowRendersReportWithEmptySections(t *testing.T) {
 	articles := &fakeArticles{article: testArticle()}
 	blog := &fakeBlog{post: testPost()}
 	chats := &fakeChats{chat: &fakeChat{answers: []string{"Страница хорошая, замечаний у меня нет."}}}
-	flow, root := newTestFlow(t, articles, blog, chats, nil)
+	flow, root := newTestFlow(t, articles, blog, chats, nil, 0)
 
 	if err := flow.Run(context.Background(), "2"); err != nil {
 		t.Fatalf("Run: %v", err)
@@ -394,7 +396,7 @@ func TestFlowRendersReportWithEmptySections(t *testing.T) {
 func TestFlowFailsOnEmptyAnswer(t *testing.T) {
 	articles := &fakeArticles{article: testArticle()}
 	blog := &fakeBlog{post: testPost()}
-	flow, root := newTestFlow(t, articles, blog, &fakeChats{chat: &fakeChat{answers: []string{"   "}}}, nil)
+	flow, root := newTestFlow(t, articles, blog, &fakeChats{chat: &fakeChat{answers: []string{"   "}}}, nil, 0)
 
 	err := flow.Run(context.Background(), "2")
 	if !errors.Is(err, ErrEmptyAnswer) {
@@ -416,7 +418,7 @@ func TestFlowFailsOnEmptyBody(t *testing.T) {
 	post.ContentHTML = "   "
 	blog := &fakeBlog{post: post, found: Post{ID: 22314}}
 	chat := &fakeChat{answers: []string{fullAnswer}}
-	flow, _ := newTestFlow(t, articles, blog, &fakeChats{chat: chat}, nil)
+	flow, _ := newTestFlow(t, articles, blog, &fakeChats{chat: chat}, nil, 0)
 
 	if err := flow.Run(context.Background(), "2"); err == nil {
 		t.Fatal("пустая запись проверена")
@@ -433,7 +435,7 @@ func TestPlanReadsWithoutModel(t *testing.T) {
 	articles := &fakeArticles{article: article}
 	blog := &fakeBlog{post: testPost()}
 	chat := &fakeChat{answers: []string{fullAnswer}}
-	flow, root := newTestFlow(t, articles, blog, &fakeChats{chat: chat}, []string{"prof_name", "docs_title"})
+	flow, root := newTestFlow(t, articles, blog, &fakeChats{chat: chat}, []string{"prof_name", "docs_title"}, 0)
 
 	planned, err := flow.Plan(context.Background(), article)
 	if err != nil {
@@ -480,7 +482,7 @@ func TestFlowReportsOverlongSEOFields(t *testing.T) {
 	post.Fields[SEOMetaDescriptionField] = strings.Repeat("а", SEOMetaDescriptionLimit+40)
 	articles := &fakeArticles{article: testArticle()}
 	blog := &fakeBlog{post: post}
-	flow, root := newTestFlow(t, articles, blog, &fakeChats{chat: &fakeChat{answers: []string{fullAnswer}}}, nil)
+	flow, root := newTestFlow(t, articles, blog, &fakeChats{chat: &fakeChat{answers: []string{fullAnswer}}}, nil, 0)
 
 	if err := flow.Run(context.Background(), "2"); err != nil {
 		t.Fatalf("Run: %v", err)
@@ -506,7 +508,7 @@ func TestFlowKeepsQuietOnFittingSEOFields(t *testing.T) {
 	post.Fields[SEOMetaDescriptionField] = "Дистанционный курс логопеда с практикой и внесением в ФИС ФРДО."
 	articles := &fakeArticles{article: testArticle()}
 	blog := &fakeBlog{post: post}
-	flow, root := newTestFlow(t, articles, blog, &fakeChats{chat: &fakeChat{answers: []string{fullAnswer}}}, nil)
+	flow, root := newTestFlow(t, articles, blog, &fakeChats{chat: &fakeChat{answers: []string{fullAnswer}}}, nil, 0)
 
 	if err := flow.Run(context.Background(), "2"); err != nil {
 		t.Fatalf("Run: %v", err)

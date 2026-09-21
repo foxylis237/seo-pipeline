@@ -36,10 +36,50 @@ const (
 
 // RequiredFields — поля записи, которые обязаны быть заполнены.
 //
-// Пусто намеренно: набор называет человек, а вывести его из живой записи нельзя — пустое поле
-// бывает законным. Пустой список означает «проверка заполненности выключена», и это рабочее
-// состояние задачи, а не недоделка.
-var RequiredFields []string
+// Набор называет человек, а не эвристика по данным: пустое поле бывает законным, и вывести
+// список из живой записи нельзя. Здесь он закрытый — одиннадцать граф, которые у статьи блога
+// заполняются всегда; всё остальное (prof_blue, метрики Yoast, шаблонные заглушки темы) не
+// проверяется намеренно, его пустота ни о чём не говорит.
+//
+// Рубрика, метки и название записи полями не являются — они живут в самой записи, — но для
+// человека это такие же графы админки, и разводить их по двум спискам незачем.
+var RequiredFields = []string{
+	articleaudit.RecordCategory,
+	articleaudit.RecordTags,
+	articleaudit.RecordTitle,
+	"prof_title",
+	"prof_name",
+	"blog_tldr",
+	"blog_read",
+	"author_link",
+	"related_courses",
+	"_yoast_wpseo_focuskw",
+	articleaudit.SEOTitleField,
+	articleaudit.SEOMetaDescriptionField,
+}
+
+// MinFAQ — сколько вопросов обязано быть в блоке частых вопросов.
+//
+// Шесть: столько их у статей, написанных стадией info, и блок под статьёй тема рисует из
+// этих же полей — неполный виден читателю сразу. Считаются заполненные вопросы, а не
+// счётчик blog_faq: счётчик пишет админка, и он переживает вычищенный вопрос.
+const MinFAQ = 6
+
+// Имена полей блока вопросов у статьи блога.
+//
+// У страницы услуги они другие (репитер faq_loop), и различие это не косметическое: ошибись
+// здесь — и проверка молча объявит блок пустым там, где он заполнен.
+const (
+	FAQQuestionField = "blog_faq_%d_question"
+	FAQAnswerField   = "blog_faq_%d_answer"
+)
+
+// MinInternalLinks — сколько внутренних ссылок обязано быть в теле статьи.
+//
+// Три — та же норма, по которой перелинковку ставит генерация (pprof_1, obuch_1): статья,
+// написанная с тремя ссылками на программы, и проверяться должна по ним же. Считает их код,
+// а не модель: число ссылок — факт, и второго мнения о нём не бывает.
+const MinInternalLinks = 3
 
 // Profile возвращает конфигурацию pprof_audit_1.
 func Profile() tasks.Profile {
@@ -63,8 +103,12 @@ func Profile() tasks.Profile {
 		// Непустое поле и есть признак задачи аудита: по нему composition root уводит её на
 		// поток articleaudit, минуя таблицы и проверки движка генерации.
 		ArticleAudit: &tasks.ArticleAudit{
-			AuditPromptPath: AuditPromptPath,
-			RequiredFields:  RequiredFields,
+			AuditPromptPath:  AuditPromptPath,
+			RequiredFields:   RequiredFields,
+			MinInternalLinks: MinInternalLinks,
+			MinFAQ:           MinFAQ,
+			FAQQuestionField: FAQQuestionField,
+			FAQAnswerField:   FAQAnswerField,
 		},
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -37,7 +38,14 @@ type SummaryPage struct {
 	ScoreMax   *int
 	Findings   int
 	Missing    []string
-	FAQ        int
+	FAQ        FAQCheck
+	// Links — перелинковка страницы, пересчитанная по сохранённой копии тела.
+	Links LinkCheck
+	// Advice — строки «Как исправить» из критических ошибок отчёта.
+	//
+	// Берутся как есть, без переписывания: это единственное место, где сказано, что делать
+	// с конкретной страницей, а всякое «приведение к виду» портит готовую фразу.
+	Advice []string
 	// RecordGaps — сколько не хватало из того, что сводка пересчитать не может: рубрики,
 	// названия записи, обложки. Считал их прогон, и число взято из его отметки в базе.
 	RecordGaps int
@@ -62,7 +70,7 @@ type IssueCount struct {
 // original/fields.json, ответ модели в generated/audit.txt. Поэтому сводку можно пересобирать
 // сколько угодно раз, в том числе после того, как список обязательного изменили: она
 // пересчитает его по сохранённым полям, а не по тому, что было на момент прогона.
-func BuildSummary(articles []Article, artifacts Artifacts, required []string) Summary {
+func BuildSummary(articles []Article, artifacts Artifacts, options Options) Summary {
 	var summary Summary
 	issues := map[string]*IssueCount{}
 	gaps := map[string]*FieldGap{}
@@ -85,25 +93,19 @@ func BuildSummary(articles []Article, artifacts Artifacts, required []string) Su
 			}
 			continue
 		}
-		if fields, err := readFields(artifacts, article.FieldsPath); err == nil {
-			check := CheckRequired(Post{Fields: fields}, fieldNames(required))
-			page.Missing = append(append([]string{}, check.Missing...), check.Empty...)
-			page.FAQ = CountFAQ(fields)
-			// Прогон считал и рубрику с обложкой, которых в артефактах нет. Расхождение
-			// означает, что не хватало как раз их, — и промолчать об этом нельзя.
-			if article.MissingFields > len(page.Missing) {
-				page.RecordGaps = article.MissingFields - len(page.Missing)
+		fillFromArtifacts(&page, artifacts, article, options)
+		for _, name := range page.Missing {
+			gap, known := gaps[name]
+			if !known {
+				gap = &FieldGap{Field: name}
+				gaps[name] = gap
 			}
-			for _, name := range page.Missing {
-				gap, known := gaps[name]
-				if !known {
-					gap = &FieldGap{Field: name}
-					gaps[name] = gap
-				}
-				gap.Pages = append(gap.Pages, article.ExternalID)
-			}
+			gap.Pages = append(gap.Pages, article.ExternalID)
 		}
-		countIssues(issues, artifacts, article)
+		if parsed, ok := readAnswer(artifacts, article); ok {
+			countIssues(issues, parsed, article)
+			page.Advice = adviceOf(parsed)
+		}
 		summary.Pages = append(summary.Pages, page)
 	}
 
@@ -137,6 +139,28 @@ func BuildSummary(articles []Article, artifacts Artifacts, required []string) Su
 	return summary
 }
 
+// fillFromArtifacts дополняет страницу тем, что лежит на диске после прогона: поля записи,
+// блок вопросов и перелинковка.
+//
+// Читается с диска, а не из блога: за прогон уже заплачено, копия страницы и её полей
+// сохранена рядом, и сводку можно пересобирать сколько угодно. Нечитаемый артефакт —
+// не отказ: страница останется без этой части, а остальное у неё есть.
+func fillFromArtifacts(page *SummaryPage, artifacts Artifacts, article Article, options Options) {
+	if fields, err := readFields(artifacts, article.FieldsPath); err == nil {
+		check := CheckRequired(Post{Fields: fields}, fieldNames(options.Required))
+		page.Missing = append(append([]string{}, check.Missing...), check.Empty...)
+		page.FAQ = CountFAQ(fields, options.FAQ)
+		// Прогон считал и графы самой записи, которых в артефактах нет. Расхождение означает,
+		// что не хватало как раз их, — и промолчать об этом нельзя.
+		if article.MissingFields > len(page.Missing) {
+			page.RecordGaps = article.MissingFields - len(page.Missing)
+		}
+	}
+	if body, err := artifacts.Read(article.OriginalPath); err == nil {
+		page.Links = CollectInternalLinks(body, article.SourceURL, options.MinInternalLinks)
+	}
+}
+
 // titleOf — как назвать страницу в сводке. Тема из книги точнее слага, но её может не быть.
 func titleOf(article Article) string {
 	if topic := strings.TrimSpace(article.Topic); topic != "" {
@@ -147,14 +171,14 @@ func titleOf(article Article) string {
 
 // fieldNames отбирает из списка обязательного то, что лежит полями записи.
 //
-// Рубрику, название и обложку сводка пересчитать не может: в артефактах сохранены поля, а эти
-// три живут в самой записи, и после прогона их на диске нет. Их проверил сам прогон, и его
-// счёт лежит в базе — если он больше пересчитанного, значит не хватало чего-то из этих трёх.
+// Рубрику, метки, название и обложку сводка пересчитать не может: в артефактах сохранены поля,
+// а эти четыре живут в самой записи, и после прогона их на диске нет. Их проверил сам прогон, и
+// его счёт лежит в базе — если он больше пересчитанного, значит не хватало чего-то из них.
 func fieldNames(required []string) []string {
 	names := make([]string, 0, len(required))
 	for _, name := range required {
 		switch name {
-		case RecordCategory, RecordTitle, RecordThumbnail:
+		case RecordCategory, RecordTags, RecordTitle, RecordThumbnail:
 			continue
 		}
 		names = append(names, name)
@@ -186,15 +210,7 @@ func readFields(artifacts Artifacts, path string) (map[string]string, error) {
 }
 
 // countIssues складывает находки страницы в общий счёт.
-func countIssues(counted map[string]*IssueCount, artifacts Artifacts, article Article) {
-	answer, err := artifacts.Read(article.AuditPath)
-	if err != nil {
-		return
-	}
-	parsed, err := ParseAnswer(answer)
-	if err != nil {
-		return
-	}
+func countIssues(counted map[string]*IssueCount, parsed Answer, article Article) {
 	seen := map[string]struct{}{}
 	for _, section := range []string{SectionIssues, SectionCritical} {
 		for _, line := range strings.Split(parsed.Section(section), "\n") {
@@ -214,6 +230,38 @@ func countIssues(counted map[string]*IssueCount, artifacts Artifacts, article Ar
 			issue.Pages = append(issue.Pages, article.ExternalID)
 		}
 	}
+}
+
+// readAnswer читает сохранённый ответ модели и разбирает его. Отказ — не беда сводки:
+// страница просто не даст ни частых ошибок, ни советов, а остальное у неё есть.
+func readAnswer(artifacts Artifacts, article Article) (Answer, bool) {
+	answer, err := artifacts.Read(article.AuditPath)
+	if err != nil {
+		return Answer{}, false
+	}
+	parsed, err := ParseAnswer(answer)
+	if err != nil {
+		return Answer{}, false
+	}
+	return parsed, true
+}
+
+// adviceOf вынимает из критических ошибок строки «Как исправить».
+//
+// Только они: «Ошибка» и «Почему это проблема» объясняют находку, а человеку, который сел
+// править страницу, нужно действие. Больше трёх их не бывает — столько просит промпт.
+func adviceOf(parsed Answer) []string {
+	var advice []string
+	for _, line := range strings.Split(parsed.Section(SectionCritical), "\n") {
+		text, found := strings.CutPrefix(strings.TrimSpace(line), "Как исправить:")
+		if !found {
+			continue
+		}
+		if text = strings.TrimSpace(text); text != "" {
+			advice = append(advice, text)
+		}
+	}
+	return advice
 }
 
 var issueBullet = regexp.MustCompile(`^\s*(?:[-—•*]|\d+[.)])\s*`)
@@ -299,8 +347,8 @@ func (s Summary) Render(task string) string {
 	out.WriteString("| Оценка | ID | Страница | Находок | Не заполнено | FAQ |\n")
 	out.WriteString("|---|---|---|---|---|---|\n")
 	for _, page := range s.Pages {
-		fmt.Fprintf(&out, "| %s | %s | %s | %d | %s | %d |\n",
-			scoreText(page), page.ExternalID, page.Title, page.Findings, gapsText(page), page.FAQ)
+		fmt.Fprintf(&out, "| %s | %s | %s | %d | %s | %s |\n",
+			scoreText(page), page.ExternalID, page.Title, page.Findings, gapsText(page), faqText(page))
 	}
 
 	out.WriteString("\n## Чего не хватает в записях\n\n")
@@ -349,6 +397,20 @@ func gapsText(page SummaryPage) string {
 		return "—"
 	}
 	return strings.Join(parts, ", ")
+}
+
+// faqText — колонка блока вопросов в сводке.
+//
+// Норма печатается рядом с числом, а нехватка помечается: по этой колонке человек решает,
+// дособирать ли блок, и «4» без «из 6» ему об этом не говорит.
+func faqText(page SummaryPage) string {
+	if !page.FAQ.Enabled() {
+		return strconv.Itoa(page.FAQ.Count)
+	}
+	if !page.FAQ.Enough() {
+		return fmt.Sprintf("%d из %d ❗", page.FAQ.Count, page.FAQ.Min)
+	}
+	return fmt.Sprintf("%d из %d", page.FAQ.Count, page.FAQ.Min)
 }
 
 // SummaryFile — имя сводки в корне артефактов задачи.

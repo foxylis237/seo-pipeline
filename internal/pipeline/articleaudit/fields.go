@@ -24,12 +24,17 @@ type FieldCheck struct {
 	// Measured — длина полей выдачи целиком, включая те, что в пределах. Нужна плану: он
 	// показывает запас, а не только нарушения.
 	Measured []LengthMeasure
-	// FAQ — сколько вопросов в блоке частых вопросов.
+	// FAQ — блок частых вопросов: сколько вопросов нашлось и сколько требует задача.
 	//
-	// Число, а не проверка: сколько их должно быть, никто не решал, и требовать ровно шесть
-	// значило бы объявлять ошибкой страницу с пятью хорошими вопросами. Человек смотрит на
-	// число сам и решает сам.
-	FAQ int
+	// Норму называет профиль, а не движок: у статьи блога она есть, у страницы услуги её
+	// никто не назначал. Нулевой минимум означает «считаем, но не судим» — прежнее
+	// поведение, при котором человек смотрит на число сам.
+	FAQ FAQCheck
+	// Links — перелинковка в теле страницы: сколько внутренних ссылок нашлось и сколько их
+	// требует задача. В отличие от вопросов здесь есть норма, и её называет профиль: статья
+	// блога без ссылок на программы не ведёт читателя никуда, а у страницы услуги
+	// перелинковки может не быть вовсе.
+	Links LinkCheck
 }
 
 // RequiredProblems — сколько обязательных полей не в порядке.
@@ -54,7 +59,15 @@ const (
 	RecordTitle = "post_title"
 	// RecordThumbnail — обложка записи.
 	RecordThumbnail = "post_thumbnail"
+	// RecordTags — метки записи. Отдельно от рубрики: рубрика у записи одна и обязательна
+	// у всех, метки площадка заводит по требованию, и пустой их список — своя находка.
+	RecordTags = tagTaxonomy
 )
+
+// tagTaxonomy — таксономия меток WordPress. Рубрика у каждого типа записи своя
+// («category» у статьи блога, «cat_rabprof» у услуги), а метки у всех одни и те же, поэтому
+// рубрикой считается любой термин любой другой таксономии.
+const tagTaxonomy = "post_tag"
 
 // fieldLabels переводит имя проверяемого в то, как его называет человек.
 //
@@ -64,8 +77,13 @@ var fieldLabels = map[string]string{
 	RecordCategory:          "рубрика записи",
 	RecordTitle:             "название записи",
 	RecordThumbnail:         "обложка записи",
+	RecordTags:              "метки записи",
 	"prof_title":            "видимый заголовок страницы",
 	"prof_name":             "название профессии в карточке",
+	"blog_tldr":             "краткое содержание",
+	"blog_read":             "время чтения",
+	"author_link":           "автор статьи",
+	"related_courses":       "связанные курсы",
 	"teachers":              "преподаватели",
 	"faq_loop":              "блок частых вопросов",
 	SEOTitleField:           "SEO-заголовок",
@@ -97,7 +115,11 @@ func CheckRequired(post Post, required []string) FieldCheck {
 	for _, name := range required {
 		switch name {
 		case RecordCategory:
-			if len(post.TermIDs) == 0 {
+			if !hasCategory(post.TermIDs) {
+				check.Empty = append(check.Empty, name)
+			}
+		case RecordTags:
+			if len(post.TermIDs[tagTaxonomy]) == 0 {
 				check.Empty = append(check.Empty, name)
 			}
 		case RecordTitle:
@@ -119,6 +141,20 @@ func CheckRequired(post Post, required []string) FieldCheck {
 		}
 	}
 	return check
+}
+
+// hasCategory отвечает, лежит ли запись хоть в одной рубрике.
+//
+// Рубрикой считается термин любой таксономии, кроме меток: имя таксономии у каждого типа
+// записи своё («category» у статьи блога, «cat_rabprof» у услуги), и перечислять их здесь
+// значило бы держать вторую копию списка, который живёт у каталога площадки.
+func hasCategory(terms map[string][]int64) bool {
+	for taxonomy, ids := range terms {
+		if taxonomy != tagTaxonomy && len(ids) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // Поля выдачи и их пределы.
@@ -197,21 +233,79 @@ func CheckLength(fields map[string]string) []LengthMeasure {
 	return problems
 }
 
-// faqQuestionField — поле вопроса в блоке частых вопросов: faq_loop_0_faq_question.
-var faqQuestionField = regexp.MustCompile(`^faq_loop_(\d+)_faq_question$`)
+// FAQScheme — как площадка называет поля блока частых вопросов и сколько их обязано быть.
+//
+// Имена полей разные у разных тем: у статьи блога это blog_faq_0_question, у страницы услуги —
+// faq_loop_0_faq_question. Знать об этом обязан профиль задачи, а не движок: ошибись здесь — и
+// проверка молча увидит блок пустым там, где он заполнен.
+//
+// Min — норма, и она тоже приходит из профиля. Нулевая означает «считаем, но не судим»:
+// сколько вопросов должно быть, решает человек, а не эта проверка.
+type FAQScheme struct {
+	// Question и Answer — форматы имён полей с одним %d, номером вопроса.
+	Question string
+	Answer   string
+	// Min — сколько заполненных вопросов задача считает минимумом.
+	Min int
+}
+
+// Формат полей по умолчанию — репитер ACF faq_loop, как он заведён на страницах услуг.
+// Задача, которая о схеме не знает, ведёт себя как раньше.
+const (
+	defaultFAQQuestion = "faq_loop_%d_faq_question"
+	defaultFAQAnswer   = "faq_loop_%d_faq_answer"
+)
+
+// withDefaults подставляет прежние имена полей вместо незаполненных.
+func (s FAQScheme) withDefaults() FAQScheme {
+	if strings.TrimSpace(s.Question) == "" {
+		s.Question = defaultFAQQuestion
+	}
+	if strings.TrimSpace(s.Answer) == "" {
+		s.Answer = defaultFAQAnswer
+	}
+	return s
+}
+
+// questionRE собирает из формата имени выражение, которым вопросы узнаются в полях записи.
+//
+// Формат экранируется целиком, и только %d становится числом: имена полей содержат
+// подчёркивания, а завтра могут содержать точку — регулярным выражением формат не является.
+func (s FAQScheme) questionRE() *regexp.Regexp {
+	format := s.withDefaults().Question
+	parts := strings.SplitN(format, "%d", 2)
+	if len(parts) != 2 {
+		return regexp.MustCompile(`^` + regexp.QuoteMeta(format) + `$`)
+	}
+	return regexp.MustCompile(`^` + regexp.QuoteMeta(parts[0]) + `(\d+)` + regexp.QuoteMeta(parts[1]) + `$`)
+}
+
+// FAQCheck — блок частых вопросов, посчитанный кодом.
+type FAQCheck struct {
+	Count int
+	Min   int
+}
+
+// Enabled отвечает, задана ли у задачи норма.
+func (c FAQCheck) Enabled() bool { return c.Min > 0 }
+
+// Enough отвечает, набралось ли вопросов до нормы. Без нормы — всегда да: непроверяемое
+// число ошибкой быть не может.
+func (c FAQCheck) Enough() bool { return !c.Enabled() || c.Count >= c.Min }
 
 // CountFAQ считает вопросы в блоке частых вопросов.
 //
-// Считаются заполненные вопросы, а не счётчик faq_loop: счётчик пишет админка, и он переживает
+// Считаются заполненные вопросы, а не счётчик репитера: счётчик пишет админка, и он переживает
 // вычищенный вопрос — тогда в блоке пусто, а в счётчике по-прежнему шесть.
-func CountFAQ(fields map[string]string) int {
-	var count int
+func CountFAQ(fields map[string]string, scheme FAQScheme) FAQCheck {
+	check := FAQCheck{Min: scheme.Min}
+	pattern := scheme.questionRE()
 	for name, value := range fields {
-		if faqQuestionField.MatchString(name) && strings.TrimSpace(value) != "" {
-			count++
+		if pattern.MatchString(name) && strings.TrimSpace(value) != "" {
+			check.Count++
 		}
 	}
-	return count
+	return check
 }
 
 // FormatFAQ собирает блок частых вопросов в читаемый вид.
@@ -222,14 +316,16 @@ func CountFAQ(fields map[string]string) int {
 // Блок отдаётся отдельно от тела статьи потому, что в теле его нет: вопросы живут полями
 // записи, а на странице их рисует тема. Для читателя это часть статьи, и проверять их надо
 // вместе с ней.
-func FormatFAQ(fields map[string]string) string {
+func FormatFAQ(fields map[string]string, scheme FAQScheme) string {
 	type pair struct {
 		index            int
 		question, answer string
 	}
+	scheme = scheme.withDefaults()
+	pattern := scheme.questionRE()
 	pairs := make([]pair, 0, 8)
 	for name := range fields {
-		match := faqQuestionField.FindStringSubmatch(name)
+		match := pattern.FindStringSubmatch(name)
 		if match == nil {
 			continue
 		}
@@ -241,7 +337,7 @@ func FormatFAQ(fields map[string]string) string {
 		if question == "" {
 			continue
 		}
-		answer := strings.TrimSpace(fields[fmt.Sprintf("faq_loop_%d_faq_answer", index)])
+		answer := strings.TrimSpace(fields[fmt.Sprintf(scheme.Answer, index)])
 		pairs = append(pairs, pair{index: index, question: question, answer: answer})
 	}
 	sort.Slice(pairs, func(i, j int) bool { return pairs[i].index < pairs[j].index })

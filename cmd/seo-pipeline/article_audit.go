@@ -148,7 +148,7 @@ func runArticleAuditReport(ctx context.Context, repository *articleaudit.Reposit
 		return nil
 	}
 	summary := articleaudit.BuildSummary(articles, articleaudit.NewArtifacts(deps.cfg.OutputDir),
-		deps.profile.ArticleAudit.RequiredFields)
+		articleAuditOptions(deps.profile))
 	text := summary.Render(deps.profile.Name)
 	path := filepath.Join(deps.cfg.OutputDir, articleaudit.SummaryFile)
 	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
@@ -158,6 +158,15 @@ func runArticleAuditReport(ctx context.Context, repository *articleaudit.Reposit
 		"field_gaps", len(summary.MissingFields), "common_issues", len(summary.CommonIssues), "file", path)
 	fmt.Fprint(deps.output, text)
 	fmt.Fprintf(deps.output, "\nСводка сохранена: %s\n", path)
+
+	// Таблица правок — тот же результат в виде списка задач: что дозаполнить в админке и что
+	// переписать в тексте. Собирается из той же сводки, поэтому разойтись им негде.
+	fixes := filepath.Join(deps.cfg.OutputDir, articleaudit.FixesFile)
+	if err := summary.WriteFixes(fixes); err != nil {
+		return err
+	}
+	deps.logger.Info("таблица правок собрана", "pages", len(summary.Pages), "file", fixes)
+	fmt.Fprintf(deps.output, "Таблица правок сохранена: %s\n", fixes)
 	return nil
 }
 
@@ -228,7 +237,24 @@ func newArticleAuditFlow(repository articleaudit.Articles, blog articleaudit.Blo
 	chats taskflow.ChatFactory, deps articleAuditDeps) (*articleaudit.Flow, error) {
 	return articleaudit.NewFlow(repository, blog, chats, articleaudit.NewArtifacts(deps.cfg.OutputDir),
 		deps.profile.ArticleAudit.AuditPromptPath, deps.profile.TemplatePath,
-		deps.profile.ArticleAudit.RequiredFields, deps.logger)
+		articleAuditOptions(deps.profile), deps.logger)
+}
+
+// articleAuditOptions переводит профиль задачи в настройки прогона.
+//
+// Одно место на прогон, план и сводку: разойдись они, и сводка пересчитала бы пачку по другим
+// правилам, чем те, по которым за неё заплатили.
+func articleAuditOptions(profile tasks.Profile) articleaudit.Options {
+	audit := profile.ArticleAudit
+	return articleaudit.Options{
+		Required:         audit.RequiredFields,
+		MinInternalLinks: audit.MinInternalLinks,
+		FAQ: articleaudit.FAQScheme{
+			Question: audit.FAQQuestionField,
+			Answer:   audit.FAQAnswerField,
+			Min:      audit.MinFAQ,
+		},
+	}
 }
 
 // runArticleAuditPlan печатает, что будет проверено, ничего не меняя и не спрашивая модель.
@@ -272,7 +298,26 @@ func runArticleAuditPlan(ctx context.Context, blog articleAuditBlog,
 		}
 		// Сколько в блоке вопросов — число, а не находка: сколько их должно быть, никто не
 		// решал, и человек смотрит на него сам.
-		fmt.Fprintf(writer, "  ·\t\t\t\t\tвопросов в блоке FAQ: %d\n", planned.Fields.FAQ)
+		if faq := planned.Fields.FAQ; !faq.Enough() {
+			fmt.Fprintf(writer, "  !\t\t\t\t\tвопросов в блоке FAQ: %d при минимуме %d\n",
+				faq.Count, faq.Min)
+			problems++
+		} else if faq.Enabled() {
+			fmt.Fprintf(writer, "  ·\t\t\t\t\tвопросов в блоке FAQ: %d при минимуме %d\n",
+				faq.Count, faq.Min)
+		} else {
+			fmt.Fprintf(writer, "  ·\t\t\t\t\tвопросов в блоке FAQ: %d\n", faq.Count)
+		}
+		// Перелинковка: у задачи с нормой нехватка видна до модели и бесплатно.
+		if links := planned.Fields.Links; links.Enabled() {
+			mark, note := "·", ""
+			if !links.Enough() {
+				mark, note = "!", " — меньше минимума"
+				problems++
+			}
+			fmt.Fprintf(writer, "  %s\t\t\t\t\tвнутренних ссылок: %d при минимуме %d%s\n",
+				mark, links.Count(), links.Min, note)
+		}
 		// Поля выдачи показываются всегда, с запасом: длину человек на глаз не отмеряет, а
 		// обрезанное описание увидит только в выдаче и через недели. «58 из 60» формально
 		// проходит, но следующая правка его переполнит — и это видно заранее.

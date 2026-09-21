@@ -28,6 +28,9 @@ type ReportData struct {
 	// FAQ — сколько вопросов в блоке частых вопросов. Число, а не находка: сколько их должно
 	// быть, никто не решал, и человек смотрит на него сам.
 	FAQ string
+	// InternalLinks — перелинковка одной строкой: сколько ссылок нашлось и сколько требует
+	// задача. В отличие от FAQ здесь норма есть, поэтому нехватка идёт ещё и в список ошибок.
+	InternalLinks string
 	// Разделы отчёта. Пустых среди них не бывает: пустой блок печатается словами «замечаний
 	// нет», а не пропускается, — человек должен видеть, что проверка была и ничего не нашла.
 	Critical string
@@ -49,6 +52,7 @@ func BuildReport(article Article, current Post, check FieldCheck, parsed Answer,
 		PostType:       current.PostType,
 		RequiredFields: requiredSummary(check, required),
 		FAQ:            faqSummary(check.FAQ),
+		InternalLinks:  linksSummary(check.Links),
 		Critical:       orDefault(parsed.Section(SectionCritical), noFindings),
 		Issues:         issuesBlock(check, parsed.Section(SectionIssues)),
 		Unparsed:       orDefault(parsed.Unparsed, "весь ответ разобран по разделам"),
@@ -81,11 +85,22 @@ func requiredSummary(check FieldCheck, required []string) string {
 
 // issuesBlock — список всех найденных ошибок.
 //
-// Сверху то, что нашёл код: незаведённые и незаполненные обязательные поля. Ниже то, что
-// нашла модель. Список один, потому что человек ищет ошибки в одном месте, а не в двух; но
-// строки кода помечены явно — по ним видно, что это факт, а не суждение модели.
+// Сверху то, что нашёл код: нехватка внутренних ссылок, незаведённые и незаполненные
+// обязательные поля. Ниже то, что нашла модель. Список один, потому что человек ищет ошибки в
+// одном месте, а не в двух; но строки кода помечены явно — по ним видно, что это факт, а не
+// суждение модели.
 func issuesBlock(check FieldCheck, modelIssues string) string {
 	var lines []string
+	if !check.FAQ.Enough() {
+		lines = append(lines, fmt.Sprintf(
+			"— вопросов в блоке FAQ %d при минимуме %d: блок под статьёй выйдет неполным",
+			check.FAQ.Count, check.FAQ.Min))
+	}
+	if !check.Links.Enough() {
+		lines = append(lines, fmt.Sprintf(
+			"— внутренних ссылок в тексте %d при минимуме %d: читателю некуда уйти со статьи",
+			check.Links.Count(), check.Links.Min))
+	}
 	for _, name := range check.Missing {
 		lines = append(lines, fmt.Sprintf("— %s — обязательное, но в записи его нет вовсе", Label(name)))
 	}
@@ -101,7 +116,7 @@ func issuesBlock(check FieldCheck, modelIssues string) string {
 	if len(lines) == 0 {
 		return orDefault(found, noFindings)
 	}
-	block := "Чего не хватает в записи (нашёл код):\n" + strings.Join(lines, "\n")
+	block := "Нашёл код:\n" + strings.Join(lines, "\n")
 	// «Замечаний нет» от модели рядом с находками кода противоречило бы им: ошибки на
 	// странице есть, просто нашла их не модель.
 	if found == "" || strings.EqualFold(found, noFindings) {
@@ -110,12 +125,39 @@ func issuesBlock(check FieldCheck, modelIssues string) string {
 	return block + "\n\n" + found
 }
 
-// faqSummary — сколько вопросов в блоке частых вопросов.
-func faqSummary(count int) string {
-	if count == 0 {
-		return "блока нет"
+// linksSummary — строка шапки про перелинковку.
+//
+// Выключенная проверка и пройденная — разные состояния: «0 ссылок» у задачи, которая их не
+// требует, читалось бы как находка. Адреса печатаются рядом с числом: по ним человек видит,
+// ведут ли ссылки на программы или статья ссылается сама на соседний абзац.
+func linksSummary(check LinkCheck) string {
+	if !check.Enabled() {
+		return "проверка выключена — минимум для задачи не задан"
 	}
-	return strconv.Itoa(count)
+	if !check.Enough() {
+		return fmt.Sprintf("%d при минимуме %d — не хватает %d",
+			check.Count(), check.Min, check.Min-check.Count())
+	}
+	return fmt.Sprintf("%d при минимуме %d: %s",
+		check.Count(), check.Min, strings.Join(check.URLs, ", "))
+}
+
+// faqSummary — строка шапки про блок частых вопросов.
+//
+// Без нормы печатается одно число: сколько вопросов должно быть, у такой задачи никто не
+// решал. С нормой видно и её — по этой строке человек понимает, дособирать блок или нет.
+func faqSummary(check FAQCheck) string {
+	if !check.Enabled() {
+		if check.Count == 0 {
+			return "блока нет"
+		}
+		return strconv.Itoa(check.Count)
+	}
+	if !check.Enough() {
+		return fmt.Sprintf("%d при минимуме %d — не хватает %d",
+			check.Count, check.Min, check.Min-check.Count)
+	}
+	return fmt.Sprintf("%d при минимуме %d", check.Count, check.Min)
 }
 
 func orDefault(value, fallback string) string {

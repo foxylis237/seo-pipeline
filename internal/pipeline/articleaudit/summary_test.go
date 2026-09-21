@@ -59,7 +59,7 @@ func TestBuildSummaryGroupsIssuesByTheme(t *testing.T) {
 		writeAudited(t, root, "1", "svarshhik-2", summaryAnswer, fields),
 		writeAudited(t, root, "2", "svarshhik-3", summaryAnswer, fields),
 	}
-	summary := BuildSummary(articles, NewArtifacts(root), []string{"prof_name", "docs_title"})
+	summary := BuildSummary(articles, NewArtifacts(root), Options{Required: []string{"prof_name", "docs_title"}})
 
 	if len(summary.Pages) != 2 {
 		t.Fatalf("страниц в сводке %d, ожидалось 2", len(summary.Pages))
@@ -84,7 +84,7 @@ func TestBuildSummaryGroupsIssuesByTheme(t *testing.T) {
 func TestBuildSummarySkipsSingleOccurrence(t *testing.T) {
 	root := t.TempDir()
 	articles := []Article{writeAudited(t, root, "1", "svarshhik-2", summaryAnswer, map[string]string{})}
-	summary := BuildSummary(articles, NewArtifacts(root), nil)
+	summary := BuildSummary(articles, NewArtifacts(root), Options{})
 	if len(summary.CommonIssues) != 0 {
 		t.Fatalf("одиночные находки попали в частые: %v", summary.CommonIssues)
 	}
@@ -98,7 +98,7 @@ func TestBuildSummaryRecountsMissingFields(t *testing.T) {
 		writeAudited(t, root, "1", "svarshhik-2", summaryAnswer, map[string]string{"prof_name": "Сварщик"}),
 		writeAudited(t, root, "2", "svarshhik-3", summaryAnswer, map[string]string{"prof_name": ""}),
 	}
-	summary := BuildSummary(articles, NewArtifacts(root), []string{"prof_name", "image_alt"})
+	summary := BuildSummary(articles, NewArtifacts(root), Options{Required: []string{"prof_name", "image_alt"}})
 
 	gaps := map[string][]string{}
 	for _, gap := range summary.MissingFields {
@@ -118,7 +118,7 @@ func TestBuildSummarySeparatesFailedFromPending(t *testing.T) {
 	summary := BuildSummary([]Article{
 		{ExternalID: "1", Slug: "svarshhik-2", ErrorMessage: "в WordPress нет записи"},
 		{ExternalID: "2", Slug: "svarshhik-3"},
-	}, NewArtifacts(t.TempDir()), nil)
+	}, NewArtifacts(t.TempDir()), Options{})
 
 	if len(summary.Failed) != 1 || summary.Failed[0].ExternalID != "1" {
 		t.Fatalf("упавшие разобраны как %+v", summary.Failed)
@@ -143,7 +143,7 @@ func TestSummarySortsWorstFirst(t *testing.T) {
 	third := writeAudited(t, root, "3", "svarshhik-4", summaryAnswer, map[string]string{})
 	third.Score = nil
 
-	summary := BuildSummary([]Article{first, second, third}, NewArtifacts(root), nil)
+	summary := BuildSummary([]Article{first, second, third}, NewArtifacts(root), Options{})
 	order := []string{summary.Pages[0].ExternalID, summary.Pages[1].ExternalID, summary.Pages[2].ExternalID}
 	// Неразобранная оценка идёт первой: её надо посмотреть глазами.
 	if order[0] != "3" || order[1] != "2" || order[2] != "1" {

@@ -72,6 +72,20 @@ type Articles interface {
 	MarkFailed(ctx context.Context, externalID string, cause error) error
 }
 
+// Options — чем одна задача аудита отличается от другой на прогоне.
+//
+// Всё здесь приходит из профиля задачи: что обязано быть заполнено, сколько нужно ссылок и
+// вопросов, как площадка называет поля блока вопросов. Нулевое значение любого поля —
+// прежнее поведение, поэтому задача, которая о нём не знает, работает как раньше.
+type Options struct {
+	// Required — поля записи, которые обязаны быть заполнены.
+	Required []string
+	// MinInternalLinks — сколько внутренних ссылок обязано быть в теле. Ноль выключает.
+	MinInternalLinks int
+	// FAQ — имена полей блока частых вопросов и их минимальное число.
+	FAQ FAQScheme
+}
+
 // Flow — прогон задачи: прочитать страницу, проверить поля, спросить модель, собрать отчёт.
 type Flow struct {
 	repository Articles
@@ -80,7 +94,7 @@ type Flow struct {
 	artifacts  Artifacts
 	prompt     *template.Template
 	result     *template.Template
-	required   []string
+	options    Options
 	logger     *slog.Logger
 }
 
@@ -90,7 +104,7 @@ type Flow struct {
 // команду на старте, а не после оплаченного ответа модели, когда сохранить его будет уже
 // некуда.
 func NewFlow(repository Articles, blog Blog, chats taskflow.ChatFactory, artifacts Artifacts,
-	promptPath, resultTemplatePath string, required []string, logger *slog.Logger) (*Flow, error) {
+	promptPath, resultTemplatePath string, options Options, logger *slog.Logger) (*Flow, error) {
 	if logger == nil {
 		logger = slog.New(slog.DiscardHandler)
 	}
@@ -104,7 +118,7 @@ func NewFlow(repository Articles, blog Blog, chats taskflow.ChatFactory, artifac
 	}
 	return &Flow{
 		repository: repository, blog: blog, chats: chats, artifacts: artifacts,
-		prompt: prompt, result: result, required: required, logger: logger,
+		prompt: prompt, result: result, options: options, logger: logger,
 	}, nil
 }
 
@@ -197,12 +211,14 @@ func (f *Flow) run(ctx context.Context, article Article) error {
 	if err != nil {
 		return err
 	}
-	check := f.checkFields(current)
+	check := f.checkFields(current, linkOf(article, current))
 	logger.Info("страница прочитана из блога", "stage", "fetch", "found_by", foundBy,
 		"post_id", current.ID, "post_type", current.PostType, "title", current.Title,
 		"html_runes", len([]rune(current.ContentHTML)),
-		"required_fields", len(f.required), "fields_missing", len(check.Missing),
-		"fields_empty", len(check.Empty), "fields_too_long", len(check.TooLong))
+		"required_fields", len(f.options.Required), "fields_missing", len(check.Missing),
+		"fields_empty", len(check.Empty), "fields_too_long", len(check.TooLong),
+		"internal_links", check.Links.Count(), "internal_links_min", check.Links.Min,
+		"faq_questions", check.FAQ.Count, "faq_min", check.FAQ.Min)
 
 	if err := f.saveOriginal(ctx, article, current); err != nil {
 		return err
@@ -265,11 +281,14 @@ func (f *Flow) saveOriginal(ctx context.Context, article Article, current Post) 
 // Две независимые проверки в одном месте: обязательные поля заполнены и поля выдачи в неё
 // помещаются. Обе про факт, а не про суждение, и обе бесплатны — поэтому их результат виден
 // и в отчёте, и в плане, который к модели не ходит вовсе.
-func (f *Flow) checkFields(current Post) FieldCheck {
-	check := CheckRequired(current, f.required)
+func (f *Flow) checkFields(current Post, pageURL string) FieldCheck {
+	check := CheckRequired(current, f.options.Required)
 	check.Measured = MeasureSEO(current.Fields)
 	check.TooLong = CheckLength(current.Fields)
-	check.FAQ = CountFAQ(current.Fields)
+	check.FAQ = CountFAQ(current.Fields, f.options.FAQ)
+	// Перелинковка живёт в теле, а не в полях, но проверяет её тот же код и по той же
+	// причине: число ссылок — факт, и платить за него модели незачем.
+	check.Links = CollectInternalLinks(current.ContentHTML, pageURL, f.options.MinInternalLinks)
 	return check
 }
 
@@ -341,7 +360,7 @@ func (f *Flow) audit(ctx context.Context, article Article, current Post, logger 
 	prompt, err := render(f.prompt, PromptData{
 		Title:        current.Title,
 		OriginalHTML: current.ContentHTML,
-		FAQ:          FormatFAQ(current.Fields),
+		FAQ:          FormatFAQ(current.Fields, f.options.FAQ),
 	})
 	if err != nil {
 		return "", "", fmt.Errorf("собрать промпт аудита: %w", err)
@@ -397,7 +416,7 @@ func (f *Flow) Plan(ctx context.Context, article Article) (PlannedCheck, error) 
 		Title:      current.Title,
 		HTMLRunes:  len([]rune(current.ContentHTML)),
 		Headings:   countHeadings(current.ContentHTML),
-		Fields:     f.checkFields(current),
+		Fields:     f.checkFields(current, linkOf(article, current)),
 		Audited:    article.Audited(),
 	}, nil
 }
@@ -410,7 +429,7 @@ func countHeadings(markup string) int { return len(headingRE.FindAllString(marku
 
 // render собирает текст отчёта по шаблону задачи.
 func (f *Flow) render(article Article, current Post, check FieldCheck, parsed Answer) (string, error) {
-	report, err := render(f.result, BuildReport(article, current, check, parsed, f.required))
+	report, err := render(f.result, BuildReport(article, current, check, parsed, f.options.Required))
 	if err != nil {
 		return "", fmt.Errorf("собрать result.md: %w", err)
 	}

@@ -48,10 +48,10 @@ func TestCountFAQCountsFilledQuestions(t *testing.T) {
 		"faq_items":               "",
 		"prof_name":               "Косметолог",
 	}
-	if got := CountFAQ(fields); got != 2 {
-		t.Fatalf("вопросов насчитано %d, ожидалось 2", got)
+	if got := CountFAQ(fields, FAQScheme{}); got.Count != 2 {
+		t.Fatalf("вопросов насчитано %d, ожидалось 2", got.Count)
 	}
-	if got := CountFAQ(map[string]string{"faq_loop": "6"}); got != 0 {
-		t.Fatalf("счётчик без вопросов дал %d", got)
+	if got := CountFAQ(map[string]string{"faq_loop": "6"}, FAQScheme{}); got.Count != 0 {
+		t.Fatalf("счётчик без вопросов дал %d", got.Count)
 	}
 }
