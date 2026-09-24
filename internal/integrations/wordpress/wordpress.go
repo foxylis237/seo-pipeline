@@ -70,6 +70,11 @@ type Config struct {
 	Timeout time.Duration
 	// Retry — политика повторов. Нулевая означает DefaultRetryPolicy.
 	Retry RetryPolicy
+	// Transport подменяет транспорт всех трёх клиентов. nil — транспорт по умолчанию, то
+	// есть прежнее поведение. Заполняется он ровно ради обхода VPN-туннеля на рабочей
+	// машине (см. internal/integrations/netbind), и ничего больше в него класть не нужно:
+	// таймауты у клиентов свои и в транспорте не живут.
+	Transport http.RoundTripper
 }
 
 // User — пользователь, которым авторизован клиент.
@@ -118,9 +123,9 @@ func NewClient(cfg Config) (*Client, error) {
 	}
 	return &Client{
 		cfg:          normalized,
-		httpClient:   &http.Client{Timeout: normalized.Timeout},
-		xmlrpcClient: &http.Client{Timeout: xmlrpcTimeout},
-		mediaClient:  &http.Client{Timeout: mediaUploadTimeout},
+		httpClient:   &http.Client{Timeout: normalized.Timeout, Transport: cfg.Transport},
+		xmlrpcClient: &http.Client{Timeout: xmlrpcTimeout, Transport: cfg.Transport},
+		mediaClient:  &http.Client{Timeout: mediaUploadTimeout, Transport: cfg.Transport},
 		sleep:        sleepContext,
 	}, nil
 }

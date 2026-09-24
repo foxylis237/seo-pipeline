@@ -157,6 +157,17 @@ func ReadRows(path string) ([]Row, error) {
 			// одна, а как её называет задача — вопрос её единого языка, а не импорта.
 			Teachers:    optionalCellValue(row, columnIndexes, "authors"),
 			ServiceName: optionalCellValue(row, columnIndexes, "service_name"),
+			// Числа программы коммерческой страницы второй площадки. Импортёр читает их
+			// всегда: колонки в книге просто нет, и значение остаётся пустым, — а до базы
+			// они доходят лишь там, где колонка объявлена профилем задачи.
+			PostType:       optionalCellValue(row, columnIndexes, "post_type"),
+			Hours:          optionalCellValue(row, columnIndexes, "hours"),
+			Duration:       optionalCellValue(row, columnIndexes, "duration"),
+			Price:          optionalCellValue(row, columnIndexes, "price"),
+			Document:       optionalCellValue(row, columnIndexes, "document"),
+			Attestation:    optionalCellValue(row, columnIndexes, "attestation"),
+			ImageSourceURL: optionalCellValue(row, columnIndexes, "image_source_url"),
+			CourseURL:      optionalCellValue(row, columnIndexes, "course_url"),
 		}
 
 		result = append(result, parsed)
@@ -188,6 +199,22 @@ var columnAliases = map[string]string{
 	"раздел":        "section",
 	"профессия":     "profession",
 	"преподаватели": "authors",
+	// Книга коммерческих страниц второй площадки. Заголовки там русские: числа программы
+	// заполняет человек, и просить его писать post_type латиницей незачем.
+	"тип записи":    "post_type",
+	"тип_записи":    "post_type",
+	"объём":         "hours",
+	"объем":         "hours",
+	"часы":          "hours",
+	"срок":          "duration",
+	"срок обучения": "duration",
+	"стоимость":     "price",
+	"цена":          "price",
+	"документ":      "document",
+	"документы":     "document",
+	"аттестация":    "attestation",
+	"ссылка на изображение": "image_source_url",
+	"ссылка на картинку":    "image_source_url",
 }
 
 // buildColumnIndexes проверяет наличие всех обязательных колонок

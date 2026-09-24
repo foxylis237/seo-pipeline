@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 
-	"github.com/foxylis237/seo-pipeline/internal/integrations/sitepage"
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/taskflow"
 	"github.com/foxylis237/seo-pipeline/internal/tasks/pproftemplate1"
 )
@@ -18,5 +17,5 @@ func newPProfTemplate1Flow(deps taskFlowDeps) (taskFlow, error) {
 		return nil, fmt.Errorf("схема стадий pprof_template_1 не загружена")
 	}
 	return pproftemplate1.NewFlow(deps.repository, deps.writer, taskflow.NewRouterChats(deps.router),
-		deps.router, deps.logger, deps.publisher, sitepage.New(linkNameTimeout)), nil
+		deps.router, deps.logger, deps.publisher, newSitePageClient()), nil
 }

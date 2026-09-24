@@ -49,6 +49,12 @@ type CustomField struct {
 	// Связь на ОДНУ запись массива не требует: скаляр ACF разворачивает сама
 	// (acf_get_array) — так устроены author_link у статьи и teachers у страницы услуги.
 	IDs []int64
+	// Values — значение-список строк, каким его хранит набор флажков ACF (prog_format).
+	// Отдельное поле по той же причине, что и IDs: уходить оно обязано XML-RPC-массивом.
+	// Готовую строку `a:1:{i:0;s:4:"dist";}` сюда класть нельзя — WordPress сериализует её
+	// повторно, и в записи оказывается s:21:"a:1:{…}";, то есть строка вместо массива.
+	// Измерено на записи 19540 первой публикацией obuch_2.
+	Values []string
 }
 
 // PostPayload — всё, что уходит в WordPress одним вызовом wp.newPost.
@@ -402,24 +408,33 @@ func storedPostFromMembers(members map[string]any) StoredPost {
 }
 
 // value — то, что уходит в custom_fields: строка или XML-RPC-массив идентификаторов.
-func (f CustomField) value() any { return customFieldValue(f.Value, f.IDs) }
+func (f CustomField) value() any { return customFieldValue(f.Value, f.IDs, f.Values) }
 
 // customFieldValue готовит значение поля postmeta и общий он у создания записи и у её правки.
 //
 // Общий намеренно: связь ACF обязана уйти массивом в обоих случаях, а второй копии правила
 // хватило бы, чтобы правка отправила строку — и связь перестала бы читаться ровно так же,
 // как от повторной сериализации.
-func customFieldValue(value string, ids []int64) any {
+func customFieldValue(value string, ids []int64, values []string) any {
+	// Набор флажков уходит списком строк: WordPress сериализует его сам, и только так в
+	// записи оказывается массив, а не строка с сериализованным массивом внутри.
+	if len(values) > 0 {
+		list := make(xmlrpcArray, 0, len(values))
+		for _, item := range values {
+			list = append(list, item)
+		}
+		return list
+	}
 	if len(ids) == 0 {
 		return value
 	}
 	// Идентификаторы уходят строками: именно так их хранит ACF внутри сериализованного
 	// массива (s:3:"507"), и запись числами разошлась бы с тем, что уже лежит на площадке.
-	values := make(xmlrpcArray, 0, len(ids))
+	list := make(xmlrpcArray, 0, len(ids))
 	for _, id := range ids {
-		values = append(values, strconv.FormatInt(id, 10))
+		list = append(list, strconv.FormatInt(id, 10))
 	}
-	return values
+	return list
 }
 
 // serializedIDs вынимает идентификаторы из сериализованного массива PHP.

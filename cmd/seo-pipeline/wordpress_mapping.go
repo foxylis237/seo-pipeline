@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/article"
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/result"
 	"github.com/foxylis237/seo-pipeline/internal/tasks"
+	"github.com/foxylis237/seo-pipeline/internal/tasks/obuch2"
 )
 
 // Раскладка данных статьи по полям площадки.
@@ -58,6 +60,21 @@ type wordPressMappedPost struct {
 	// раскладке, а не признаку публикации: картинка в теле — часть того, как выглядит запись
 	// на конкретной площадке, и сухой прогон обязан её видеть.
 	WithoutBodyImage bool
+	// BodyImageBeforeFirstHeading ставит обложку в конец вводной части, перед первым
+	// заголовком, и верстает её классами темы вместо прежнего блока с подписью.
+	//
+	// Нулевое значение — прежнее поведение, середина страницы. У статьи блога середина
+	// выбрана намеренно, а у коммерческой страницы услуги она приходится на разбор модулей
+	// обучения: картинка внутри него читается как потерянная, и на всех просмотренных живых
+	// страницах она стоит сразу за лидом и плашкой параметров программы.
+	BodyImageBeforeFirstHeading bool
+	// BodyImageSourceURL — адрес фотографии на стоке, с которой взята обложка.
+	//
+	// Пустой означает, что абзаца-ссылки под картинкой не будет вовсе. Прежний блок ведёт на
+	// главную страницу стока, потому что конкретного адреса у него нет; там, где адрес
+	// приходит колонкой книги, подставлять вместо него главную нельзя — в опубликованной
+	// записи выдуманную атрибуцию уже не отличить от настоящей.
+	BodyImageSourceURL string
 }
 
 // wordPressMapping — раскладка одной задачи.
@@ -523,6 +540,13 @@ func courseCustomFields(
 // которого не бывает.
 func newWordPressMapping(profile tasks.Profile) wordPressMapping {
 	switch {
+	case profile.PlainServicePages:
+		// Площадка резолвится один раз и здесь: у неё раскладка спрашивает список типов
+		// записей и правило имени таксономии, и второй копии этих данных в composition root
+		// быть не должно. Ошибка резолва не теряется — она поднимается первой же проверкой
+		// раскладки, до единого запроса в блог.
+		site, _, err := catalogSiteFor(profile)
+		return plainServiceWordPressMapping{site: site, siteErr: err}
 	case profile.CommercialPages:
 		return courseWordPressMapping{}
 	case profile.PlainBlogPages:
@@ -611,3 +635,229 @@ const (
 	yoastTitle           = "_yoast_wpseo_title"
 	yoastMetaDescription = "_yoast_wpseo_metadesc"
 )
+
+// ---------------------------------------------------------------------------
+// Страница услуги площадки без ACF: obuch_2.
+// ---------------------------------------------------------------------------
+
+// plainServiceWordPressMapping — раскладка коммерческой страницы на площадке, у которой
+// полей ACF нет вовсе.
+//
+// Ни одна из трёх прежних раскладок не подходит, и это не вопрос вкуса.
+// courseWordPressMapping шлёт десяток полей ACF и связь с записью преподавателя — на этой
+// площадке нет ни полей, ни типа записи teacher. plainBlogWordPressMapping требует метки,
+// кладёт запись обычным post во встроенную category и снимает картинку из тела — у страницы
+// услуги меток не бывает, тип записи и таксономия у неё свои, а картинка в теле есть.
+//
+// В запись уходят тип записи из книги, рубрика своей таксономии, ярлык, обложка, тело, три
+// ключа Yoast и поля программы: плашка «Параметры программы» и аккордеон модулей, которые
+// площадка рисует над текстом.
+//
+// Имя раскладки старше её содержимого и уже неточно: полей ACF у площадки хватает — у живой
+// страницы услуги их 65. Верно другое: полей *статьи блога* (prof_title, blog_tldr, репитер
+// blog_faq_*, связь author_link) у неё нет вовсе, и блоговая раскладка отправила бы десяток
+// несуществующих. Остальные поля темы — герой, картинки секций, вторая форма — по-прежнему
+// остаются человеку: их значения не выводятся ни из книги, ни из написанной страницы.
+type plainServiceWordPressMapping struct {
+	// site — площадка задачи. У неё спрашиваются закрытый список типов записей и правило
+	// имени таксономии рубрик: у этой площадки оно зеркально соседней (cat_rabprof, а не
+	// rabprof-cat), и держать вторую копию правила рядом с публикацией нельзя.
+	site catalog.Site
+	// siteErr — отказ резолва площадки, перенесённый сюда из newWordPressMapping.
+	//
+	// Хранится, а не теряется: раскладка собирается в composition root, где возвращать
+	// ошибку некуда, а поднять её обязательно — иначе задача с опечаткой в CatalogSite
+	// молча искала бы рубрику в таксономии чужого сайта.
+	siteErr error
+}
+
+func (m plainServiceWordPressMapping) Validate(input article.PublicationInput) error {
+	externalID := input.Article.ExternalID
+	if m.siteErr != nil {
+		return m.siteErr
+	}
+	// Тип записи — колонка книги, и ошибиться в ней легко: типов шесть, пишет их человек.
+	// Проверяется он здесь, среди локальных проверок, то есть до единого запроса в блог.
+	postType := strings.TrimSpace(input.PostType)
+	if postType == "" {
+		return fmt.Errorf("у страницы %s не заполнено обязательное для публикации поле: тип записи (post_type)",
+			externalID)
+	}
+	if _, known := m.site.Taxonomy(postType); !known {
+		return fmt.Errorf("у страницы %s тип записи %q, а у площадки такого нет: %s",
+			externalID, postType, strings.Join(m.site.PostTypes(), ", "))
+	}
+	// SEO-заголовок у страницы услуги свой: поиск режет заголовок примерно на 60 знаках, а
+	// название записи человек пишет длинным и описательным.
+	if strings.TrimSpace(input.SEOTitle) == "" {
+		return fmt.Errorf("у страницы %s не заполнено обязательное для публикации поле: SEO-заголовок (seo_title)",
+			externalID)
+	}
+	// Меток раскладка не спрашивает и не отправляет: у страницы услуги их не бывает, и
+	// колонки tags у задачи нет вовсе.
+	return nil
+}
+
+func (m plainServiceWordPressMapping) Build(
+	ctx context.Context, deps wordPressPublishDeps, input article.PublicationInput,
+	_ []result.FAQItem, _ string, _ bool,
+) (wordPressMappedPost, error) {
+	externalID := input.Article.ExternalID
+	postType := strings.TrimSpace(input.PostType)
+	taxonomy, known := m.site.Taxonomy(postType)
+	if !known {
+		return wordPressMappedPost{}, fmt.Errorf("у страницы %s тип записи %q, а у площадки такого нет: %s",
+			externalID, postType, strings.Join(m.site.PostTypes(), ", "))
+	}
+	// Рубрика ищется в своей таксономии и заводить её приложению нельзя: рубрики продуманы
+	// человеком, а опечатка обязана останавливать публикацию — здесь, до записи в блог.
+	categoryID, err := deps.client.FindTermIDInTaxonomy(ctx, taxonomy, input.Category)
+	if err != nil {
+		return wordPressMappedPost{}, fmt.Errorf("рубрика страницы %s: %w", externalID, err)
+	}
+	// Программа разбирается из уже написанной страницы, а не спрашивается у модели вторым
+	// запросом: источник обязан быть один — тот текст, что уйдёт в блог. Отказ разбора
+	// страницу не роняет, поля просто не отправляются, и заполняет их человек, как раньше.
+	fields := yoastFields(input)
+	program, err := programFields(deps, input)
+	if err != nil {
+		return wordPressMappedPost{}, err
+	}
+	fields = append(fields, program...)
+	return wordPressMappedPost{
+		PostType:         postType,
+		CategoryTaxonomy: taxonomy,
+		CategoryID:       categoryID,
+		CategoryName:     strings.TrimSpace(input.Category),
+		// alt — заголовок H1 страницы, title — слаг картинки: так же, как у соседних
+		// раскладок. Поля ACF image_alt у этой площадки нет, второй подписи не существует.
+		ImageAlt:   strings.TrimSpace(input.Header),
+		ImageTitle: strings.TrimSpace(input.Article.Slug),
+		Fields:     fields,
+		// Картинка в теле есть у всех просмотренных страниц площадки и стоит сразу за лидом
+		// и плашкой параметров, а не в середине.
+		BodyImageBeforeFirstHeading: true,
+		BodyImageSourceURL:          strings.TrimSpace(input.ImageSourceURL),
+	}, nil
+}
+
+// ---------------------------------------------------------------------------
+// Программа обучения в полях записи: obuch_2.
+// ---------------------------------------------------------------------------
+
+// Поля программы у площадки obuchim-specialista.ru. Имена сняты с живой страницы услуги
+// (гид-переводчик, запись 15050) и разложены по двум блокам, которые тема рисует над телом:
+// плашка «Параметры программы» и аккордеон модулей.
+const (
+	progModulesCount   = "prog_moduli"
+	progModulesHeading = "prog_moduli_zagolovok"
+	progHours          = "prog_chasy"
+	progDuration       = "prog_srok"
+	progPrice          = "novaya_czena"
+	progDocument       = "prog_dokument"
+	progDocumentNote   = "prog_dokument_utochnenie"
+	progAttestation    = "prog_attestaciya"
+	progFormat         = "prog_format"
+	progProfession     = "prof_name"
+)
+
+// progDigitsRE вынимает число из значения книги: в плашке темы стоит «144», а в колонке
+// человек пишет «144 часа» — то же число словами. Второго источника у него нет, поэтому
+// число берётся отсюда, а не заводится отдельной колонкой.
+var progDigitsRE = regexp.MustCompile(`\d+`)
+
+// programFields собирает поля программы для страницы услуги.
+//
+// Модули разбираются из готовой разметки — того самого текста, что уйдёт в блог. Второго
+// источника быть не должно: спросив модель отдельно, получили бы второй набор модулей,
+// отличный от напечатанного на странице, и заметить это можно было бы только глазами.
+//
+// Пустая программа стадию не роняет и публикацию не останавливает: страница уже написана и
+// оплачена, а незаполненный аккордеон — ровно то состояние, в котором записи живут сегодня,
+// и человек дозаполняет его в админке. Зато расхождение часов с книгой — отказ: то же число
+// стоит в плашке, и разойтись им нельзя.
+func programFields(deps wordPressPublishDeps, input article.PublicationInput) ([]wordpress.CustomField, error) {
+	fields := make([]wordpress.CustomField, 0, 16)
+	add := func(key, value string) {
+		if value = strings.TrimSpace(value); value != "" {
+			fields = append(fields, wordpress.CustomField{Key: key, Value: value})
+		}
+	}
+	add(progProfession, input.Profession)
+	add(progHours, progDigitsRE.FindString(input.Hours))
+	add(progDuration, input.Duration)
+	add(progPrice, input.Price)
+	add(progDocumentNote, input.Document)
+	preset, known := obuch2.ProgramPresetOf(input.PostType)
+	// Формулировка книги и служебное значение селекта — об одном и том же: текст печатает
+	// «Итоговое тестирование», поле хранит "test", и подпись над телом рисует площадка.
+	// Расходятся они молча, поэтому сверка стоит здесь, до единого запроса в блог.
+	if issues := obuch2.CheckProgramPreset(preset, obuch2.ProgramFacts{
+		Document: input.Document, Attestation: input.Attestation,
+	}); len(issues) > 0 {
+		var report strings.Builder
+		for _, issue := range issues {
+			fmt.Fprintf(&report, "\n  - %s", issue)
+		}
+		return nil, fmt.Errorf("у страницы %s книга расходится с полями записи типа %q:%s",
+			input.Article.ExternalID, strings.TrimSpace(input.PostType), report.String())
+	}
+	add(progDocument, preset.Document)
+	add(progAttestation, preset.Attestation)
+	if len(preset.Format) > 0 {
+		fields = append(fields, wordpress.CustomField{Key: progFormat, Values: preset.Format})
+	}
+
+	markup, err := deps.writer.Read(input.HTMLPath)
+	if err != nil {
+		return nil, fmt.Errorf("прочитать разметку страницы %s: %w", input.Article.ExternalID, err)
+	}
+	modules := obuch2.ParseModules(markup)
+	// Числа в тексте страницы и числа в полях записи — одни и те же числа, названные дважды.
+	// Сверяются они здесь, до единого запроса в блог: плашку темы читатель видит над телом,
+	// текст — под ним, и расхождение не заметит никто, кроме него. У живых страниц площадки
+	// оно уже есть («150 часов» в тексте против «144 часа» в плашке), и повторять это машинно
+	// нельзя.
+	if issues := obuch2.CheckProgramFacts(markup, obuch2.ProgramFacts{
+		Hours: input.Hours, Duration: input.Duration, Price: input.Price,
+	}, modules); len(issues) > 0 {
+		var report strings.Builder
+		for _, issue := range issues {
+			fmt.Fprintf(&report, "\n  - %s", issue)
+		}
+		return nil, fmt.Errorf("у страницы %s текст расходится с полями программы:%s",
+			input.Article.ExternalID, report.String())
+	}
+	if len(modules) == 0 {
+		// Публикацию это не роняет — страница написана и оплачена, — но и молчать нельзя:
+		// незаполненный аккордеон дозаполняет человек, и его модули разойдутся с телом
+		// страницы. Ровно так разошлась первая страница задачи.
+		deps.logger.Warn("программа не разобралась из текста: аккордеон останется пустым",
+			"external_id", input.Article.ExternalID)
+		fmt.Fprintf(deps.out, "ВНИМАНИЕ: у страницы %s программа не разобралась из текста — "+
+			"поля модулей не уйдут, аккордеон останется пустым\n", input.Article.ExternalID)
+		return fields, nil
+	}
+	// Часы модулей и объём программы — одно и то же число, названное дважды. Сверяется оно
+	// здесь, до единого запроса в блог: в опубликованной записи расхождение видно только
+	// глазами на самой странице, и оно уже случалось на живых страницах площадки.
+	if want := progDigitsRE.FindString(input.Hours); want != "" {
+		if total := obuch2.TotalHours(modules); total > 0 && strconv.Itoa(total) != want {
+			return nil, fmt.Errorf("у страницы %s часы модулей в сумме дают %d, а объём программы в книге — %s",
+				input.Article.ExternalID, total, want)
+		}
+	}
+	if known {
+		add(progModulesHeading, preset.Heading)
+	}
+	fields = append(fields, wordpress.CustomField{
+		Key: progModulesCount, Value: strconv.Itoa(len(modules)),
+	})
+	for index, module := range modules {
+		prefix := fmt.Sprintf("%s_%d_", progModulesCount, index)
+		add(prefix+"tema", module.Topic)
+		add(prefix+"chasy", module.Hours)
+		add(prefix+"opisanie", module.Text)
+	}
+	return fields, nil
+}

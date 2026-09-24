@@ -41,8 +41,12 @@ var (
 type Client struct{ http *http.Client }
 
 // New собирает клиент с общим таймаутом на запрос.
-func New(timeout time.Duration) *Client {
-	return &Client{http: &http.Client{Timeout: timeout}}
+//
+// transport — обычный параметр, а не вариативный хвост: nil здесь значит «транспорт по
+// умолчанию», и это значение обязан назвать вызывающий. Непустым он бывает ровно в одном
+// случае — когда исходящие соединения уводят мимо VPN-туннеля (internal/integrations/netbind).
+func New(timeout time.Duration, transport http.RoundTripper) *Client {
+	return &Client{http: &http.Client{Timeout: timeout, Transport: transport}}
 }
 
 // Name возвращает название программы со страницы.

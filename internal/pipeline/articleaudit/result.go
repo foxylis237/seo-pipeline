@@ -8,13 +8,20 @@ import (
 
 // ReportData — поля шаблона result.md.
 //
-// Отчёт состоит из трёх вещей: оценки, самых важных ошибок и всех ошибок списком. Ни
-// рекомендаций, ни разбора по критериям, ни сильных сторон в нём нет — их не читают, а
-// оплачивать их генерацию и место в ответе незачем.
+// Отчёт состоит из четырёх вещей: оценки, разбора по критериям, самых важных ошибок и всех
+// ошибок списком. Рекомендаций и готовых абзацев на замену в нём по-прежнему нет — правит
+// страницу человек, и оплачивать место в ответе под чужую работу незачем.
+//
+// Разбор вернулся в формат: общая оценка «11/20» не отличает слабую экспертность от слабой
+// структуры, а решение «что чинить» принимают именно по этому. Одна фраза на критерий стоит
+// нескольких строк ответа и отвечает на вопрос, ради которого отчёт открывают.
 type ReportData struct {
 	// Score — «14/20» либо слова о том, что оценки в ответе не нашлось. Первой строкой отчёта:
 	// по ней страницы сравнивают между собой и решают, за какую браться.
 	Score string
+	// Scores — тот же результат по критериям, одной строкой: «Структура 4/4 · Контент 4/5 · …».
+	// Стоит в шапке рядом с оценкой, потому что читают их вместе: сначала сколько, потом где.
+	Scores string
 	// Шапка: что именно проверено.
 	Title    string
 	URL      string
@@ -33,9 +40,13 @@ type ReportData struct {
 	InternalLinks string
 	// Разделы отчёта. Пустых среди них не бывает: пустой блок печатается словами «замечаний
 	// нет», а не пропускается, — человек должен видеть, что проверка была и ничего не нашла.
-	Critical string
-	Issues   string
-	Unparsed string
+	//
+	// Breakdown — разбор по критериям, как его написала модель: балл и фраза на каждый.
+	// Печатается дословно, потому что фраза и есть ответ на «почему 2 из 5».
+	Breakdown string
+	Critical  string
+	Issues    string
+	Unparsed  string
 }
 
 // BuildReport собирает отчёт из прочитанной страницы, проверки полей и ответа модели.
@@ -45,6 +56,7 @@ type ReportData struct {
 func BuildReport(article Article, current Post, check FieldCheck, parsed Answer, required []string) ReportData {
 	return ReportData{
 		Score:          scoreLine(parsed),
+		Scores:         scoresLine(parsed),
 		Title:          current.Title,
 		URL:            linkOf(article, current),
 		Topic:          orDefault(article.Topic, "не задана — основанием служил заголовок записи"),
@@ -53,10 +65,40 @@ func BuildReport(article Article, current Post, check FieldCheck, parsed Answer,
 		RequiredFields: requiredSummary(check, required),
 		FAQ:            faqSummary(check.FAQ),
 		InternalLinks:  linksSummary(check.Links),
+		Breakdown:      orDefault(parsed.Section(SectionBreakdown), noBreakdown),
 		Critical:       orDefault(parsed.Section(SectionCritical), noFindings),
 		Issues:         issuesBlock(check, parsed.Section(SectionIssues)),
 		Unparsed:       orDefault(parsed.Unparsed, "весь ответ разобран по разделам"),
 	}
+}
+
+// noBreakdown — что печатать вместо разбора, которого в ответе не нашлось. Пустой блок
+// выглядит как потерянные данные, а ответ модели лежит рядом и его можно посмотреть глазами.
+const noBreakdown = "разбора по критериям в ответе нет — посмотреть generated/audit.txt"
+
+// scoresLine — разбор по критериям одной строкой шапки.
+//
+// Числа берутся из разбора, а не считаются заново: сколько весит каждый критерий, решает
+// промпт задачи, и второй копии этих весов в движке быть не должно.
+//
+// Сумма разбора сверяется с итоговой оценкой и расхождение называется прямо. Молчать здесь
+// нельзя: пять чисел модель складывает в уме и ошибается, а человек, читающий «11/20» над
+// разбором на 18, решит, что сломан отчёт. Пометка стоит рядом, а не вместо, — обе цифры
+// настоящие, и какой верить, решает он сам.
+func scoresLine(parsed Answer) string {
+	if len(parsed.Criteria) == 0 {
+		return "не разобран"
+	}
+	parts := make([]string, 0, len(parsed.Criteria))
+	for _, criterion := range parsed.Criteria {
+		parts = append(parts, criterion.Text())
+	}
+	line := strings.Join(parts, " · ")
+	sum, limit := parsed.CriteriaTotal()
+	if parsed.ScoreFound && sum != parsed.Score {
+		line += fmt.Sprintf(" (в сумме %d/%d — расходится с итоговой)", sum, limit)
+	}
+	return line
 }
 
 // linkOf — адрес страницы. Ссылка из блога точнее той, что записана во входном файле: слаг

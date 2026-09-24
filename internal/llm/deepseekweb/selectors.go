@@ -298,16 +298,33 @@ func isLoginURL(value string) bool {
 	return strings.Contains(value, "/sign_in") || strings.Contains(value, "/login")
 }
 
-// modeSelector — переключатель режима ответа над полем ввода нового чата: группа
+// modeSelector — прежний переключатель режима ответа над полем ввода нового чата: группа
 // role="radio" с data-model-type у каждого пункта (default — «Instant», expert, vision).
+//
+// На странице его больше нет: 21.09.2026 в сохранённом снимке (output/<задача>/debug/deepseek)
+// ни одного data-model-type и ни одного role="radio" не осталось вовсе. Селектор сохранён
+// намеренно — он ищется первым и стоит один querySelectorAll, а вернувшийся выбор режима
+// заработает без правки кода.
 const modeSelector = `[data-model-type]`
+
+// reasoningLabels — подписи тумблера рассуждения. Своего атрибута у него нет, классы
+// генерируются сборкой, подпись локализована — сверяются обе, как у поиска.
+var reasoningLabels = []string{"deepthink", "глубокое мышление"}
 
 // selectModeJS переключает интерфейс в заданный режим.
 //
-// Режим опознаётся сначала по data-model-type, и только потом по подписи: подпись
-// локализована (в профиле стоит английский, и «Быстрый» на странице не встречается вовсе),
-// а классы генерируются сборкой. Уже выбранный режим повторно не нажимается — у пунктов
-// aria-checked, и второе нажатие ничего не улучшит.
+// Порядок поиска — от точного к общему, и каждый шаг отвечает своему состоянию интерфейса:
+//
+//  1. data-model-type — прежняя группа выбора режима. Сегодня её на странице нет, но шаг
+//     стоит первым: вернётся — заработает сам.
+//  2. Тумблер рассуждения рядом с полем ввода. Сегодня режим ответа выражается только им:
+//     expert — нажат, default — отжат. Это единственная причина, по которой режим вообще
+//     двусторонний: у поиска хватает включения, а здесь оставленный с прошлой стадии
+//     DeepThink молча увёл бы разметку в режим рассуждения.
+//  3. Подпись пункта — на случай, если выбор режима вернётся не группой радиокнопок.
+//
+// Уже выставленный режим повторно не нажимается: у пунктов aria-checked, у тумблера
+// aria-pressed, и второе нажатие тумблер как раз выключило бы.
 const selectModeJS = `(options) => {
   const visible = (element) => {
     const style = window.getComputedStyle(element);
@@ -315,26 +332,50 @@ const selectModeJS = `(options) => {
     return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
   };
   const normalize = (value) => (value || "").replace(/\s+/g, " ").trim().toLowerCase();
+  const pressed = (control) => ["aria-checked", "aria-pressed", "aria-selected"]
+    .some((attribute) => control.getAttribute(attribute) === "true");
   const mode = normalize(options.mode);
+
   const byType = Array.from(document.querySelectorAll(options.modeSelector))
     .filter(visible)
     .find((control) => normalize(control.getAttribute("data-model-type")) === mode);
-  const byLabel = () => Array.from(document.querySelectorAll(
+  if (byType) {
+    if (pressed(byType)) return "already";
+    byType.click();
+    return "clicked";
+  }
+
+  if (mode === "expert" || mode === "default") {
+    const reasoning = Array.from(document.querySelectorAll(options.toggleSelector))
+      .filter(visible)
+      .find((control) => options.reasoningLabels.includes(normalize(control.innerText)));
+    if (reasoning) {
+      const want = mode === "expert";
+      if (pressed(reasoning) === want) return "already";
+      reasoning.click();
+      return "clicked";
+    }
+  }
+
+  const byLabel = Array.from(document.querySelectorAll(
     'button, [role="button"], [role="menuitem"], [role="option"], [role="radio"], [role="tab"], [role="switch"]'
   )).filter(visible).find((control) => normalize(control.innerText) === mode);
-  const match = byType || byLabel();
-  if (!match) return "not_found";
-  for (const attribute of ["aria-checked", "aria-pressed", "aria-selected"]) {
-    if (match.getAttribute(attribute) === "true") return "already";
-  }
-  match.click();
+  if (!byLabel) return "not_found";
+  if (pressed(byLabel)) return "already";
+  byLabel.click();
   return "clicked";
 }`
 
 // searchToggleSelector — кнопки-переключатели рядом с полем ввода: «DeepThink» и «Search».
-// Это не та группа, что у режима ответа: у режима свой data-model-type и своё состояние,
-// а здесь обычные тумблеры с aria-pressed, и включаются они независимо друг от друга.
+// Обычные тумблеры с aria-pressed, включаются независимо друг от друга.
+//
+// Селектор один на оба тумблера, и его же берёт выбор режима: прежней группы режима ответа
+// на странице больше нет, и «рассуждать» сегодня — это тот самый DeepThink. Различают их
+// подписи (reasoningLabels против searchLabels), а не селектор: своих атрибутов у кнопок нет.
 const searchToggleSelector = `.ds-toggle-button, [class*="toggle-button"]`
+
+// searchLabels — подписи тумблера поиска, обе локали.
+var searchLabels = []string{"search", "поиск"}
 
 // toggleSearchJS включает поиск, если он ещё не включён.
 //
@@ -348,10 +389,9 @@ const toggleSearchJS = `(options) => {
     return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
   };
   const normalize = (value) => (value || "").replace(/\s+/g, " ").trim().toLowerCase();
-  const labels = ["search", "поиск"];
   const match = Array.from(document.querySelectorAll(options.selector))
     .filter(visible)
-    .find((control) => labels.includes(normalize(control.innerText)));
+    .find((control) => options.labels.includes(normalize(control.innerText)));
   if (!match) return "not_found";
   if (match.getAttribute("aria-pressed") === "true") return "already";
   match.click();

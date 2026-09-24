@@ -3,12 +3,13 @@ package main
 import (
 	"context"
 	"fmt"
+	"html"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/foxylis237/seo-pipeline/internal/integrations/wordpress"
-	"github.com/foxylis237/seo-pipeline/internal/pipeline/generation"
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/repository"
 )
 
@@ -48,10 +49,33 @@ type wordPressRepublishClient interface {
 // У записей, созданных раньше самих полей, их нет вовсе — такое поле правка заводит впервые.
 var republishFields = []string{blogFieldRelatedCourses, blogFieldTLDR, blogFieldReadTime}
 
-// bodyImageRE — картинка, которую публикация вставила в тело записи. При перезаписи её нужно
-// перенести: адрес вложения известен только той публикации, что его загружала, а грузить
-// второй раз — плодить копии в медиабиблиотеке.
-var bodyImageRE = regexp.MustCompile(`(?is)<img[^>]*class="[^"]*wp-image-\d+[^"]*"[^>]*>\s*(?:<p>\s*Источник изображения:.*?</p>)?`)
+// bodyImageRE — картинка, которую публикация вставила в тело записи. Из неё берутся адрес
+// вложения и его идентификатор: грузить файл второй раз значит плодить копии в
+// медиабиблиотеке, а больше этот адрес нигде не хранится.
+//
+// Ищется только сам <img>: обёртка и подпись вокруг него у площадок разные и собираются
+// заново, а не переносятся.
+var bodyImageRE = regexp.MustCompile(`(?is)<img[^>]*class="[^"]*wp-image-(\d+)[^"]*"[^>]*>`)
+
+// bodyImageSrcRE — адрес файла внутри найденного <img>.
+var bodyImageSrcRE = regexp.MustCompile(`(?is)\bsrc="([^"]+)"`)
+
+// storedBodyImage вынимает из прежней записи вложение, которым была её картинка тела.
+func storedBodyImage(contentHTML string) (wordpress.UploadedMedia, bool) {
+	tag := bodyImageRE.FindStringSubmatch(contentHTML)
+	if len(tag) < 2 {
+		return wordpress.UploadedMedia{}, false
+	}
+	id, err := strconv.ParseInt(tag[1], 10, 64)
+	if err != nil {
+		return wordpress.UploadedMedia{}, false
+	}
+	src := bodyImageSrcRE.FindStringSubmatch(tag[0])
+	if len(src) < 2 {
+		return wordpress.UploadedMedia{}, false
+	}
+	return wordpress.UploadedMedia{AttachmentID: id, URL: html.UnescapeString(src[1])}, true
+}
 
 func runWordPressRepublish(
 	ctx context.Context, deps wordPressPublishDeps, client wordPressRepublishClient, externalID string,
@@ -80,11 +104,18 @@ func runWordPressRepublish(
 	if err != nil {
 		return fmt.Errorf("прочитать запись %d статьи %s: %w", postID, externalID, err)
 	}
-	// Картинка тела переносится из прежней записи. Она пришла из медиабиблиотеки при первой
-	// публикации, и её адрес больше нигде не хранится.
-	if block := strings.TrimSpace(bodyImageRE.FindString(stored.ContentHTML)); block != "" {
-		payload.ContentHTML = generation.InsertBeforeMiddleHeading(payload.ContentHTML, block)
-		logger.Info("картинка тела перенесена из прежней записи", "post_id", postID)
+	// Картинка тела берётся из прежней записи: она пришла из медиабиблиотеки при первой
+	// публикации, и её адрес больше нигде не хранится. А вот блок вокруг неё собирается
+	// заново, теми же правилами, что и при публикации.
+	//
+	// Переносить готовый кусок разметки нельзя, и это измерено: у страницы услуги картинка
+	// обёрнута <figure>, подпись идёт отдельным абзацем, а место — перед первым заголовком, а
+	// не в середине. Перенос куска ронял обёртку с подписью и уводил картинку в середину —
+	// каждая правка молча портила запись ещё на шаг.
+	if media, ok := storedBodyImage(stored.ContentHTML); ok {
+		payload.ContentHTML = insertBodyImage(plan, media, payload.ContentHTML)
+		logger.Info("картинка тела пересобрана из прежней записи", "post_id", postID,
+			"attachment_id", media.AttachmentID)
 	}
 
 	fields := republishFieldUpdates(payload, stored)

@@ -244,3 +244,46 @@ func RestoreStatsList(page, markup string) string {
 	}
 	return block + "\n" + markup
 }
+
+// RestoreStatsTable возвращает в разметку плашку параметров программы таблицей.
+//
+// Третий вариант того же восстановления, и выбирает его не вкус, а площадка. У статьи блога
+// плашки — ряд карточек (RestoreStats), у статьи площадки без инлайновых стилей — список
+// (RestoreStatsList), у коммерческой страницы той же площадки — одноколоночная таблица:
+// снято с живых страниц, где плашка это единственная таблица на всю страницу, у неё нет
+// шапки, а каждая строка выглядит как «<td><strong>Срок:</strong> 150 часов</td>».
+//
+// Как и у сестёр, блок собирает код: значения известны целиком (они пришли колонками книги),
+// место известно, а просить у модели страницу заново — значит упереться в тот же предел
+// длины ответа, в который упёрся первый заход.
+//
+// Уже свёрстанная моделью плашка не дублируется: признак — подпись первой строки, стоящая в
+// разметке жирной.
+func RestoreStatsTable(page, markup string) string {
+	match := statsLineRE.FindStringSubmatch(page)
+	if match == nil {
+		return markup
+	}
+	rows := make([]string, 0, 4)
+	for _, item := range strings.Split(match[1], ";;") {
+		value, label, found := strings.Cut(item, "|")
+		value, label = strings.TrimSpace(value), strings.TrimSpace(label)
+		if !found || value == "" || label == "" {
+			continue
+		}
+		// Подпись у этой плашки идёт первой и жирной, а значение за ней: «Срок: 150 часов».
+		// У соседей наоборот — там плашка это карточка с крупной цифрой, а здесь строка
+		// таблицы, и читается она как графа, а не как цифра с подписью.
+		if len(rows) == 0 && strings.Contains(markup, "<strong>"+html.EscapeString(label)+":</strong>") {
+			return markup
+		}
+		rows = append(rows, "<tr><td><strong>"+html.EscapeString(label)+":</strong> "+
+			html.EscapeString(value)+"</td></tr>")
+	}
+	if len(rows) == 0 {
+		return markup
+	}
+	block := plainFigureOpen + `<table ` + plainTableClass + `><tbody>` +
+		strings.Join(rows, "") + `</tbody></table>` + plainFigureClose
+	return InsertBeforeFirstHeading(markup, block)
+}

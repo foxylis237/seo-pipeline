@@ -116,7 +116,7 @@ func (c *Client) EditPost(ctx context.Context, update PostUpdate) error {
 }
 
 // value — то, что уходит в custom_fields этого поля. Правило одно с созданием записи.
-func (f FieldUpdate) value() any { return customFieldValue(f.Value, f.IDs) }
+func (f FieldUpdate) value() any { return customFieldValue(f.Value, f.IDs, nil) }
 
 // VerifyFields сверяет поля, ушедшие правкой, с тем, что вернуло чтение записи.
 //

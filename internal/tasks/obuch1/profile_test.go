@@ -89,22 +89,47 @@ func TestEveryStageHasItsOwnPrompt(t *testing.T) {
 // Регламент прикреплён ровно к тем стадиям, которые решают, какой статья будет, и ни к одной
 // другой.
 //
-// Разметке он не прикрепляется намеренно: вёрстка площадки описана в самом промпте
-// 4_html.txt, и документ был бы её вторым описанием — они разошлись бы молча. Пустой каталог
-// при этом роняет стадию до обращения к модели, поэтому лишний attachments_dir у html стоил
-// бы прогона.
-func TestRegulationIsAttachedToStructureAndExpertOnly(t *testing.T) {
+// Регламентов два, и у каждого своя стадия: статью описывает один, вёрстку — другой.
+// Редактуре и метаданным документ не прикрепляется: беседа чата 2 помнит его с первого
+// сообщения, а второй раз он стоил бы длины ответа. Пустой каталог роняет стадию до
+// обращения к модели, поэтому лишний attachments_dir стоил бы прогона.
+func TestRegulationsAreAttachedToTheirStages(t *testing.T) {
 	attached := stageAttachments(t)
 	for _, stage := range []string{StageStructure, StageExpert} {
 		if attached[stage] != RegulationDir {
-			t.Fatalf("стадия %q не получает регламент: %q", stage, attached[stage])
+			t.Fatalf("стадия %q не получает регламент статьи: %q", stage, attached[stage])
 		}
 	}
-	for _, stage := range []string{StageHTML, StageReview, StageInfo, StageArticle, StageKeywords} {
+	if attached[StageHTML] != MarkupRegulationDir {
+		t.Fatalf("разметка не получает регламент вёрстки: %q", attached[StageHTML])
+	}
+	for _, stage := range []string{StageReview, StageInfo, StageArticle, StageKeywords} {
 		if attached[stage] != "" {
 			t.Fatalf("стадия %q получает документ %q, хотя не должна", stage, attached[stage])
 		}
 	}
+}
+
+// Регламент вёрстки обязан лежать на диске и быть непустым: пустой каталог вложения роняет
+// стадию разметки, а прогон к этому моменту уже оплачен тремя чатами.
+func TestMarkupRegulationFileExists(t *testing.T) {
+	entries, err := os.ReadDir(filepath.Join(projectRoot, filepath.FromSlash(MarkupRegulationDir)))
+	if err != nil {
+		t.Fatalf("каталог регламента вёрстки не читается: %v", err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Size() > 0 {
+			return
+		}
+	}
+	t.Fatal("в каталоге регламента вёрстки нет ни одного непустого документа")
 }
 
 // Документы стадий тоже свои: регламент чужой площадки описывает чужие нормы.

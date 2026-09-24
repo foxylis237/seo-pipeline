@@ -52,7 +52,24 @@ type extraInputColumn struct {
 // seo_title — короткий заголовок для поисковой выдачи (_yoast_wpseo_title). Он одинаково
 // нужен и странице услуги, и статье блога: название статьи человек читает в админке, а поиск
 // режет заголовок примерно на 60 знаках, и короткую строку приходится хранить отдельно.
-var SharedInputColumns = []string{"seo_title"}
+//
+// profession — название профессии, о которой страница. Его объявили обе задачи коммерческих
+// страниц, по одной на площадку, и значит оно у них буквально одно и то же: не список
+// похожих профессий для перелинковки (это professions), а предмет самой страницы. Второго
+// имени тому же полю заводить нельзя, а где оно в итоге окажется — в поле ACF prof_name у
+// одной площадки и только в result.md у другой, — свойство площадки, а не колонки.
+//
+// hours, duration, price, document, attestation — числа программы. Их объявили обе задачи
+// коммерческих страниц, по одной на площадку, и значит они у них буквально одни и те же:
+// объём, срок, стоимость, документ по итогам и форма аттестации той самой программы, о
+// которой страница. Держать их в книге, а не выводить из вида программы, — общее решение
+// обеих площадок: те же пять значений человек заполняет в полях записи руками, и второй их
+// источник разошёлся бы с первым молча. Расходятся площадки не смыслом колонки, а тем, куда
+// значение попадает на странице, — это свойство вёрстки, а не колонки.
+var SharedInputColumns = []string{
+	"seo_title", "profession",
+	"hours", "duration", "price", "document", "attestation",
+}
 
 // extraInputColumns — реестр необщих колонок.
 //
@@ -104,6 +121,55 @@ var extraInputColumns = map[string]extraInputColumn{
 		typeName: "text", nullable: true,
 		write: func(input article.Input) string { return input.ServiceName },
 		read:  func(result *article.ResultInput) *string { return &result.ServiceName },
+	},
+	// Колонки коммерческой страницы площадки без ACF. Числа программы приходят из книги, а
+	// не от модели: те же значения человек заполняет в полях записи руками, и второй
+	// источник того же числа разошёлся бы с первым молча.
+	//
+	// Все они читаются в result.md — именно затем, чтобы расхождение книги с админкой было
+	// видно человеку на одном листе.
+	"post_type": {
+		typeName: "text", nullable: true,
+		write: func(input article.Input) string { return input.PostType },
+		read:  func(result *article.ResultInput) *string { return &result.PostType },
+	},
+	"hours": {
+		typeName: "text", nullable: true,
+		write: func(input article.Input) string { return input.Hours },
+		read:  func(result *article.ResultInput) *string { return &result.Hours },
+	},
+	"duration": {
+		typeName: "text", nullable: true,
+		write: func(input article.Input) string { return input.Duration },
+		read:  func(result *article.ResultInput) *string { return &result.Duration },
+	},
+	"price": {
+		typeName: "text", nullable: true,
+		write: func(input article.Input) string { return input.Price },
+		read:  func(result *article.ResultInput) *string { return &result.Price },
+	},
+	"document": {
+		typeName: "text", nullable: true,
+		write: func(input article.Input) string { return input.Document },
+		read:  func(result *article.ResultInput) *string { return &result.Document },
+	},
+	"attestation": {
+		typeName: "text", nullable: true,
+		write: func(input article.Input) string { return input.Attestation },
+		read:  func(result *article.ResultInput) *string { return &result.Attestation },
+	},
+	"image_source_url": {
+		typeName: "text", nullable: true,
+		write: func(input article.Input) string { return input.ImageSourceURL },
+		read:  func(result *article.ResultInput) *string { return &result.ImageSourceURL },
+	},
+	// Колонка статей блога второй площадки: адрес курса, на который ведёт кнопка призыва.
+	//
+	// read пуст намеренно: адрес виден в самой кнопке готовой статьи, и второй его копии в
+	// result.md заводить незачем. Читает колонку поток генерации через GetGenerationInput.
+	"course_url": {
+		typeName: "text", nullable: true,
+		write: func(input article.Input) string { return input.CourseURL },
 	},
 }
 

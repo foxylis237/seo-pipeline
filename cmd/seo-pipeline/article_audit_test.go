@@ -171,8 +171,8 @@ func TestArticleAuditPromptFormatMatchesParser(t *testing.T) {
 			t.Fatalf("задача %s: %v", profile.Name, err)
 		}
 		headings := promptSectionHeadings(string(content))
-		if len(headings) != 2 {
-			t.Fatalf("задача %s: в формате ответа %d заголовков разделов, ожидалось 2: %v",
+		if len(headings) != 3 {
+			t.Fatalf("задача %s: в формате ответа %d заголовков разделов, ожидалось 3: %v",
 				profile.Name, len(headings), headings)
 		}
 		var answer strings.Builder
@@ -189,7 +189,11 @@ func TestArticleAuditPromptFormatMatchesParser(t *testing.T) {
 				profile.Name, parsed.Score, parsed.ScoreMax)
 		}
 		// Каждая метка легла ровно в один раздел, и разделы не перепутались местами.
-		sections := []string{articleaudit.SectionCritical, articleaudit.SectionIssues}
+		sections := []string{
+			articleaudit.SectionBreakdown,
+			articleaudit.SectionCritical,
+			articleaudit.SectionIssues,
+		}
 		for index, section := range sections {
 			want := fmt.Sprintf("метка-%d", index)
 			if got := parsed.Section(section); got != want {
@@ -230,9 +234,10 @@ var promptHeadingRE = regexp.MustCompile(`^[1-9]\. [А-ЯЁ][^.]*$`)
 const codeFence = "```"
 
 // realisticAnswer — ответ в том виде, в каком его присылает веб-интерфейс модели: обёрнутый
-// в блок кода, с markdown-разметкой заголовков, с нумерацией из привычного модели порядка и с
-// разделами, которых формат не просит. Всё это разбор обязан пережить: за ответ заплачено, а
-// лишние разделы не должны подмешаться в список ошибок.
+// в блок кода, с markdown-разметкой заголовков, с нумерацией из привычного модели порядка, с
+// разделом, которого формат не просит, и с разбором по критериям под прежним именем. Всё это
+// разбор обязан пережить: за ответ заплачено, рекомендации не должны подмешаться в список
+// ошибок, а разбор — потеряться из-за того, что модель назвала его по-своему.
 const realisticAnswer = "```markdown\n" + `Количество слов: 1 240
 Ключевые запросы: обучение на логопеда, курсы логопеда дистанционно
 Итоговая оценка: 13/20
@@ -283,6 +288,11 @@ func TestArticleAuditTemplateRendersParsedAnswer(t *testing.T) {
 			t.Fatalf("маркер блока кода попал в раздел %q: %q", section, parsed.Section(section))
 		}
 	}
+	// Разбор под прежним именем найден, и баллы из него разобраны: на них держится и строка
+	// шапки отчёта, и колонка слабого места в сводке.
+	if len(parsed.Criteria) != 2 || parsed.Criteria[0].Name != "Структура" {
+		t.Fatalf("разбор по критериям не разобран: %+v", parsed.Criteria)
+	}
 
 	article := articleaudit.Article{ExternalID: "2", SourceURL: "https://dpoprof.ru/obuchenie-medpersonala/logoped/",
 		Slug: "logoped", Topic: "Логопед"}
@@ -322,7 +332,7 @@ func TestArticleAuditTemplateRendersParsedAnswer(t *testing.T) {
 		}
 		// Находки тоже лежат блоками: отчёт копируют кусками, и вычищать разметку после
 		// вставки человек не должен.
-		if strings.Count(text, "```text") != 4 {
+		if strings.Count(text, "```text") != 5 {
 			t.Fatalf("задача %s: не все разделы отчёта копируются блоком:\n%s", profile.Name, text)
 		}
 		// Совет «как исправить» доезжает до отчёта: он часть критической ошибки.

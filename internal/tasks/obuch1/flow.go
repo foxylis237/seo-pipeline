@@ -12,6 +12,7 @@ import (
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/generation"
 	articleoutput "github.com/foxylis237/seo-pipeline/internal/pipeline/output"
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/taskflow"
+	"github.com/foxylis237/seo-pipeline/internal/tasks"
 )
 
 // Repository — то, что поток требует от хранилища. Интерфейс объявлен у потребителя и
@@ -64,11 +65,14 @@ type Flow struct {
 	repository Repository
 	writer     Writer
 	names      LinkNames
-	// ctaButtonPath — шаблон кнопки призыва. Поле, а не константа по месту: тест подставляет
-	// временный файл, а прогон — CTAButtonPath.
-	ctaButtonPath string
+	// ctaCardPath — шаблон карточки призыва. Поле, а не константа по месту: тест подставляет
+	// временный файл, а прогон — CTACardPath.
+	ctaCardPath string
+	// blockTemplatesDir — каталог шаблонов визуальных блоков тела статьи. Поле по той же
+	// причине, что и ctaCardPath: тест подставляет свой каталог.
+	blockTemplatesDir string
 	// programs — каталог услуг площадки. Нужен ровно затем, чтобы адрес кнопки призыва вёл
-	// на существующую страницу; nil означает прежнее поведение.
+	// на существующую страницу; nil означает, что адрес из книги принимается без сверки.
 	programs ProgramCatalog
 }
 
@@ -77,19 +81,20 @@ func NewFlow(repository Repository, writer Writer, chats taskflow.ChatFactory,
 	prompts taskflow.PromptRenderer, logger *slog.Logger, publisher taskflow.PromptPublisher,
 	names LinkNames) *Flow {
 	return &Flow{
-		Base:          taskflow.NewBase(repository, writer, chats, prompts, logger, publisher),
-		repository:    repository,
-		writer:        writer,
-		names:         names,
-		ctaButtonPath: CTAButtonPath,
+		Base:              taskflow.NewBase(repository, writer, chats, prompts, logger, publisher),
+		repository:        repository,
+		writer:            writer,
+		names:             names,
+		ctaCardPath:       CTACardPath,
+		blockTemplatesDir: tasks.CommonBlockTemplatesDir,
 	}
 }
 
 // ProgramCatalog отвечает, есть ли такая страница программы в каталоге площадки.
 //
 // Интерфейс объявлен здесь, у потребителя: потоку нужен один ответ «да/нет», а откуда он —
-// из PostgreSQL или из подмены в тесте — его не касается. nil означает прежнее поведение:
-// адрес кнопки принимается таким, каким его назвала модель.
+// из PostgreSQL или из подмены в тесте — его не касается. nil означает, что адрес курса из
+// книги импорта принимается без сверки.
 type ProgramCatalog interface {
 	HasProgram(ctx context.Context, url string) (bool, error)
 }
@@ -97,7 +102,8 @@ type ProgramCatalog interface {
 // UseProgramCatalog включает сверку адреса кнопки призыва с каталогом услуг.
 //
 // Не аргумент конструктора, а отдельный вызов: зависимость необязательная, и задача без
-// собранного каталога обязана работать ровно как раньше.
+// собранного каталога обязана работать ровно как раньше — адрес из книги уходит в кнопку
+// как есть.
 func (f *Flow) UseProgramCatalog(programs ProgramCatalog) { f.programs = programs }
 
 // LinkNames отдаёт название программы по адресу её страницы.
@@ -140,6 +146,11 @@ func (f *Flow) RunStructure(ctx context.Context, externalID string) error {
 		return taskflow.StageFailure(externalID, "load_generation_data", err)
 	}
 	logger := f.ArticleLogger(input.Article)
+	// Адрес курса проверяется первым: статья без него всё равно не соберётся на стадии html,
+	// и узнать об этом дешевле до единого сообщения модели.
+	if _, err := f.courseURL(ctx, logger, input); err != nil {
+		return f.Fail(ctx, logger, input.Article, "load_generation_data", err)
+	}
 	if err := f.repository.BeginGeneration(ctx, input.Article.ID); err != nil {
 		return f.Fail(ctx, logger, input.Article, "begin_generation", err)
 	}
@@ -348,7 +359,11 @@ func (f *Flow) RunHTML(ctx context.Context, externalID string) error {
 		return taskflow.StageFailure(externalID, "load_generation_data", err)
 	}
 	logger := f.ArticleLogger(input.Article)
-	button, err := readCTAButton(f.ctaButtonPath)
+	card, err := readCTACard(f.ctaCardPath)
+	if err != nil {
+		return f.Fail(ctx, logger, input.Article, "load_article_data", err)
+	}
+	courseURL, err := f.courseURL(ctx, logger, input)
 	if err != nil {
 		return f.Fail(ctx, logger, input.Article, "load_article_data", err)
 	}
@@ -409,7 +424,8 @@ func (f *Flow) RunHTML(ctx context.Context, externalID string) error {
 		return f.Fail(ctx, logger, input.Article, "html_generation", err)
 	}
 	html = f.completeLinks(ctx, logger, chat, named, f.completeHTMLPage(logger, finalText, html))
-	html = f.appendCTA(ctx, logger, chat, button, input.Article.Title, html)
+	html = f.decorate(logger, html)
+	html = f.appendCTA(ctx, logger, chat, card, input.Article.Title, courseURL, html)
 	pending, err := f.writer.StageHTML(input.Article.ExternalID, input.Article.Slug, prompt, html)
 	if err != nil {
 		return f.Fail(ctx, logger, input.Article, "save_html", err)
@@ -447,75 +463,100 @@ func (f *Flow) completeHTMLPage(logger *slog.Logger, page, markup string) string
 	return markup
 }
 
+// decorate разворачивает помеченные визуальные блоки в оформление площадки.
+//
+// Идёт после чистки: CleanPlainBlogMarkup снимает <div> и style, и поставленное до него
+// оформление она бы и сняла. Отказ шаблонов стадию не роняет — статья остаётся с обычными
+// списками и врезкой-цитатой, это хуже видом, но не содержанием.
+func (f *Flow) decorate(logger *slog.Logger, markup string) string {
+	blocks, err := generation.ReadBlockTemplates(f.blockTemplatesDir)
+	if err != nil {
+		logger.Warn("шаблоны визуальных блоков не прочитаны, статья уходит без оформления блоков",
+			"stage", "html_generation", "error", err)
+		return markup
+	}
+	return generation.DecorateBlocks(markup, blocks)
+}
+
 // appendCTA дописывает кнопку призыва в конец разметки.
 //
 // Заголовок раздела и абзац перед кнопкой модель уже написала — они часть статьи и стоят в
 // её структуре. Кодом ставится только кнопка: у неё фиксированные инлайновые стили и класс,
 // за который цепляется оформление площадки.
 //
-// Надпись и адрес спрашиваются отдельным коротким сообщением в том же чате: страница уже в
-// истории, и второй раз её передавать нельзя. Отказ доспроса стадию не роняет — кнопка
-// собирается на умолчаниях: раздел призыва без кнопки обрывается на абзаце, за которым
+// Строки карточки спрашиваются отдельным коротким сообщением в том же чате: страница уже в
+// истории, и второй раз её передавать нельзя. Отказ доспроса стадию не роняет — карточка
+// собирается на умолчаниях: раздел призыва без неё обрывается на абзаце, за которым
 // читателю некуда нажать.
 func (f *Flow) appendCTA(ctx context.Context, logger *slog.Logger, chat taskflow.Chat,
-	tmpl *template.Template, title, markup string) string {
+	tmpl *template.Template, title, courseURL, markup string) string {
 	var slots map[string]string
-	answer, err := f.Answer(ctx, chat.Continue, ctaSlotsPrompt(title), StageHTML)
+	answer, err := f.Answer(ctx, chat.Continue, ctaSlotsPrompt(title, courseURL), StageHTML)
 	if err != nil {
-		logger.Warn("надпись и адрес кнопки призыва не получены, кнопка соберётся на умолчаниях",
+		logger.Warn("строки карточки призыва не получены, карточка соберётся на умолчаниях",
 			"stage", "html_generation", "error", err)
 	} else {
 		slots = parseCTASlots(answer)
 	}
-	f.dropUnknownCTAURL(ctx, logger, slots)
-	button, missing := buildCTAButton(slots, ctaFallbackURL)
+	card, missing := buildCTACard(slots, courseURL)
 	if len(missing) > 0 {
-		logger.Warn("часть слотов кнопки призыва заменена умолчаниями",
+		logger.Warn("часть слотов карточки призыва заменена умолчаниями",
 			"stage", "html_generation", "slots", strings.Join(missing, ", "))
 	}
-	rendered, err := renderCTAButton(tmpl, button)
+	rendered, err := renderCTACard(tmpl, card)
 	if err != nil {
-		logger.Warn("кнопка призыва не собрана, статья уходит без неё",
+		logger.Warn("карточка призыва не собрана, статья уходит без неё",
 			"stage", "html_generation", "error", err)
 		return markup
 	}
-	result, added := appendCTAButton(markup, rendered)
+	result, added := appendCTACard(markup, rendered)
 	if !added {
-		logger.Warn("в разметке уже есть кнопка призыва — свою не дописываем",
+		logger.Warn("в разметке уже есть призыв — свою карточку не дописываем",
 			"stage", "html_generation")
 		return result
 	}
-	logger.Info("кнопка призыва дописана кодом", "stage", "html_generation",
-		"button_url", button.ButtonURL)
+	logger.Info("карточка призыва дописана кодом", "stage", "html_generation",
+		"button_url", card.ButtonURL)
 	return result
 }
 
-// dropUnknownCTAURL убирает адрес кнопки, которого нет в каталоге услуг площадки.
+// courseURL — адрес курса, на который ведёт кнопка призыва.
 //
-// ctaURL проверяет только префикс http — значит модель вправе собрать правдоподобный адрес
-// несуществующей программы, и он уйдёт в опубликованную статью ссылкой в никуда. Каталог
-// отвечает на это без единого запроса к модели.
+// Приходит колонкой course_url книги импорта, а не от модели: кнопка ведёт в деньги, и
+// решать, на какой курс уходит читатель, обязан человек. Поэтому незаполненная колонка —
+// отказ, а не умолчание: статья с кнопкой на случайную программу хуже, чем ненаписанная.
 //
-// Убранный слот дальше проходит общим путём: buildCTACard подставит раздел рабочих профессий
-// и отметит слот заменённым. Молчащий или пустой каталог адрес не трогает — отменять
-// возможно верную ссылку из-за недоступной базы хуже, чем оставить её как есть.
-func (f *Flow) dropUnknownCTAURL(ctx context.Context, logger *slog.Logger, slots map[string]string) {
-	url, named := slots["адрес"]
-	if f.programs == nil || !named || strings.TrimSpace(url) == "" {
-		return
+// Проверка стоит до первого сообщения модели (RunStructure) и повторяется там, где адрес
+// используется (RunHTML): книгу правят по ходу работы, а стадии запускают поодиночке.
+// Отказ стоит нисколько — ни один чат к этому моменту не открыт.
+//
+// Молчащий или пустой каталог адрес не отменяет: остановить статью из-за недоступной базы
+// хуже, чем принять ссылку, которую человек написал руками.
+func (f *Flow) courseURL(ctx context.Context, logger *slog.Logger, input article.GenerationInput) (string, error) {
+	url := strings.TrimSpace(input.CourseURL)
+	if url == "" {
+		return "", fmt.Errorf("не заполнена колонка course_url книги импорта: " +
+			"кнопка призыва ведёт на курс, и её адрес задаёт книга, а не модель")
+	}
+	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
+		return "", fmt.Errorf("адрес курса %q не похож на ссылку: ожидается http(s)-адрес "+
+			"страницы курса на сайте площадки", url)
+	}
+	if f.programs == nil {
+		return url, nil
 	}
 	known, err := f.programs.HasProgram(ctx, url)
 	if err != nil {
-		logger.Warn("адрес кнопки призыва не сверен с каталогом услуг",
-			"stage", "html_generation", "button_url", url, "error", err)
-		return
+		logger.Warn("адрес курса не сверен с каталогом услуг",
+			"stage", "load_article_data", "course_url", url, "error", err)
+		return url, nil
 	}
-	if known {
-		return
+	if !known {
+		return "", fmt.Errorf("адреса курса %s нет в каталоге услуг площадки: "+
+			"проверьте колонку course_url книги импорта или пересоберите каталог "+
+			"командой make obuch-1 catalog-sync", url)
 	}
-	logger.Warn("адрес кнопки призыва не найден в каталоге услуг — кнопка ведёт в раздел",
-		"stage", "html_generation", "button_url", url)
-	delete(slots, "адрес")
+	return url, nil
 }
 
 // enoughInternalLinks — столько ссылок перелинковки в тексте достаточно: недостающие к ним уже

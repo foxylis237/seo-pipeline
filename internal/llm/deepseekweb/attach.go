@@ -36,12 +36,21 @@ func (c *Client) SupportsAttachments() bool { return true }
 // Отсутствие переключателя стадию не роняет: промпт уйдёт в текущем режиме, ответ будет
 // получен, и терять оплаченный прогон из-за переехавшей кнопки нельзя. Но событие это не
 // рядовое — в лог уходит предупреждение, а на диск состояние страницы.
+//
+// Переключение двустороннее, в отличие от поиска: сегодня режим ответа выражается тумблером
+// DeepThink (см. selectModeJS), профиль браузера переживает прогон, и оставленное с прошлой
+// стадии рассуждение молча увело бы в него разметку — стадию, которой оно не нужно.
 func (c *Client) applyMode(page playwright.Page, request llm.Request, newChat bool) {
 	mode := strings.TrimSpace(request.Mode)
 	if mode == "" || !newChat {
 		return
 	}
-	value, err := page.Evaluate(selectModeJS, map[string]any{"mode": mode, "modeSelector": modeSelector})
+	value, err := page.Evaluate(selectModeJS, map[string]any{
+		"mode":            mode,
+		"modeSelector":    modeSelector,
+		"toggleSelector":  searchToggleSelector,
+		"reasoningLabels": reasoningLabels,
+	})
 	if err != nil {
 		c.logger.Warn("DeepSeek mode was not switched", "mode", mode, "error", err)
 		return
@@ -66,7 +75,10 @@ func (c *Client) applySearch(page playwright.Page, request llm.Request, newChat 
 	if !request.Search || !newChat {
 		return
 	}
-	value, err := page.Evaluate(toggleSearchJS, map[string]any{"selector": searchToggleSelector})
+	value, err := page.Evaluate(toggleSearchJS, map[string]any{
+		"selector": searchToggleSelector,
+		"labels":   searchLabels,
+	})
 	if err != nil {
 		c.logger.Warn("DeepSeek search was not switched on", "error", err)
 		return

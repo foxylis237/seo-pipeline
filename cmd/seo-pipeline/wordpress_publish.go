@@ -172,9 +172,7 @@ func runWordPressPublish(ctx context.Context, deps wordPressPublishDeps, externa
 	// Площадка, у которой картинок в теле нет вовсе, снимает этот шаг признаком раскладки.
 	// Нулевое значение признака — прежнее поведение, картинка вставляется.
 	if !plan.WithoutBodyImage {
-		if block := bodyImageBlock(media, plan.ImageAlt); block != "" {
-			payload.ContentHTML = generation.InsertBeforeMiddleHeading(payload.ContentHTML, block)
-		}
+		payload.ContentHTML = insertBodyImage(plan, media, payload.ContentHTML)
 	}
 
 	postID, err := deps.client.CreatePost(ctx, payload)
@@ -318,6 +316,52 @@ const (
 	bodyImageStockName = "Pexels"
 )
 
+// insertBodyImage ставит обложку в тело записи так, как это делает площадка задачи.
+//
+// Разметка и место решаются вместе и здесь, а не двумя признаками по разным файлам: это одно
+// решение — как выглядит запись на конкретной площадке. Нулевые значения плана означают
+// прежнее поведение: блок с подписью «Источник изображения: Pexels» перед серединным
+// заголовком, как это было у всех задач до появления коммерческих страниц второй площадки.
+func insertBodyImage(plan wordPressPayloadContext, media wordpress.UploadedMedia, contentHTML string) string {
+	if !plan.BodyImageBeforeFirstHeading {
+		if block := bodyImageBlock(media, plan.ImageAlt); block != "" {
+			return generation.InsertBeforeMiddleHeading(contentHTML, block)
+		}
+		return contentHTML
+	}
+	if block := plainBodyImageBlock(media, plan.ImageAlt, plan.BodyImageSourceURL); block != "" {
+		return generation.InsertBeforeFirstHeading(contentHTML, block)
+	}
+	return contentHTML
+}
+
+// plainBodyImageBlock — обложка в теле записи на площадке без инлайновых стилей.
+//
+// Классы те же, что проставляет редактор WordPress при вставке из медиабиблиотеки: на этой
+// площадке оформление несут только они, и блок, свёрстанный иначе, отличался бы от
+// вставленного руками.
+//
+// Абзац-ссылка печатается только при известном адресе фотографии. Пустой адрес означает, что
+// абзаца нет вовсе: ссылка на главную страницу стока вместо конкретного кадра — выдуманная
+// атрибуция, а в опубликованной записи её уже не отличить от настоящей.
+func plainBodyImageBlock(media wordpress.UploadedMedia, alt, sourceURL string) string {
+	if strings.TrimSpace(media.URL) == "" {
+		return ""
+	}
+	block := fmt.Sprintf(
+		`<figure class="wp-block-image size-large"><img src="%s" alt="%s" class="wp-image-%d" /></figure>`,
+		html.EscapeString(media.URL), html.EscapeString(alt), media.AttachmentID)
+	if sourceURL = strings.TrimSpace(sourceURL); sourceURL == "" {
+		return block
+	}
+	// Подпись — атрибуция стока, а не голая ссылка: сток её требует, а адрес ведёт на
+	// конкретный кадр из книги, а не на главную страницу — выдуманной атрибуции здесь нет.
+	return block + "\n" + fmt.Sprintf(
+		`<p class="wp-block-paragraph">Источник изображения: `+
+			`<a href="%s" target="_blank" rel="nofollow noopener noreferrer">%s</a>.</p>`,
+		html.EscapeString(sourceURL), bodyImageStockName)
+}
+
 // buildWordPressPayload собирает нагрузку и проверяет всё, что можно проверить локально.
 //
 // createMissingTags разводит два вызова одной сборки. Боевая публикация заводит недостающие
@@ -425,8 +469,12 @@ func buildWordPressPayloadFor(
 		FAQItems:         len(faqItems),
 		RelatedCourses:   mapped.RelatedCourses,
 		WithoutBodyImage: mapped.WithoutBodyImage,
-		HTMLPath:         input.HTMLPath,
-		ContentRunes:     len([]rune(contentHTML)),
+
+		BodyImageBeforeFirstHeading: mapped.BodyImageBeforeFirstHeading,
+		BodyImageSourceURL:          mapped.BodyImageSourceURL,
+
+		HTMLPath:     input.HTMLPath,
+		ContentRunes: len([]rune(contentHTML)),
 	}
 	return wordpress.PostPayload{
 		Title:            collapseSpaces(input.Article.Title),
@@ -519,8 +567,13 @@ type wordPressPayloadContext struct {
 	// WithoutBodyImage — картинка в тело этой площадки не вставляется. Видно и в сухом
 	// прогоне: человек перед необратимой командой обязан знать, что уйдёт в запись.
 	WithoutBodyImage bool
-	HTMLPath         string
-	ContentRunes     int
+	// BodyImageBeforeFirstHeading и BodyImageSourceURL — как выглядит и где стоит картинка в
+	// теле записи. Нулевые значения означают прежнее поведение: блок «Источник изображения:
+	// Pexels» перед серединным заголовком.
+	BodyImageBeforeFirstHeading bool
+	BodyImageSourceURL          string
+	HTMLPath                    string
+	ContentRunes                int
 }
 
 // formatPlanIDs печатает идентификаторы связи в том порядке, в каком они уйдут.
@@ -880,6 +933,10 @@ func runWordPressPublishPlan(ctx context.Context, deps wordPressPublishDeps, ext
 	// здесь скрыла бы ровно ту разницу, ради которой сухой прогон и запускают.
 	fmt.Fprintf(out, "  %-22s %s\n", "media.alt_text", plan.ImageAlt)
 	fmt.Fprintf(out, "  %-22s %s\n", "media.title", plan.ImageTitle)
+	// Картинка в теле — часть того, как выглядит запись на площадке, и раскладок у неё уже
+	// три. В нагрузке её нет: адрес известен только после загрузки вложения, — поэтому
+	// увидеть решение задачи человек может только здесь.
+	fmt.Fprintf(out, "  %-22s %s\n", "body_image", wordPressPlanBodyImage(plan))
 
 	fmt.Fprintf(out, "\ncustom_fields (%d):\n", len(payload.Fields))
 	for _, field := range payload.Fields {
@@ -998,6 +1055,25 @@ func wordPressPlanTaxonomy(taxonomy string) string {
 		return "category"
 	}
 	return taxonomy
+}
+
+// wordPressPlanBodyImage описывает человеческими словами, что раскладка сделает с обложкой
+// внутри тела записи.
+//
+// Три случая, и все три — решения площадки: не вставлять вовсе, поставить за вводной частью
+// со ссылкой на кадр, поставить в середину с подписью на главную стока. Отличить их по
+// нагрузке нельзя — картинки в ней нет, её адрес появляется только после загрузки вложения.
+func wordPressPlanBodyImage(plan wordPressPayloadContext) string {
+	if plan.WithoutBodyImage {
+		return "не вставляется"
+	}
+	if !plan.BodyImageBeforeFirstHeading {
+		return "перед серединным заголовком, подпись на " + bodyImageStockName
+	}
+	if strings.TrimSpace(plan.BodyImageSourceURL) == "" {
+		return "перед первым заголовком, без ссылки на источник"
+	}
+	return "перед первым заголовком, ссылка на " + plan.BodyImageSourceURL
 }
 
 // countNewWordPressTags считает метки, которых на площадке ещё нет.

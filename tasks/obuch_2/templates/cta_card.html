@@ -1,0 +1,13 @@
+<!-- wp:html -->
+<div class="cta-course-zone" style="background: #fff8f2; padding: 30px; border-top: 4px solid #ff7500; border-radius: 6px; margin-top: 25px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+<p style="color: #333333; line-height: 1.6; font-size: 15px; margin-bottom: 15px;"><b>{{.Heading}}.</b> {{.Intro}}</p>
+<p style="color: #333333; line-height: 1.6; font-size: 15px; margin-bottom: 20px;">После завершения обучения все сведения о выданных документах вносятся в государственную систему ФИС ФРДО Рособрнадзора. Это подтверждает обучение при проверках со стороны работодателей и инспектирующих органов.</p>
+<p style="color: #1a1a1a; font-size: 15px; font-weight: 600; margin-top: 20px; margin-bottom: 12px;">Выдаваемые документы по итогам обучения:</p>
+<ul style="padding-left: 20px; color: #333333; line-height: 1.6; font-size: 15px;">{{range .Documents}}
+<li style="margin-bottom: 8px;"><b>{{.Label}}</b> — {{.Text}}</li>{{end}}
+</ul>
+<div style="margin-top: 25px;">
+<button class="service btn-primary feedback__event" data-popup="popup-contact" style="background: #ff7500; color: #ffffff; padding: 14px 28px; border: none; border-radius: 4px; font-weight: bold; font-size: 16px; cursor: pointer; transition: background 0.2s ease-in-out;" onmouseover="this.style.backgroundColor='#e06700'" onmouseout="this.style.backgroundColor='#ff7500'">{{.ButtonText}}</button>
+</div>
+</div>
+<!-- /wp:html -->

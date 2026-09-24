@@ -22,6 +22,12 @@ type Summary struct {
 	MissingFields []FieldGap
 	// CommonIssues — самые частые находки, чаще первыми.
 	CommonIssues []IssueCount
+	// Criteria — баллы разбора, сложенные по всей пачке, слабое первым.
+	//
+	// По одному отчёту этого не увидеть: «Контент 3/5» на одной странице — замечание к ней,
+	// «Контент 3/5» на сорока — вопрос к тому, кто эти сорок писал. Это и есть ответ на
+	// «что у нас проседает системно»: экспертность, оформление или конверсия.
+	Criteria []CriterionAverage
 	// Failed — страницы, которые проверить не удалось: прогон дошёл до них и упал.
 	Failed []SummaryPage
 	// Pending — страницы, до которых прогон ещё не дошёл. Это не отказ, и путать их нельзя:
@@ -49,7 +55,31 @@ type SummaryPage struct {
 	// RecordGaps — сколько не хватало из того, что сводка пересчитать не может: рубрики,
 	// названия записи, обложки. Считал их прогон, и число взято из его отметки в базе.
 	RecordGaps int
-	Error      string
+	// Criteria — разбор страницы по критериям, как его написала модель. Разбирается из
+	// сохранённого ответа, а не берётся из базы: колонок под него нет, и заводить их незачем —
+	// артефакт лежит рядом, и сводка пересобирается по нему сколько угодно.
+	Criteria []CriterionScore
+	Error    string
+}
+
+// CriterionAverage — один критерий, сложенный по всей пачке.
+//
+// Хранятся суммы, а не среднее: страниц с разобранным разбором меньше, чем страниц в пачке,
+// и делить надо на своё число, а не на общее.
+type CriterionAverage struct {
+	Name  string
+	Score int
+	Max   int
+	Pages int
+}
+
+// Share — доля набранного по пачке. По ней критерии и сравниваются: веса у них разные, и
+// «2 из 3» сильнее, чем «3 из 5».
+func (a CriterionAverage) Share() float64 {
+	if a.Max <= 0 {
+		return 0
+	}
+	return float64(a.Score) / float64(a.Max)
 }
 
 // FieldGap — обязательное, которого нет, и страницы, где его нет.
@@ -74,6 +104,8 @@ func BuildSummary(articles []Article, artifacts Artifacts, options Options) Summ
 	var summary Summary
 	issues := map[string]*IssueCount{}
 	gaps := map[string]*FieldGap{}
+	criteria := map[string]*CriterionAverage{}
+	var order []string
 
 	for _, article := range articles {
 		page := SummaryPage{
@@ -105,6 +137,8 @@ func BuildSummary(articles []Article, artifacts Artifacts, options Options) Summ
 		if parsed, ok := readAnswer(artifacts, article); ok {
 			countIssues(issues, parsed, article)
 			page.Advice = adviceOf(parsed)
+			page.Criteria = parsed.Criteria
+			countCriteria(criteria, &order, parsed)
 		}
 		summary.Pages = append(summary.Pages, page)
 	}
@@ -136,7 +170,34 @@ func BuildSummary(articles []Article, artifacts Artifacts, options Options) Summ
 		}
 		return summary.CommonIssues[i].Issue < summary.CommonIssues[j].Issue
 	})
+	for _, name := range order {
+		summary.Criteria = append(summary.Criteria, *criteria[name])
+	}
+	// Слабое первым: сводку читают, чтобы решить, что чинить во всей пачке.
+	sort.SliceStable(summary.Criteria, func(i, j int) bool {
+		return summary.Criteria[i].Share() < summary.Criteria[j].Share()
+	})
 	return summary
+}
+
+// countCriteria складывает разбор страницы в общий счёт по пачке.
+//
+// Порядок первого появления запоминается отдельно: имена критериев приходят из промпта задачи,
+// движок их не знает, а обход map выдал бы их каждый раз в новом порядке — сводка, собранная
+// дважды по одним артефактам, выглядела бы разной.
+func countCriteria(counted map[string]*CriterionAverage, order *[]string, parsed Answer) {
+	for _, criterion := range parsed.Criteria {
+		key := strings.ToLower(criterion.Name)
+		average, known := counted[key]
+		if !known {
+			average = &CriterionAverage{Name: criterion.Name}
+			counted[key] = average
+			*order = append(*order, key)
+		}
+		average.Score += criterion.Score
+		average.Max += criterion.Max
+		average.Pages++
+	}
 }
 
 // fillFromArtifacts дополняет страницу тем, что лежит на диске после прогона: поля записи,
@@ -344,11 +405,28 @@ func (s Summary) Render(task string) string {
 	out.WriteString("\n\n")
 
 	out.WriteString("## Оценки\n\nХудшие первыми — с них и начинают.\n\n")
-	out.WriteString("| Оценка | ID | Страница | Находок | Не заполнено | FAQ |\n")
-	out.WriteString("|---|---|---|---|---|---|\n")
+	out.WriteString("| Оценка | Слабое | ID | Страница | Находок | Не заполнено | FAQ |\n")
+	out.WriteString("|---|---|---|---|---|---|---|\n")
 	for _, page := range s.Pages {
-		fmt.Fprintf(&out, "| %s | %s | %s | %d | %s | %s |\n",
-			scoreText(page), page.ExternalID, page.Title, page.Findings, gapsText(page), faqText(page))
+		fmt.Fprintf(&out, "| %s | %s | %s | %s | %d | %s | %s |\n",
+			scoreText(page), weakestText(page), page.ExternalID, page.Title,
+			page.Findings, gapsText(page), faqText(page))
+	}
+
+	out.WriteString("\n## Где теряются баллы\n\n")
+	out.WriteString("Разбор по критериям, сложенный по всей пачке. Слабое первым: " +
+		"на одной странице это замечание к ней, на сорока — вопрос к тому, кто их писал.\n\n")
+	if len(s.Criteria) == 0 {
+		out.WriteString("Разбора по критериям в сохранённых ответах нет.\n")
+	} else {
+		out.WriteString("| Критерий | Средний балл | Доля | Страниц |\n|---|---|---|---|\n")
+		for _, criterion := range s.Criteria {
+			fmt.Fprintf(&out, "| %s | %.1f из %.0f | %.0f%% | %d |\n",
+				criterion.Name,
+				float64(criterion.Score)/float64(criterion.Pages),
+				float64(criterion.Max)/float64(criterion.Pages),
+				criterion.Share()*100, criterion.Pages)
+		}
 	}
 
 	out.WriteString("\n## Чего не хватает в записях\n\n")
@@ -386,6 +464,30 @@ func scoreText(page SummaryPage) string {
 		return fmt.Sprintf("%d", *page.Score)
 	}
 	return fmt.Sprintf("%d/%d", *page.Score, *page.ScoreMax)
+}
+
+// weakestText — колонка «Слабое»: критерий, где страница потеряла больше всего.
+//
+// Один критерий, а не все пять: колонок в таблице и так шесть, а решение по строке принимают
+// одно — чинить эту страницу или следующую. Полный разбор лежит в отчёте самой страницы.
+//
+// Страница с полным баллом по всем критериям слабого места не имеет, и придумывать его нельзя:
+// «Структура 4/4» в этой колонке читалось бы как находка.
+func weakestText(page SummaryPage) string {
+	var worst CriterionScore
+	found := false
+	for _, criterion := range page.Criteria {
+		if criterion.Max <= 0 || criterion.Score >= criterion.Max {
+			continue
+		}
+		if !found || criterion.Share() < worst.Share() {
+			worst, found = criterion, true
+		}
+	}
+	if !found {
+		return "—"
+	}
+	return worst.Text()
 }
 
 func gapsText(page SummaryPage) string {

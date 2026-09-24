@@ -28,6 +28,10 @@ func (r *ArticleRepository) GetPublicationInput(ctx context.Context, externalID 
 			` + r.inputColumn("seo_title") + `, ` + r.inputColumn("teachers") + `,
 			` + r.inputColumn("profession") + `, ` + r.inputColumn("author") + `,
 			` + r.inputColumn("professions") + `, ` + r.inputColumn("links") + `,
+			` + r.inputColumn("post_type") + `, ` + r.inputColumn("image_source_url") + `,
+			` + r.inputColumn("hours") + `, ` + r.inputColumn("duration") + `,
+			` + r.inputColumn("price") + `, ` + r.inputColumn("document") + `,
+			` + r.inputColumn("attestation") + `,
 			COALESCE(o.html_path, '')
 		FROM articles AS a
 		LEFT JOIN article_inputs AS i ON i.article_id = a.id
@@ -47,6 +51,8 @@ func (r *ArticleRepository) GetPublicationInput(ctx context.Context, externalID 
 		&input.TLDR, &input.FAQ,
 		&input.SEOTitle, &input.Teachers, &input.Profession, &input.Author,
 		&input.Professions, &input.Links,
+		&input.PostType, &input.ImageSourceURL,
+		&input.Hours, &input.Duration, &input.Price, &input.Document, &input.Attestation,
 		&input.HTMLPath,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {

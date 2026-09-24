@@ -27,6 +27,10 @@ tasks/*/input/**/*.xlsx
 # Готовые правки pprof_fix_6: копии страниц, их поля и снимки, по которым правку
 # готовили. Данные прогона, а не код — как книги импорта и обложки статей.
 input/pprof_fix_6/prepared/
+input/pprof_fix_7/prepared/
+input/pprof_fix_8/prepared/
+# Локальные бэкапы книг импорта: сами книги уже исключены выше.
+input/**/*.xlsx.bak
 
 # macOS
 .DS_Store

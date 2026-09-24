@@ -12,7 +12,7 @@ DRY_RUN_DATABASE_URL ?= postgres://seo:seo@localhost:5433/seo_dry_run?sslmode=di
 #
 # Задачи различаются только именем: набор операций, разбор аргументов и рецепт у них общие,
 # а пути, схему стадий и схему PostgreSQL выбирает профиль внутри CLI.
-TASK_NAMES := task-1 pprof-1 pprof-2 pprof-template-1 obuch-1 pprof-fix-1 pprof-fix-2 pprof-fix-3 pprof-fix-4 pprof-fix-5 pprof-fix-6 pprof-audit-1 pprof-audit-2
+TASK_NAMES := task-1 pprof-1 pprof-2 pprof-template-1 obuch-1 obuch-2 pprof-fix-1 pprof-fix-2 pprof-fix-3 pprof-fix-4 pprof-fix-5 pprof-fix-6 pprof-fix-7 pprof-fix-8 pprof-audit-1 pprof-audit-2
 TASK_NAME := $(firstword $(MAKECMDGOALS))
 CLI = $(GO) run ./cmd/seo-pipeline $(TASK_NAME)
 
@@ -25,7 +25,7 @@ TASK_EXTRA_ARGS := $(wordlist 4,$(words $(MAKECMDGOALS)),$(MAKECMDGOALS))
 TASK_OPERATIONS := import import-check errors keywords retry run regenerate dry-run prepare generate demo-generate article info review fix html result report clear reset google-login google-publish deepseek-login wordpress-check publish republish mark-published catalog-sync catalog-show
 OPTIONAL_ARGUMENT_OPERATIONS := import-check errors keywords retry run regenerate clear reset google-publish prepare generate demo-generate article info review fix html result publish mark-published
 
-.PHONY: help task-1 pprof-1 pprof-2 pprof-template-1 obuch-1 pprof-fix-1 pprof-fix-2 pprof-fix-3 pprof-fix-4 pprof-fix-5 pprof-fix-6 pprof-audit-1 pprof-audit-2 login docker-up docker-start docker-stop docker-down docker-restart docker-logs docker-ps
+.PHONY: help task-1 pprof-1 pprof-2 pprof-template-1 obuch-1 obuch-2 pprof-fix-1 pprof-fix-2 pprof-fix-3 pprof-fix-4 pprof-fix-5 pprof-fix-6 pprof-fix-7 pprof-fix-8 pprof-audit-1 pprof-audit-2 login docker-up docker-start docker-stop docker-down docker-restart docker-logs docker-ps
 .PHONY: test test-race fmt vet lint lint-fix build
 
 # ----------------------------------------------------
@@ -119,6 +119,19 @@ help: ## этот список
 		'make obuch-1 wordpress-check'     'проверка доступа к своему сайту, без записи' \
 		'make obuch-1 dry-run'             'офлайн-прогон без сервисов' \
 		'' '' \
+		'obuch-2 — страницы услуг той же второй площадки:' '' \
+		'make obuch-2 import'              'импорт страниц из Excel [limit]' \
+		'make obuch-2 import-check'        'сверка импорта с Excel [ID]' \
+		'make obuch-2 prepare'             'research Keys.so и Arsenkin [ID]' \
+		'make obuch-2 run'                 'полный прогон, возобновляемый [ID]' \
+		'make obuch-2 article'             'чат 2 целиком [ID]' \
+		'make obuch-2 html'                'чат 3: HTML и надпись кнопки [ID]' \
+		'make obuch-2 result'              'собрать result.md [ID]' \
+		'make obuch-2 wordpress-check'     'проверка доступа к своему сайту, без записи' \
+		'make obuch-2 publish plan [ID]'   'что именно уйдёт в WordPress, без записи' \
+		'make obuch-2 publish [ID]'        'опубликовать в WordPress' \
+		'make obuch-2 dry-run'             'офлайн-прогон без сервисов' \
+		'' '' \
 		'pprof-fix-1…5 — правка уже опубликованных статей:' '' \
 		'make pprof-fix-1 import'          'индексы и ссылки из файла в input/pprof_fix_1' \
 		'make pprof-fix-1 run plan [ID]'   'что изменится в блоге, без правки' \
@@ -138,6 +151,12 @@ help: ## этот список
 		'make pprof-fix-6 import'          'индексы и ссылки из файла в input/pprof_fix_6' \
 		'make pprof-fix-6 run plan [ID]'   'готова ли правка и что она меняет, без записи' \
 		'make pprof-fix-6 run [ID]'        'записать готовые правки в блог' \
+		'make pprof-fix-7 import'          'индексы и ссылки из файла в input/pprof_fix_7' \
+		'make pprof-fix-7 run plan [ID]'   'готова ли правка и что она меняет, без записи' \
+		'make pprof-fix-7 run [ID]'        'записать готовые правки в блог' \
+		'make pprof-fix-8 import'          'номера и ссылки из файла в input/pprof_fix_8' \
+		'make pprof-fix-8 run plan [ID]'   'готова ли правка и что она меняет, без записи' \
+		'make pprof-fix-8 run [ID]'        'записать готовые правки в блог' \
 		'' '' \
 		'pprof-audit-1,2 - проверка опубликованных страниц, в блог не пишет:' '' \
 		'make pprof-audit-1 import'        'индексы и ссылки из файла в input/pprof_audit_1' \
@@ -249,6 +268,9 @@ pprof-template-1: ## Run a pprof_template_1 operation
 obuch-1: ## Run an obuch_1 operation
 	$(run_task_operation)
 
+obuch-2: ## Run an obuch_2 operation
+	$(run_task_operation)
+
 pprof-fix-1: ## Run a pprof_fix_1 operation
 	$(run_task_operation)
 
@@ -265,6 +287,12 @@ pprof-fix-5: ## Run a pprof_fix_5 operation
 	$(run_task_operation)
 
 pprof-fix-6: ## Run a pprof_fix_6 operation
+	$(run_task_operation)
+
+pprof-fix-7: ## Run a pprof_fix_7 operation
+	$(run_task_operation)
+
+pprof-fix-8: ## Run a pprof_fix_8 operation
 	$(run_task_operation)
 
 pprof-audit-1: ## Run a pprof_audit_1 operation

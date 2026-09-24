@@ -126,6 +126,33 @@ func LeadKept(page, markup string) bool {
 // блога текстом, — признак того, что вёрстка её не узнала.
 var blockMarkers = []string{"ЗАМЕТКА:", "ПЛАШКИ:", "ШАГИ:"}
 
+// DropBlockMarkerLines убирает из текста страницы строки-маркеры визуальных блоков.
+//
+// Нужна там, где текст страницы служит образцом для сверки с разметкой. Маркер — не абзац, а
+// инструкция вёрстке, и в готовой разметке его нет по построению: строка «ПЛАШКИ: 150 часов |
+// Срок ;; …» стала таблицей. Но по длине она обгоняет вводные абзацы, поэтому поиск первого
+// абзаца выбирает именно её — и восстановление лида возвращает в разметку саму инструкцию,
+// текстом, в блог. Спрашивать лид у текста без маркеров дешевле, чем учить общий разбор
+// абзаца отличать их: словарь маркеров живёт здесь же, рядом с blockMarkers.
+func DropBlockMarkerLines(page string) string {
+	lines := strings.Split(page, "\n")
+	kept := make([]string, 0, len(lines))
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		marked := false
+		for _, marker := range blockMarkers {
+			if strings.HasPrefix(trimmed, marker) {
+				marked = true
+				break
+			}
+		}
+		if !marked {
+			kept = append(kept, line)
+		}
+	}
+	return strings.Join(kept, "\n")
+}
+
 // LeftoverBlockMarkers возвращает метки блоков, оставшиеся в разметке текстом.
 //
 // Ошибкой это не считается: страница уже написана и оплачена, а метку человек уберёт руками.
@@ -458,6 +485,29 @@ func InsertBeforeMiddleHeading(markup, block string) string {
 		}
 	}
 	return strings.TrimSpace(markup[:best]) + "\n" + block + "\n" + markup[best:]
+}
+
+// InsertBeforeFirstHeading вставляет блок в конец вводной части — перед первым заголовком.
+//
+// Сестра InsertBeforeMiddleHeading, и различаются они не вкусом, а площадкой. У статьи блога
+// картинка стоит в середине: там она не разрывает мысль и не прилипает к лиду. У
+// коммерческой страницы услуги вводная часть — это лид и плашка с параметрами программы,
+// картинка идёт сразу за ними, а середина страницы приходится на разбор модулей обучения, и
+// картинка внутри него читается как потерянная.
+//
+// «Перед первым заголовком», а не «после первого абзаца»: вводных абзацев бывает два, между
+// ними и заголовком стоит плашка, и любой счёт абзацев ломался бы на первой же странице с
+// другим их числом. Заголовков нет вовсе — блок уходит в конец: потерять его хуже, чем
+// поставить не там.
+func InsertBeforeFirstHeading(markup, block string) string {
+	if strings.TrimSpace(block) == "" {
+		return markup
+	}
+	position := headingOpenRE.FindStringIndex(markup)
+	if position == nil {
+		return strings.TrimSpace(markup) + "\n" + block
+	}
+	return strings.TrimSpace(markup[:position[0]]) + "\n" + block + "\n" + markup[position[0]:]
 }
 
 func abs(value int) int {

@@ -15,6 +15,8 @@ import (
 	"github.com/foxylis237/seo-pipeline/internal/tasks/pproffix4"
 	"github.com/foxylis237/seo-pipeline/internal/tasks/pproffix5"
 	"github.com/foxylis237/seo-pipeline/internal/tasks/pproffix6"
+	"github.com/foxylis237/seo-pipeline/internal/tasks/pproffix7"
+	"github.com/foxylis237/seo-pipeline/internal/tasks/pproffix8"
 )
 
 // articleFixProfiles — задачи правки из реестра. Список берётся признаком, а не именами:
@@ -39,6 +41,8 @@ func TestRegistryResolvesArticleFixTasks(t *testing.T) {
 		pproffix4.Name, pproffix4.Command,
 		pproffix5.Name, pproffix5.Command,
 		pproffix6.Name, pproffix6.Command,
+		pproffix7.Name, pproffix7.Command,
+		pproffix8.Name, pproffix8.Command,
 	} {
 		profile, err := lookupTask(want)
 		if err != nil {

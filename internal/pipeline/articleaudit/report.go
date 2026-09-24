@@ -2,17 +2,20 @@ package articleaudit
 
 import (
 	"errors"
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
-// Разделы ответа. Их два, и это весь вывод модели: оценка, самые важные ошибки и все ошибки
-// списком. Имена внутренние — в самом ответе разделы называются словами, и по словам же
-// ищутся (см. anchors).
+// Разделы ответа. Их три, и это весь вывод модели: разбор по критериям, самые важные ошибки и
+// все ошибки списком. Имена внутренние — в самом ответе разделы называются словами, и по
+// словам же ищутся (см. anchors).
 const (
-	SectionCritical = "critical"
-	SectionIssues   = "issues"
+	SectionBreakdown = "breakdown"
+	SectionCritical  = "critical"
+	SectionIssues    = "issues"
 )
 
 // ErrEmptyAnswer — модель ответила пустотой. Это отказ стадии: платить второй раз дешевле,
@@ -31,19 +34,28 @@ type anchor struct {
 }
 
 // anchors — разделы, которые промпт просит и которые печатает отчёт.
+//
+// У разбора два имени: «Детальный разбор» просит промпт, «Разбор по критериям» модель пишет по
+// привычке от прежних версий. Оба ведут в один раздел — отличать их незачем, а терять ответ
+// из-за формулировки заголовка нельзя.
 var anchors = []anchor{
+	{SectionBreakdown, "детальный разбор"},
+	{SectionBreakdown, "разбор по критериям"},
+	{SectionBreakdown, "разбор по пунктам"},
 	{SectionCritical, "критические ошибки"},
 	{SectionIssues, "все найденные ошибки"},
 }
 
 // strayPrefixes — разделы, которых промпт больше не просит.
 //
-// Модель их всё равно пишет: разбор по критериям и рекомендации она считает частью хорошего
-// ответа, а прежние версии промпта их и требовали. Узнавать их надо затем, чтобы такой раздел
-// ушёл в «Не разобрано» целиком, а не подмешался в список ошибок, — иначе человек читал бы в
-// перечне находок пересказ критериев оценки.
+// Модель их всё равно пишет: рекомендации она считает частью хорошего ответа, а прежние версии
+// промпта их и требовали. Узнавать их надо затем, чтобы такой раздел ушёл в «Не разобрано»
+// целиком, а не подмешался в список ошибок, — иначе человек читал бы в перечне находок
+// пересказ критериев оценки.
+//
+// Разбора по критериям здесь больше нет: он снова часть формата и разбирается якорем выше.
 var strayPrefixes = []string{
-	"поля записи", "рекомендации", "разбор по критериям", "что работает хорошо",
+	"поля записи", "рекомендации", "что работает хорошо",
 }
 
 // droppedPrefixes — строки шапки, которых промпт больше не просит.
@@ -69,12 +81,125 @@ type Answer struct {
 	ScoreFound bool
 	// Sections — разделы ответа по именам констант выше.
 	Sections map[string]string
+	// Criteria — баллы разбора, по одному на критерий, в том порядке, в каком их написала
+	// модель. Имена критериев у задач разные (у статей блога «Контент», у страниц услуг
+	// «Программа обучения»), поэтому здесь они не названы: движок берёт то, что стоит в строке
+	// перед баллом, и о задачах по-прежнему ничего не знает.
+	Criteria []CriterionScore
 	// Unparsed — всё, что не легло ни в один раздел и не опознано как строка шапки.
 	Unparsed string
 }
 
 // Section возвращает содержимое раздела; отсутствующий раздел — пустая строка, а не отказ.
 func (a Answer) Section(name string) string { return a.Sections[name] }
+
+// CriterionScore — балл за один критерий разбора.
+//
+// Нужен затем, что общая оценка «11/20» не отличает слабую экспертность от слабой структуры, а
+// решение «что чинить раньше» принимают как раз по этому. Разбор модель пишет словами, и
+// человек их читает; отдельно разобранные числа нужны машине — сводке, которая складывает их
+// по всей пачке.
+type CriterionScore struct {
+	Name  string
+	Score int
+	Max   int
+}
+
+// Share — доля набранного. Сравнивать критерии по самому баллу нельзя: они разного веса, и
+// «2 из 3» сильнее, чем «3 из 5».
+func (c CriterionScore) Share() float64 {
+	if c.Max <= 0 {
+		return 0
+	}
+	return float64(c.Score) / float64(c.Max)
+}
+
+// Text — как критерий печатается человеку.
+func (c CriterionScore) Text() string {
+	return fmt.Sprintf("%s %d/%d", c.Name, c.Score, c.Max)
+}
+
+// CriteriaTotal — сумма разбора: сколько набрано и из скольких.
+//
+// Сверять её с итоговой оценкой обязан отчёт, а не разбор: модель складывает пять чисел в уме
+// и ошибается, а расхождение «в разборе 18, в итоговой 11» человек молча не заметит.
+func (a Answer) CriteriaTotal() (int, int) {
+	var score, limit int
+	for _, criterion := range a.Criteria {
+		score += criterion.Score
+		limit += criterion.Max
+	}
+	return score, limit
+}
+
+// criterionNameLimit — предел длины имени критерия. Всё длиннее это фраза комментария, в
+// которой модель повторила балл, а не строка разбора.
+const criterionNameLimit = 40
+
+// parseCriteria вынимает из раздела разбора баллы по критериям.
+//
+// Разбирается только то, что стоит перед баллом в той же строке: промпт просит по строке на
+// критерий, но комментарий модель пишет тут же, и резать его нельзя — в отчёт он уходит
+// дословно. Неразобранная строка не теряется: раздел печатается целиком как пришёл, а числа
+// это надстройка над ним.
+func parseCriteria(section string) []CriterionScore {
+	if strings.TrimSpace(section) == "" {
+		return nil
+	}
+	var out []CriterionScore
+	seen := map[string]struct{}{}
+	for _, raw := range strings.Split(section, "\n") {
+		place := scorePattern.FindStringIndex(raw)
+		if place == nil {
+			continue
+		}
+		name := criterionName(raw[:place[0]])
+		if name == "" {
+			continue
+		}
+		key := strings.ToLower(name)
+		if _, repeat := seen[key]; repeat {
+			// Второе упоминание того же критерия — повтор балла внутри комментария, а не
+			// новая строка разбора.
+			continue
+		}
+		digits := scorePattern.FindStringSubmatch(raw[place[0]:place[1]])
+		score, _ := strconv.Atoi(digits[1])
+		limit, _ := strconv.Atoi(digits[2])
+		if limit <= 0 {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, CriterionScore{Name: name, Score: score, Max: limit})
+	}
+	return out
+}
+
+// criterionName — имя критерия из начала строки: «— Контент: », «3. Структура — ».
+//
+// Пустое имя означает, что это не строка разбора, а предложение комментария с числом вида
+// «2/3» внутри. Отличают их три признака: длина, отсутствие знаков конца предложения и
+// заглавная буква в начале — имена критериев пишутся с неё во всех промптах, а зачин фразы
+// («оценка 2/3 снята за…») со строчной.
+func criterionName(prefix string) string {
+	name := strings.TrimSpace(prefix)
+	name = strings.TrimLeft(name, "-—–•*_#> \t")
+	name = anchorNumber.ReplaceAllString(name, "")
+	name = strings.Trim(name, "*_ \t")
+	name = strings.TrimRight(name, ":—–- \t")
+	name = strings.TrimSpace(name)
+	if name == "" || len([]rune(name)) > criterionNameLimit {
+		return ""
+	}
+	if strings.ContainsAny(name, ".!?,;()") {
+		return ""
+	}
+	first := []rune(name)[0]
+	if !unicode.IsUpper(first) {
+		return ""
+	}
+	return name
+}
 
 // normalizeHeading снимает с строки всё, чем модель украшает заголовок: markdown, звёздочки,
 // номер раздела. Номер отбрасывается намеренно — он задан промптом, но модель переносит
@@ -153,6 +278,7 @@ func ParseAnswer(text string) (Answer, error) {
 		parsed.Sections[section] = strings.TrimSpace(builder.String())
 	}
 	parsed.Unparsed = strings.TrimSpace(preamble.String())
+	parsed.Criteria = parseCriteria(parsed.Sections[SectionBreakdown])
 	readScore(&parsed, text)
 	return parsed, nil
 }

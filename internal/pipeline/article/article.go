@@ -82,6 +82,21 @@ type PublicationInput struct {
 	SEOTitle   string
 	Teachers   string
 	Profession string
+	// PostType — тип записи площадки из книги. По нему раскладка выбирает и тип записи, и
+	// таксономию рубрики; пустой означает обычную запись блога — так у всех задач, кроме
+	// той, что пишет страницы услуг площадки без ACF.
+	PostType string
+	// ImageSourceURL — адрес фотографии на стоке. Пустой означает, что абзаца-ссылки под
+	// картинкой в теле записи не будет.
+	ImageSourceURL string
+	// Числа программы из книги. Уходят в поля плашки параметров, которую площадка рисует над
+	// текстом страницы услуги: те же значения стоят в тексте, и разойтись им нельзя —
+	// источник у них один, колонка книги. Пустые означают, что параметра на странице нет.
+	Hours       string
+	Duration    string
+	Price       string
+	Document    string
+	Attestation string
 	// Author — авторы статьи из книги импорта, через запятую. Публикация ищет по ним карточку
 	// на сайте и связывает с ней запись.
 	Author string
@@ -154,6 +169,39 @@ type Input struct {
 	// там полное название страницы с уточнениями («… — дистанционное обучение с практикой»),
 	// здесь только услуга («Медицинский массаж»).
 	ServiceName string `json:"service_name"`
+
+	// Поля ниже завела задача коммерческих страниц второй площадки. Числа программы
+	// приходят колонками книги, а не выводятся моделью из вида программы: те же значения
+	// человек заполняет в полях записи руками, и расходиться двум источникам одного числа
+	// нельзя — на живых страницах площадки они уже разошлись («150 часов» в тексте против
+	// «144 часа» в плашке темы).
+
+	// PostType — тип записи площадки (rabprof, perepodgotovka, povyshenie, …). Он же
+	// выбирает таксономию рубрики: cat_<тип>.
+	PostType string `json:"post_type"`
+	// Hours — объём программы в академических часах.
+	Hours string `json:"hours"`
+	// Duration — срок обучения.
+	Duration string `json:"duration"`
+	// Price — стоимость обучения.
+	Price string `json:"price"`
+	// Document — документ, выдаваемый по итогам обучения.
+	Document string `json:"document"`
+	// Attestation — форма итоговой аттестации.
+	Attestation string `json:"attestation"`
+	// ImageSourceURL — адрес фотографии на стоке, с которой взята обложка.
+	//
+	// Пустое значение означает, что абзаца-ссылки под картинкой не будет вовсе: ссылка на
+	// главную страницу стока вместо конкретного кадра — выдуманная атрибуция, а в
+	// опубликованной записи её уже не отличить от настоящей.
+	ImageSourceURL string `json:"image_source_url"`
+
+	// CourseURL — адрес страницы курса, на который ведёт кнопка призыва в конце статьи.
+	//
+	// Колонку заводит задача статей блога второй площадки: кнопка ведёт в деньги, и выбирать
+	// её адрес модели не доверяют. Пустое значение роняет статью до первого сообщения модели —
+	// см. obuch1.Flow.
+	CourseURL string `json:"course_url"`
 }
 
 // ImportedArticle связывает статью с сохранённой при импорте строкой Excel.
@@ -195,6 +243,18 @@ type GenerationInput struct {
 	Professions         string
 	Links               string
 	Teachers            string
+	// Поля ниже приходят из колонок, которые заводит не каждая задача, и у задачи без такой
+	// колонки остаются пустыми. Нужны они промптам коммерческой страницы: числа программы
+	// стоят в её плашке и в тексте, и придумывать их модели запрещено — те же значения
+	// человек заполняет в полях записи руками.
+	Profession  string
+	Hours       string
+	Duration    string
+	Price       string
+	Document    string
+	Attestation string
+	// CourseURL — адрес курса для кнопки призыва статьи блога второй площадки.
+	CourseURL string
 }
 
 // SavedGenerationInput contains persisted artifacts required to resume one LLM stage.
@@ -245,4 +305,14 @@ type ResultInput struct {
 	Profession  string
 	Teachers    string
 	ServiceName string
+
+	// Числа программы коммерческой страницы. Лист печатает их затем, чтобы человек сверил
+	// книгу с полями записи, которые заполняет руками: расхождение видно только так.
+	PostType       string
+	Hours          string
+	Duration       string
+	Price          string
+	Document       string
+	Attestation    string
+	ImageSourceURL string
 }

@@ -150,3 +150,87 @@ func TestSummarySortsWorstFirst(t *testing.T) {
 		t.Fatalf("порядок страниц %v, ожидался 3, 2, 1", order)
 	}
 }
+
+// На одной странице «Контент 3/5» — замечание к ней, на сорока — вопрос к тому, кто эти сорок
+// писал. Поэтому сводка складывает разбор по всей пачке и ставит слабое первым.
+func TestSummaryFoldsCriteriaAcrossPages(t *testing.T) {
+	root := t.TempDir()
+	weak := `Итоговая оценка: 13/20
+
+1. Детальный разбор
+Структура: 4/4 — заголовки на месте.
+SEO: 4/4 — ключ в первом абзаце.
+Контент: 2/5 — компиляция, фактуры нет.
+Конверсия: 1/3 — CTA общий.
+Стиль: 2/4 — канцелярит.`
+	strong := `Итоговая оценка: 18/20
+
+1. Детальный разбор
+Структура: 4/4 — заголовки на месте.
+SEO: 4/4 — ключ в первом абзаце.
+Контент: 4/5 — фактура есть.
+Конверсия: 3/3 — CTA по теме.
+Стиль: 3/4 — пара штампов.`
+	articles := []Article{
+		writeAudited(t, root, "1", "kadrovik", weak, map[string]string{}),
+		writeAudited(t, root, "2", "svarshchik", strong, map[string]string{}),
+	}
+	summary := BuildSummary(articles, NewArtifacts(root), Options{})
+
+	if len(summary.Criteria) != 5 {
+		t.Fatalf("критериев в сводке %d, а не пять: %+v", len(summary.Criteria), summary.Criteria)
+	}
+	// Веса у критериев разные, поэтому сравниваются доли, а не баллы: «6 из 10» слабее, чем
+	// «4 из 6», хотя балл выше.
+	if summary.Criteria[0].Name != "Контент" {
+		t.Fatalf("слабый критерий не первый: %+v", summary.Criteria)
+	}
+	content := summary.Criteria[0]
+	if content.Name != "Контент" || content.Score != 6 || content.Max != 10 || content.Pages != 2 {
+		t.Fatalf("контент сложен неверно: %+v", content)
+	}
+
+	text := summary.Render("pprof_audit_1")
+	if !strings.Contains(text, "## Где теряются баллы") {
+		t.Fatalf("в сводке нет раздела про критерии:\n%s", text)
+	}
+	if !strings.Contains(text, "| Конверсия | 2.0 из 3 | 67% | 2 |") {
+		t.Fatalf("строка критерия собрана неверно:\n%s", text)
+	}
+}
+
+// В таблице оценок у страницы одна колонка на слабое место: решение по строке принимают
+// одно — чинить эту страницу или следующую, а полный разбор лежит в её отчёте.
+func TestSummaryNamesWeakestCriterion(t *testing.T) {
+	root := t.TempDir()
+	answer := `Итоговая оценка: 13/20
+
+1. Детальный разбор
+Структура: 4/4 — заголовки на месте.
+Контент: 2/5 — компиляция, фактуры нет.
+Конверсия: 2/3 — CTA общий.`
+	full := `Итоговая оценка: 20/20
+
+1. Детальный разбор
+Структура: 4/4 — заголовки на месте.
+Контент: 5/5 — фактура есть.
+Конверсия: 3/3 — CTA по теме.`
+	articles := []Article{
+		writeAudited(t, root, "1", "kadrovik", answer, map[string]string{}),
+		writeAudited(t, root, "2", "svarshchik", full, map[string]string{}),
+	}
+	summary := BuildSummary(articles, NewArtifacts(root), Options{})
+
+	byID := map[string]SummaryPage{}
+	for _, page := range summary.Pages {
+		byID[page.ExternalID] = page
+	}
+	if got := weakestText(byID["1"]); got != "Контент 2/5" {
+		t.Fatalf("слабое место страницы названо как %q", got)
+	}
+	// Полный балл по всем критериям слабого места не имеет, и придумывать его нельзя:
+	// «Структура 4/4» в этой колонке читалось бы как находка.
+	if got := weakestText(byID["2"]); got != "—" {
+		t.Fatalf("у страницы без потерь придумано слабое место: %q", got)
+	}
+}

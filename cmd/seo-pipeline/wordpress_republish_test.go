@@ -34,29 +34,37 @@ func TestRepublishParsesExternalID(t *testing.T) {
 }
 
 // Картинка тела живёт только в записи блога: её адрес известен той публикации, что грузила
-// вложение. Перезапись обязана переносить её, иначе статья теряет иллюстрацию.
-func TestBodyImageRECapturesPublishedImageBlock(t *testing.T) {
-	stored := `<p>Лид статьи.</p>` + "\n" +
-		`<img class="alignnone size-full wp-image-22627" src="https://dpoprof.ru/img.webp" alt="Заголовок" />` + "\n" +
-		`<p>Источник изображения: <a href="https://www.pexels.com/ru-ru/" target="_blank" rel="nofollow noindex noopener">Pexels</a>.</p>` + "\n" +
+// Из прежней записи берётся только вложение — адрес файла и его идентификатор. Обёртка и
+// подпись вокруг картинки у площадок разные и собираются заново: перенос готового куска
+// ронял <figure> с подписью и уводил картинку в середину страницы при каждой правке.
+func TestStoredBodyImageTakesAttachmentOnly(t *testing.T) {
+	stored := `<p>Лид.</p>` +
+		`<figure class="wp-block-image size-large">` +
+		`<img src="https://obuchim-specialista.ru/img.webp" alt="Кран" class="wp-image-19539" />` +
+		`</figure>` +
+		`<p class="wp-block-paragraph">Источник изображения: <a href="https://www.pexels.com/x/">Pexels</a>.</p>` +
 		`<h2>Раздел</h2>`
 
-	got := bodyImageRE.FindString(stored)
-	if !strings.Contains(got, "wp-image-22627") {
-		t.Fatalf("картинка не найдена: %q", got)
+	media, ok := storedBodyImage(stored)
+
+	if !ok {
+		t.Fatal("вложение прежней записи не найдено")
 	}
-	if !strings.Contains(got, "Pexels") {
-		t.Fatalf("подпись источника не захвачена: %q", got)
+	if media.AttachmentID != 19539 {
+		t.Fatalf("идентификатор вложения = %d", media.AttachmentID)
 	}
-	if strings.Contains(got, "<h2>") {
-		t.Fatalf("захвачено лишнее: %q", got)
+	if media.URL != "https://obuchim-specialista.ru/img.webp" {
+		t.Fatalf("адрес вложения = %q", media.URL)
 	}
 }
 
-// --- связанные курсы при перезаписи ---
+// Запись без картинки — законное состояние: правка просто не ставит её.
+func TestStoredBodyImageSkipsRecordWithoutImage(t *testing.T) {
+	if _, ok := storedBodyImage(`<p>Только текст.</p><h2>Раздел</h2>`); ok {
+		t.Fatal("картинка нашлась там, где её нет")
+	}
+}
 
-// newWPRepublishDeps готовит статью, уже лежащую в блоге: только такую правка и берёт.
-// fields — поля, которые у записи уже есть, вместе с идентификаторами postmeta.
 func newWPRepublishDeps(fieldIDs map[string]string) (wordPressPublishDeps, *fakeWPClient, *bytes.Buffer) {
 	deps, repo, client, _, out := newWPPublishDeps()
 	postID := int64(22615)

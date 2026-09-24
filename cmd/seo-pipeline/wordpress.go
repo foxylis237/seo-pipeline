@@ -5,9 +5,12 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"time"
 
 	"github.com/foxylis237/seo-pipeline/internal/config"
+	"github.com/foxylis237/seo-pipeline/internal/integrations/netbind"
+	"github.com/foxylis237/seo-pipeline/internal/integrations/sitepage"
 	"github.com/foxylis237/seo-pipeline/internal/integrations/wordpress"
 )
 
@@ -41,13 +44,32 @@ type wordPressChecker interface {
 // Единственное место, где эти два мира встречаются. Пакет config не знает про WordPress-клиент,
 // пакет wordpress не знает про переменные окружения и про задачи — связывает их composition root.
 func newWordPressClient(cfg config.WordPressConfig) (*wordpress.Client, error) {
+	// Транспорт обычно nil. Непустым он становится, только когда исходящие соединения уводят
+	// мимо VPN-туннеля: см. netbind — там же сказано, почему правильное место починки не здесь.
+	transport, err := netbind.Transport(os.Getenv(netbind.Interface))
+	if err != nil {
+		return nil, err
+	}
 	return wordpress.NewClient(wordpress.Config{
 		BaseURL:     cfg.BaseURL,
 		Username:    cfg.Username,
 		AppPassword: cfg.AppPassword,
 		Timeout:     wordPressRequestTimeout,
 		Retry:       wordpress.DefaultRetryPolicy(),
+		Transport:   transport,
 	})
+}
+
+// newSitePageClient собирает клиент чтения названий программ с сайта площадки. Транспорт у
+// него тот же, что у WordPress-клиента, и по той же причине: он ходит на ту же площадку.
+func newSitePageClient() *sitepage.Client {
+	transport, err := netbind.Transport(os.Getenv(netbind.Interface))
+	if err != nil {
+		// Отказ здесь не роняет прогон: перелинковка и без названий уходит адресами, а
+		// ошибку имени интерфейса уже назвала сборка WordPress-клиента.
+		transport = nil
+	}
+	return sitepage.New(linkNameTimeout, transport)
 }
 
 // runWordPressCheck подтверждает, что credentials задачи рабочие, ничего не создавая.

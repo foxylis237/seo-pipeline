@@ -97,9 +97,88 @@ func TestParseAnswerMovesStraySectionsToUnparsed(t *testing.T) {
 	if got := parsed.Section(SectionIssues); got != "— «В современном мире» в первом абзаце" {
 		t.Fatalf("в список ошибок подмешался чужой раздел: %q", got)
 	}
-	for _, want := range []string{"Рекомендации", "переписать первый абзац", "Разбор по критериям", "Структура: 3/4"} {
+	for _, want := range []string{"Рекомендации", "переписать первый абзац"} {
 		if !strings.Contains(parsed.Unparsed, want) {
 			t.Fatalf("чужой раздел потерян, в «Не разобрано» нет %q: %q", want, parsed.Unparsed)
+		}
+	}
+	// А вот разбор по критериям чужим больше не считается: он вернулся в формат, и под
+	// прежним именем модель пишет его до сих пор.
+	if got := parsed.Section(SectionBreakdown); !strings.Contains(got, "Структура: 3/4") {
+		t.Fatalf("разбор под прежним именем не разобран: %q", got)
+	}
+}
+
+// Разбор по критериям — это и есть ответ на вопрос «где потеряны баллы»: общее «11/20» не
+// отличает слабую экспертность от слабой структуры. Числа разбираются отдельно от текста,
+// потому что текст читает человек, а складывает их по пачке сводка.
+func TestParseAnswerReadsCriteria(t *testing.T) {
+	answer := `Итоговая оценка: 17/20
+
+1. Детальный разбор
+Структура: 4/4 — заголовки на месте, текст сканируется.
+SEO: 4/4 — ключ в первом абзаце, переспама нет.
+Контент: 3/5 — компиляция, а не текст практика: нет ошибок новичков и проверок ГИТ.
+Конверсия: 2/3 — CTA общий, без привязки к теме.
+Стиль: 4/4 — инфостиль выдержан.
+
+2. Критические ошибки
+замечаний нет
+
+3. Все найденные ошибки списком
+— «В современном мире» в первом абзаце`
+	parsed, err := ParseAnswer(answer)
+	if err != nil {
+		t.Fatalf("ParseAnswer: %v", err)
+	}
+	if len(parsed.Criteria) != 5 {
+		t.Fatalf("разобрано критериев %d, а не пять: %+v", len(parsed.Criteria), parsed.Criteria)
+	}
+	want := []CriterionScore{
+		{Name: "Структура", Score: 4, Max: 4},
+		{Name: "SEO", Score: 4, Max: 4},
+		{Name: "Контент", Score: 3, Max: 5},
+		{Name: "Конверсия", Score: 2, Max: 3},
+		{Name: "Стиль", Score: 4, Max: 4},
+	}
+	for i, criterion := range want {
+		if parsed.Criteria[i] != criterion {
+			t.Fatalf("критерий %d разобран как %+v, а не %+v", i, parsed.Criteria[i], criterion)
+		}
+	}
+	// Порядок тоже часть ответа: он задан промптом, и по нему человек сверяет разбор с
+	// критериями оценки.
+	if sum, limit := parsed.CriteriaTotal(); sum != 17 || limit != 20 {
+		t.Fatalf("сумма разбора %d/%d, а не 17/20", sum, limit)
+	}
+	// Комментарий уходит в отчёт дословно: фраза и есть ответ на «почему 3 из 5».
+	if got := parsed.Section(SectionBreakdown); !strings.Contains(got, "нет ошибок новичков") {
+		t.Fatalf("комментарий разбора потерян: %q", got)
+	}
+}
+
+// Балл внутри фразы комментария строкой разбора не является: иначе «снято 2/3 за CTA» завело
+// бы критерий с именем «снято». Отличают их заглавная буква, длина и знаки препинания.
+func TestParseAnswerIgnoresScoresInsideComments(t *testing.T) {
+	answer := `Итоговая оценка: 12/20
+
+1. Детальный разбор
+Структура: 3/4 — списки есть, но абзацы по семь строк.
+за перелинковку снято 1/3, ссылки свалены в один абзац.
+Контент: 3/5 — снова 3/5, потому что фактуры нет.
+
+2. Критические ошибки
+замечаний нет`
+	parsed, err := ParseAnswer(answer)
+	if err != nil {
+		t.Fatalf("ParseAnswer: %v", err)
+	}
+	if len(parsed.Criteria) != 2 {
+		t.Fatalf("разобрано критериев %d, а не два: %+v", len(parsed.Criteria), parsed.Criteria)
+	}
+	for _, criterion := range parsed.Criteria {
+		if criterion.Name != "Структура" && criterion.Name != "Контент" {
+			t.Fatalf("фраза комментария принята за критерий: %+v", criterion)
 		}
 	}
 }
@@ -169,5 +248,78 @@ func TestParseAnswerFindsScoreAnywhere(t *testing.T) {
 	// Строку оценки при этом не тащим в «Не разобрано»: она разобрана и напечатана отдельно.
 	if strings.Contains(parsed.Unparsed, "Итоговая оценка") {
 		t.Fatalf("строка оценки попала в остаток: %q", parsed.Unparsed)
+	}
+}
+
+// Разбор печатается в отчёте дословно, а числа из него — ещё и строкой шапки: сначала
+// человек читает, сколько, потом — где именно потеряно.
+func TestReportShowsBreakdownAndScores(t *testing.T) {
+	answer := `Итоговая оценка: 13/20
+
+1. Детальный разбор
+Структура: 4/4 — заголовки на месте.
+SEO: 3/4 — ключа нет в первом абзаце.
+Контент: 2/5 — компиляция: ни одной ошибки новичков, ни одной проверки надзора.
+Конверсия: 2/3 — CTA без привязки к теме.
+Стиль: 2/4 — канцелярит в трёх абзацах.
+
+2. Критические ошибки
+замечаний нет
+
+3. Все найденные ошибки списком
+замечаний нет`
+	parsed, err := ParseAnswer(answer)
+	if err != nil {
+		t.Fatalf("ParseAnswer: %v", err)
+	}
+	report := BuildReport(Article{ExternalID: "4"}, Post{ID: 11}, FieldCheck{}, parsed, nil)
+
+	if !strings.Contains(report.Scores, "Контент 2/5") {
+		t.Fatalf("в шапке нет баллов по критериям: %q", report.Scores)
+	}
+	if !strings.Contains(report.Breakdown, "ни одной проверки надзора") {
+		t.Fatalf("разбор не попал в отчёт: %q", report.Breakdown)
+	}
+}
+
+// Пять чисел модель складывает в уме и ошибается. Расхождение суммы разбора с итоговой
+// оценкой называется прямо: иначе человек, читающий «13/20» над разбором на 16, решит, что
+// сломан отчёт.
+func TestReportNamesScoreMismatch(t *testing.T) {
+	answer := `Итоговая оценка: 13/20
+
+1. Детальный разбор
+Структура: 4/4 — заголовки на месте.
+SEO: 4/4 — ключ в первом абзаце.
+Контент: 4/5 — фактура есть.
+Конверсия: 2/3 — CTA общий.
+Стиль: 4/4 — инфостиль выдержан.`
+	parsed, err := ParseAnswer(answer)
+	if err != nil {
+		t.Fatalf("ParseAnswer: %v", err)
+	}
+	report := BuildReport(Article{ExternalID: "4"}, Post{ID: 11}, FieldCheck{}, parsed, nil)
+	if !strings.Contains(report.Scores, "в сумме 18/20") {
+		t.Fatalf("расхождение суммы разбора с итоговой оценкой не названо: %q", report.Scores)
+	}
+	// Обе цифры настоящие: итоговая остаётся той, что написала модель.
+	if report.Score != "13/20" {
+		t.Fatalf("итоговая оценка подменена суммой разбора: %q", report.Score)
+	}
+}
+
+// Разбора в ответе может не оказаться вовсе: модель пропустила раздел или сорвалась на
+// формате. Это не отказ — отчёт говорит об этом словами и называет, где смотреть ответ.
+func TestReportNamesMissingBreakdown(t *testing.T) {
+	parsed, err := ParseAnswer("Итоговая оценка: 9/20\n\n2. Критические ошибки\nзамечаний нет")
+	if err != nil {
+		t.Fatalf("ParseAnswer: %v", err)
+	}
+	report := BuildReport(Article{ExternalID: "4"}, Post{ID: 11}, FieldCheck{}, parsed, nil)
+	if !strings.Contains(report.Breakdown, "generated/audit.txt") {
+		t.Fatalf("пустой разбор напечатан молча: %q", report.Breakdown)
+	}
+	if report.Scores != "не разобран" {
+		t.Fatalf("шапка придумала баллы: %q", report.Scores)
 	}
 }
