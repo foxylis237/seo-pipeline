@@ -20,7 +20,12 @@ import (
 //
 // links, professions и tags сюда не входят: у pprof_2 их нет, и его собственная baseline их
 // не заводит. blogColumns — то же самое для задач, которые пишут статьи блога.
-var pprof2Columns = []string{"seo_title", "section", "profession", "teachers", "service_name"}
+var pprof2Columns = []string{
+	"seo_title", "section", "profession", "teachers", "service_name",
+	// Числа программы: их завела миграция 000002_program_facts, и список обязан повторять
+	// pprof2.InputColumns — разойдясь, тест проверяет не ту схему, что работает в бою.
+	"hours", "duration", "price", "document", "attestation",
+}
 
 var blogColumns = []string{"author", "links", "professions", "tags"}
 
