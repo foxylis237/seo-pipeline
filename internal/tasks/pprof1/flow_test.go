@@ -152,6 +152,7 @@ func newFlowFixture(t *testing.T) (*Flow, *fakeChats, *fakeRepository, *recordin
 			LSIWords:            []string{"дефектолог"},
 			Professions:         "логопед, дефектолог, педагог",
 			Links:               "https://example.test/logoped",
+			CourseURL:           "https://example.test/course",
 		},
 	}
 	chats := &fakeChats{answers: map[string]string{
@@ -160,8 +161,12 @@ func newFlowFixture(t *testing.T) (*Flow, *fakeChats, *fakeRepository, *recordin
 	}}
 	publisher := &recordingPublisher{}
 	flow := NewFlow(repository, writer, chats, &fakeRenderer{}, nil, publisher, nil)
+	flow.ctaCardPath = testCTACardPath
 	return flow, chats, repository, publisher, writer
 }
+
+// testCTACardPath — настоящий шаблон карточки: тест проверяет и поток, и сам файл.
+const testCTACardPath = "../../../tasks/pprof_1/templates/cta_card.html"
 
 // htmlWithLink — разметка с обязательной ссылкой перелинковки из входных данных фикстуры.
 const htmlWithLink = `<h2>Заголовок</h2><p>текст со ссылкой на <a href="https://example.test/logoped">логопеда</a></p>`
@@ -189,7 +194,8 @@ func TestFlowUsesThreeChats(t *testing.T) {
 	want := [][]string{
 		{StageStructure},
 		{StageExpert, StageReview, StageInfo},
-		{StageHTML},
+		// Разметка и доспрос строк карточки призыва.
+		{StageHTML, StageHTML},
 	}
 	for index, expected := range want {
 		if strings.Join(chats.chats[index], ",") != strings.Join(expected, ",") {
@@ -347,8 +353,8 @@ func TestHTMLStageAsksModelForMissingLinks(t *testing.T) {
 		t.Fatalf("html: %v", err)
 	}
 
-	if got := len(chats.chats[2]); got != 2 {
-		t.Fatalf("чат разметки: %d сообщений, ожидалось два — разметка и доспрос ссылок", got)
+	if got := len(chats.chats[2]); got != 3 {
+		t.Fatalf("чат разметки: %d сообщений, ожидалось три — разметка, доспрос ссылок и строки карточки", got)
 	}
 	saved, err := writer.Read(repository.htmlPath)
 	if err != nil {
@@ -383,8 +389,8 @@ func TestHTMLStageSkipsLinkRepairWithThreeLinks(t *testing.T) {
 		t.Fatalf("html: %v", err)
 	}
 
-	if got := len(chats.chats[2]); got != 1 {
-		t.Fatalf("чат разметки: %d сообщений, ожидалось одно — трёх ссылок достаточно", got)
+	if got := len(chats.chats[2]); got != 2 {
+		t.Fatalf("чат разметки: %d сообщений, ожидалось два — разметка и строки карточки, трёх ссылок достаточно", got)
 	}
 	saved, err := writer.Read(repository.htmlPath)
 	if err != nil {
@@ -500,13 +506,15 @@ func (n *fakeNames) Name(_ context.Context, url string) (string, error) {
 func TestHTMLPromptCarriesProgramNames(t *testing.T) {
 	writer := articleoutput.NewWriter(t.TempDir())
 	repository := &fakeRepository{input: article.GenerationInput{
-		Article: article.Article{ID: 7, ExternalID: "7", Title: "Как стать логопедом", Slug: "kak-stat-logopedom"},
-		Links:   "https://example.test/logoped",
+		Article:   article.Article{ID: 7, ExternalID: "7", Title: "Как стать логопедом", Slug: "kak-stat-logopedom"},
+		Links:     "https://example.test/logoped",
+		CourseURL: "https://example.test/course",
 	}}
 	renderer := &recordingRenderer{}
 	names := &fakeNames{names: map[string]string{"https://example.test/logoped": "Дистанционное обучение на логопеда"}}
 	flow := NewFlow(repository, writer, &fakeChats{answers: map[string]string{StageHTML: htmlWithLink}},
 		renderer, nil, nil, names)
+	flow.ctaCardPath = testCTACardPath
 	repository.saved.FixedArticlePath = "" // текст читается ниже из подготовленного артефакта
 
 	pending, err := writer.StageFixedArticle("7", "kak-stat-logopedom", "промпт", "H1 - Как стать логопедом\n\nТекст статьи.")
@@ -533,13 +541,15 @@ func TestHTMLPromptCarriesProgramNames(t *testing.T) {
 func TestHTMLPromptKeepsLinkWhenSiteFails(t *testing.T) {
 	writer := articleoutput.NewWriter(t.TempDir())
 	repository := &fakeRepository{input: article.GenerationInput{
-		Article: article.Article{ID: 7, ExternalID: "7", Title: "Как стать логопедом", Slug: "kak-stat-logopedom"},
-		Links:   "https://example.test/logoped",
+		Article:   article.Article{ID: 7, ExternalID: "7", Title: "Как стать логопедом", Slug: "kak-stat-logopedom"},
+		Links:     "https://example.test/logoped",
+		CourseURL: "https://example.test/course",
 	}}
 	renderer := &recordingRenderer{}
 	names := &fakeNames{err: fmt.Errorf("страница ответила 503")}
 	flow := NewFlow(repository, writer, &fakeChats{answers: map[string]string{StageHTML: htmlWithLink}},
 		renderer, nil, nil, names)
+	flow.ctaCardPath = testCTACardPath
 
 	pending, err := writer.StageFixedArticle("7", "kak-stat-logopedom", "промпт", "H1 - Как стать логопедом\n\nТекст статьи.")
 	if err != nil {

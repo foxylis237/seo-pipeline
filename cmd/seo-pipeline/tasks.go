@@ -20,6 +20,7 @@ import (
 	"github.com/foxylis237/seo-pipeline/internal/tasks/pproffix6"
 	"github.com/foxylis237/seo-pipeline/internal/tasks/pproffix7"
 	"github.com/foxylis237/seo-pipeline/internal/tasks/pproffix8"
+	"github.com/foxylis237/seo-pipeline/internal/tasks/pproffix9"
 	"github.com/foxylis237/seo-pipeline/internal/tasks/pproftemplate1"
 	"github.com/foxylis237/seo-pipeline/internal/tasks/task1"
 )
@@ -33,7 +34,7 @@ func taskRegistry() []tasks.Profile {
 	return []tasks.Profile{
 		task1.Profile(), pprof1.Profile(), pprof2.Profile(), obuch1.Profile(), obuch2.Profile(),
 		pproffix1.Profile(), pproffix2.Profile(), pproffix3.Profile(), pproffix4.Profile(),
-		pproffix5.Profile(), pproffix6.Profile(), pproffix7.Profile(), pproffix8.Profile(),
+		pproffix5.Profile(), pproffix6.Profile(), pproffix7.Profile(), pproffix8.Profile(), pproffix9.Profile(),
 		pproftemplate1.Profile(),
 		pprofaudit1.Profile(), pprofaudit2.Profile(),
 	}

@@ -69,7 +69,9 @@ func Profile() tasks.Profile {
 		// название статьи уходит человеку в админку, а поиску нужна строка до 60 знаков, и
 		// одной колонкой эти две задачи не закрываются. У task_1 её нет: он остаётся старой
 		// реализацией, и пустое значение там означает прежнее поведение.
-		ExtraInputColumns: []string{"author", "links", "professions", "seo_title", "tags"},
+		// course_url — адрес кнопки карточки призыва в конце статьи: кнопка ведёт в деньги, и
+		// куда уходит читатель, решает человек книгой, как у obuch_1.
+		ExtraInputColumns: []string{"author", "course_url", "links", "professions", "seo_title", "tags"},
 		LLMStages:         Stages,
 	}
 }

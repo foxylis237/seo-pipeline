@@ -12,7 +12,7 @@ DRY_RUN_DATABASE_URL ?= postgres://seo:seo@localhost:5433/seo_dry_run?sslmode=di
 #
 # Задачи различаются только именем: набор операций, разбор аргументов и рецепт у них общие,
 # а пути, схему стадий и схему PostgreSQL выбирает профиль внутри CLI.
-TASK_NAMES := task-1 pprof-1 pprof-2 pprof-template-1 obuch-1 obuch-2 pprof-fix-1 pprof-fix-2 pprof-fix-3 pprof-fix-4 pprof-fix-5 pprof-fix-6 pprof-fix-7 pprof-fix-8 pprof-audit-1 pprof-audit-2
+TASK_NAMES := task-1 pprof-1 pprof-2 pprof-template-1 obuch-1 obuch-2 pprof-fix-1 pprof-fix-2 pprof-fix-3 pprof-fix-4 pprof-fix-5 pprof-fix-6 pprof-fix-7 pprof-fix-8 pprof-fix-9 pprof-audit-1 pprof-audit-2
 TASK_NAME := $(firstword $(MAKECMDGOALS))
 CLI = $(GO) run ./cmd/seo-pipeline $(TASK_NAME)
 
@@ -25,7 +25,7 @@ TASK_EXTRA_ARGS := $(wordlist 4,$(words $(MAKECMDGOALS)),$(MAKECMDGOALS))
 TASK_OPERATIONS := import import-check errors keywords retry run regenerate dry-run prepare generate demo-generate article info review fix html result report clear reset google-login google-publish deepseek-login wordpress-check publish republish mark-published catalog-sync catalog-show
 OPTIONAL_ARGUMENT_OPERATIONS := import-check errors keywords retry run regenerate clear reset google-publish prepare generate demo-generate article info review fix html result publish mark-published
 
-.PHONY: help task-1 pprof-1 pprof-2 pprof-template-1 obuch-1 obuch-2 pprof-fix-1 pprof-fix-2 pprof-fix-3 pprof-fix-4 pprof-fix-5 pprof-fix-6 pprof-fix-7 pprof-fix-8 pprof-audit-1 pprof-audit-2 login docker-up docker-start docker-stop docker-down docker-restart docker-logs docker-ps
+.PHONY: help task-1 pprof-1 pprof-2 pprof-template-1 obuch-1 obuch-2 pprof-fix-1 pprof-fix-2 pprof-fix-3 pprof-fix-4 pprof-fix-5 pprof-fix-6 pprof-fix-7 pprof-fix-8 pprof-fix-9 pprof-audit-1 pprof-audit-2 login docker-up docker-start docker-stop docker-down docker-restart docker-logs docker-ps
 .PHONY: test test-race fmt vet lint lint-fix build
 
 # ----------------------------------------------------
@@ -157,6 +157,9 @@ help: ## этот список
 		'make pprof-fix-8 import'          'номера и ссылки из файла в input/pprof_fix_8' \
 		'make pprof-fix-8 run plan [ID]'   'готова ли правка и что она меняет, без записи' \
 		'make pprof-fix-8 run [ID]'        'записать готовые правки в блог' \
+		'make pprof-fix-9 import'          'номера и ссылки статей pprof_1 из input/pprof_fix_9' \
+		'make pprof-fix-9 run plan [ID]'   'готова ли правка финала и что она меняет, без записи' \
+		'make pprof-fix-9 run [ID]'        'записать новые финалы с карточкой в блог' \
 		'' '' \
 		'pprof-audit-1,2 - проверка опубликованных страниц, в блог не пишет:' '' \
 		'make pprof-audit-1 import'        'индексы и ссылки из файла в input/pprof_audit_1' \
@@ -293,6 +296,9 @@ pprof-fix-7: ## Run a pprof_fix_7 operation
 	$(run_task_operation)
 
 pprof-fix-8: ## Run a pprof_fix_8 operation
+	$(run_task_operation)
+
+pprof-fix-9: ## Run a pprof_fix_9 operation
 	$(run_task_operation)
 
 pprof-audit-1: ## Run a pprof_audit_1 operation

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"text/template"
 	"time"
 
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/article"
@@ -64,6 +65,9 @@ type Flow struct {
 	repository Repository
 	writer     Writer
 	names      LinkNames
+	// ctaCardPath — шаблон карточки призыва. Поле, а не константа по месту: тест подставляет
+	// свой путь, а прогон — CTACardPath.
+	ctaCardPath string
 }
 
 // NewFlow собирает поток. publisher необязателен и может быть nil.
@@ -74,10 +78,11 @@ func NewFlow(repository Repository, writer Writer, chats taskflow.ChatFactory,
 	prompts taskflow.PromptRenderer, logger *slog.Logger, publisher taskflow.PromptPublisher,
 	names LinkNames) *Flow {
 	return &Flow{
-		Base:       taskflow.NewBase(repository, writer, chats, prompts, logger, publisher),
-		repository: repository,
-		writer:     writer,
-		names:      names,
+		Base:        taskflow.NewBase(repository, writer, chats, prompts, logger, publisher),
+		repository:  repository,
+		writer:      writer,
+		names:       names,
+		ctaCardPath: CTACardPath,
 	}
 }
 
@@ -122,6 +127,11 @@ func (f *Flow) RunStructure(ctx context.Context, externalID string) error {
 		return taskflow.StageFailure(externalID, "load_generation_data", err)
 	}
 	logger := f.ArticleLogger(input.Article)
+	// Адрес кнопки призыва проверяется первым: статья без него всё равно не соберётся на
+	// стадии html, и узнать об этом дешевле до единого сообщения модели.
+	if _, err := courseURL(input); err != nil {
+		return f.Fail(ctx, logger, input.Article, "load_generation_data", err)
+	}
 	// BeginGeneration сам ставит current_step = structure_generation, отдельный переход
 	// этапа здесь не нужен и репозиторием не поддерживается.
 	if err := f.repository.BeginGeneration(ctx, input.Article.ID); err != nil {
@@ -327,12 +337,23 @@ func (f *Flow) saveArticleChat(ctx context.Context, logger *slog.Logger, input a
 
 // RunHTML выполняет чат 3. Отдельный чат нужен потому, что разметка не должна тянуть за
 // собой историю правок текста: модель получает финальную статью и список профессий.
+//
+// Шаблон карточки призыва и её адрес проверяются первыми, до перехода этапа и до единого
+// сообщения модели: отказ обязан стоить нисколько, а не оплаченный ответ разметки.
 func (f *Flow) RunHTML(ctx context.Context, externalID string) error {
 	input, err := f.repository.GetGenerationInput(ctx, externalID)
 	if err != nil {
 		return taskflow.StageFailure(externalID, "load_generation_data", err)
 	}
 	logger := f.ArticleLogger(input.Article)
+	card, err := readCTACard(f.ctaCardPath)
+	if err != nil {
+		return f.Fail(ctx, logger, input.Article, "load_article_data", err)
+	}
+	buttonURL, err := courseURL(input)
+	if err != nil {
+		return f.Fail(ctx, logger, input.Article, "load_article_data", err)
+	}
 	saved, err := f.repository.GetSavedGenerationInput(ctx, externalID)
 	if err != nil {
 		return f.Fail(ctx, logger, input.Article, "load_article_data", err)
@@ -359,9 +380,9 @@ func (f *Flow) RunHTML(ctx context.Context, externalID string) error {
 	// Чат разметки принимает больше одного сообщения: оборванный ответ дописывается
 	// продолжением той же стадии, а чат роутера принимает ровно столько сообщений, сколько
 	// стадий ему названо при создании.
-	// Сверх первого ответа с продолжениями — одно сообщение на доспрос перелинковки: ответ на
-	// него короткий, по строке на ссылку, и обрываться ему не на чем.
-	htmlStages := append(generation.HTMLChatStages(StageHTML), StageHTML)
+	// Сверх первого ответа с продолжениями — одно сообщение на доспрос перелинковки и одно на
+	// строки карточки призыва: ответы на них короткие, и обрываться им не на чем.
+	htmlStages := append(generation.HTMLChatStages(StageHTML), StageHTML, StageHTML)
 	chat, err := f.NewChat(ctx, input.Article.ID, htmlStages...)
 	if err != nil {
 		return f.Fail(ctx, logger, input.Article, "html_generation", err)
@@ -388,6 +409,7 @@ func (f *Flow) RunHTML(ctx context.Context, externalID string) error {
 		return f.Fail(ctx, logger, input.Article, "html_generation", err)
 	}
 	html = f.completeLinks(ctx, logger, chat, named, f.completeHTMLPage(logger, finalText, html))
+	html = f.appendCTA(ctx, logger, chat, card, input.Article.Title, buttonURL, html)
 	pending, err := f.writer.StageHTML(input.Article.ExternalID, input.Article.Slug, prompt, html)
 	if err != nil {
 		return f.Fail(ctx, logger, input.Article, "save_html", err)
@@ -483,4 +505,62 @@ func (f *Flow) repairLinks(ctx context.Context, logger *slog.Logger, chat taskfl
 	logger.Info("перелинковка дописана моделью", "stage", "html_generation",
 		"asked_links", len(missing), "inserted_links", len(inserts)-len(skipped))
 	return repaired
+}
+
+// appendCTA дописывает карточку призыва в конец разметки.
+//
+// Заголовок раздела и абзац перед карточкой модель уже написала — они часть статьи. Строки
+// карточки спрашиваются отдельным коротким сообщением в том же чате: страница уже в истории.
+// Отказ доспроса стадию не роняет — карточка собирается на умолчаниях: раздел призыва без неё
+// обрывается на абзаце, за которым читателю некуда нажать.
+func (f *Flow) appendCTA(ctx context.Context, logger *slog.Logger, chat taskflow.Chat,
+	tmpl *template.Template, title, buttonURL, markup string) string {
+	var slots map[string]string
+	answer, err := f.Answer(ctx, chat.Continue, ctaSlotsPrompt(title, buttonURL), StageHTML)
+	if err != nil {
+		logger.Warn("строки карточки призыва не получены, карточка соберётся на умолчаниях",
+			"stage", "html_generation", "error", err)
+	} else {
+		slots = parseCTASlots(answer)
+	}
+	card, missing := buildCTACard(slots, buttonURL)
+	if len(missing) > 0 {
+		logger.Warn("часть слотов карточки призыва заменена умолчаниями",
+			"stage", "html_generation", "slots", strings.Join(missing, ", "))
+	}
+	rendered, err := renderCTACard(tmpl, card)
+	if err != nil {
+		logger.Warn("карточка призыва не собрана, статья уходит без неё",
+			"stage", "html_generation", "error", err)
+		return markup
+	}
+	result, added := appendCTACard(markup, rendered)
+	if !added {
+		logger.Warn("в разметке уже есть призыв — свою карточку не дописываем",
+			"stage", "html_generation")
+		return result
+	}
+	logger.Info("карточка призыва дописана кодом", "stage", "html_generation",
+		"button_url", card.ButtonURL)
+	return result
+}
+
+// courseURL — адрес, на который ведёт кнопка карточки призыва.
+//
+// Приходит колонкой course_url книги импорта, а не от модели: кнопка ведёт в деньги, и куда
+// уходит читатель, решает человек. Поэтому незаполненная колонка — отказ, а не умолчание.
+//
+// С каталогом услуг адрес не сверяется, в отличие от obuch_1: у тем без своей программы
+// кнопка ведёт на рубрику площадки, а рубрик в каталоге программ нет.
+func courseURL(input article.GenerationInput) (string, error) {
+	url := strings.TrimSpace(input.CourseURL)
+	if url == "" {
+		return "", fmt.Errorf("не заполнена колонка course_url книги импорта: " +
+			"кнопка карточки призыва ведёт на программу, и её адрес задаёт книга, а не модель")
+	}
+	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
+		return "", fmt.Errorf("адрес кнопки призыва %q не похож на ссылку: ожидается http(s)-адрес "+
+			"страницы программы или рубрики на сайте", url)
+	}
+	return url, nil
 }

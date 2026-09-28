@@ -29,6 +29,7 @@ tasks/*/input/**/*.xlsx
 input/pprof_fix_6/prepared/
 input/pprof_fix_7/prepared/
 input/pprof_fix_8/prepared/
+input/pprof_fix_9/prepared/
 # Локальные бэкапы книг импорта: сами книги уже исключены выше.
 input/**/*.xlsx.bak
 

@@ -66,8 +66,12 @@ type extraInputColumn struct {
 // обеих площадок: те же пять значений человек заполняет в полях записи руками, и второй их
 // источник разошёлся бы с первым молча. Расходятся площадки не смыслом колонки, а тем, куда
 // значение попадает на странице, — это свойство вёрстки, а не колонки.
+//
+// course_url — адрес кнопки карточки призыва в конце статьи блога. Его объявили статьи блога
+// обеих площадок (obuch_1 и pprof_1), и значит он у них одно и то же: куда ведёт кнопка
+// «Записаться на обучение». Адрес задаёт человек книгой, потому что кнопка ведёт в деньги.
 var SharedInputColumns = []string{
-	"seo_title", "profession",
+	"seo_title", "profession", "course_url",
 	"hours", "duration", "price", "document", "attestation",
 }
 
@@ -163,7 +167,7 @@ var extraInputColumns = map[string]extraInputColumn{
 		write: func(input article.Input) string { return input.ImageSourceURL },
 		read:  func(result *article.ResultInput) *string { return &result.ImageSourceURL },
 	},
-	// Колонка статей блога второй площадки: адрес курса, на который ведёт кнопка призыва.
+	// Колонка статей блога обеих площадок: адрес курса, на который ведёт кнопка призыва.
 	//
 	// read пуст намеренно: адрес виден в самой кнопке готовой статьи, и второй его копии в
 	// result.md заводить незачем. Читает колонку поток генерации через GetGenerationInput.
