@@ -97,6 +97,20 @@ func TestPublishStopsWhenCatalogUnavailable(t *testing.T) {
 	}
 }
 
+// A failed course selection must not leave a new tag behind: deleting terms is not supported.
+func TestPublishCreatesNoTagWhenCoursesFail(t *testing.T) {
+	deps, repository, client, _, _ := newWPPublishDeps()
+	repository.input.Tags = "Мастер СМР"
+	deps.courses = &stubCourses{related: threeCourses()[:2]}
+
+	if err := runWordPressPublish(context.Background(), deps, "16"); err == nil {
+		t.Fatal("ожидался отказ публикации")
+	}
+	if len(client.createdTags) != 0 {
+		t.Fatalf("в блоге заведены метки %v — отказ обязан быть до записи", client.createdTags)
+	}
+}
+
 // Задача без блока под статьёй публикуется как раньше: поля в нагрузке нет вовсе, и тема
 // подбирает курсы сама по совпадению рубрики и меток.
 func TestPublishWithoutCatalogKeepsPayloadUnchanged(t *testing.T) {

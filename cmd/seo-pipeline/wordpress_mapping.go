@@ -158,17 +158,18 @@ func (m blogWordPressMapping) Build(
 	if len(tagNames) == 0 {
 		return wordPressMappedPost{}, fmt.Errorf("у статьи %s не разобраны метки: %q", externalID, input.Tags)
 	}
+	// Связанные курсы подбираются по каталогу услуг площадки. Каталога может не быть вовсе —
+	// тогда поле не отправляется, и блок под статьёй тема заполняет сама, как и раньше.
+	// Selection goes before tags: EnsureTag writes to the blog.
+	related, err := selectRelatedCourses(ctx, deps, input)
+	if err != nil {
+		return wordPressMappedPost{}, err
+	}
 	tags, err := resolveWordPressTags(ctx, deps, externalID, tagNames, createMissingTerms)
 	if err != nil {
 		return wordPressMappedPost{}, err
 	}
 	fields := blogCustomFields(input, faqItems, readingTime, tagNames, !deps.withoutArticleMetadata)
-	// Связанные курсы подбираются по каталогу услуг площадки. Каталога может не быть вовсе —
-	// тогда поле не отправляется, и блок под статьёй тема заполняет сама, как и раньше.
-	related, err := selectRelatedCourses(ctx, deps, input)
-	if err != nil {
-		return wordPressMappedPost{}, err
-	}
 	if len(related) > 0 {
 		fields = append(fields, wordpress.CustomField{
 			Key: blogFieldRelatedCourses, IDs: catalog.RelatedPostIDs(related),
