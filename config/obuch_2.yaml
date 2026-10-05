@@ -20,13 +20,17 @@ llm:
       chat_url: https://chat.deepseek.com/
       login_url: https://chat.deepseek.com/sign_in
       profile_dir: data/browser/deepseek
-      headless: true
+      # Обычное окно, не headless: headless-сборка представляется DeepSeek как HeadlessChrome
+      # с программной видеокартой и без плагинов, а аккаунт уже блокировали за автоматизацию.
+      headless: false
       # Один диалог на страницу: без него браузерный клиент открывал бы новую беседу на
       # каждое сообщение, и история внутри чата 2 терялась бы. Границы между тремя чатами
       # задаёт сам поток — первое сообщение каждого чата просит начать новую беседу.
       single_chat_per_article: true
 
-  # Режим ответа DeepSeek: expert рассуждает, default отвечает сразу. Два бюджета времени у
+  # Режим ответа DeepSeek: expert рассуждает, default отвечает сразу. У всех стадий default с
+  # 28.09.2026: expert сегодня — это тумблер DeepThink, с ним стадия structure не укладывалась
+  # в attempt_timeout, а прежние страницы задачи писались без рассуждений. Два бюджета времени у
   # каждой стадии: timeout — общий на все попытки, attempt_timeout — на одну. Раздельными они
   # стали после отказа DeepSeek «Server is busy»: пока бюджет был один, первая же попытка
   # выбирала его целиком, и повтор не начинался никогда.
@@ -47,7 +51,7 @@ llm:
       targets:
         - { provider: deepseek_web, model: deepseek-web }
       prompt: tasks/obuch_2/prompts/keywords.txt
-      mode: expert
+      mode: default
       temperature: 0.2
       max_tokens: 3000
       timeout: 600s
@@ -60,7 +64,7 @@ llm:
       targets:
         - { provider: deepseek_web, model: deepseek-web }
       prompt: tasks/obuch_2/prompts/structure.txt
-      mode: expert
+      mode: default
       temperature: 0.3
       max_tokens: 3000
       timeout: 600s
@@ -73,7 +77,7 @@ llm:
       targets:
         - { provider: deepseek_web, model: deepseek-web }
       prompt: tasks/obuch_2/prompts/article.txt
-      mode: expert
+      mode: default
       # Единственная стадия задачи с поиском: страницу пишет она, и источник под таблицей
       # заработка обязан быть сайтом, который модель правда открыла. Она же открывает чат 2,
       # а переключатель поиска относится к чату целиком — у стадии-продолжения он молчит.
@@ -93,7 +97,7 @@ llm:
       targets:
         - { provider: deepseek_web, model: deepseek-web }
       prompt: tasks/obuch_2/prompts/review.txt
-      mode: expert
+      mode: default
       temperature: 0.3
       max_tokens: 12000
       timeout: 900s
@@ -128,11 +132,15 @@ pipeline:
   # не сверена с живой записью, а отменить публикацию приложение не умеет. Первые страницы
   # выкладываются руками — `publish plan <id>`, затем `publish <id>`, — и только когда запись
   # в блоге совпала с ожидаемой, признак переключается в true.
-  publish_after_run: false
-  # Выгрузка промпта страницы в Google Docs. Выключена: своей папки Drive у задачи ещё нет, а
-  # общая перезаписывает документы соседей по совпадению имени «Промт: <заголовок>».
-  # Включается одной строкой вместе с Profile.GoogleFolderURL, когда папку заведут.
-  google_docs: false
+  #
+  # Включена 28.09.2026: раскладка сверена с живыми записями 19540, 19728 и 19731 — все три
+  # легли такими, какими их показал `publish plan`. Цена та же, что у obuch_1: отменить
+  # публикацию приложение не умеет, сорванный прогон оставит запись под правку руками.
+  publish_after_run: true
+  # Выгрузка промпта страницы в Google Docs. Включена 28.09.2026 вместе со своей папкой Drive
+  # (Profile.GoogleFolderURL): общая перезаписала бы документы соседей по совпадению имени
+  # «Промт: <заголовок>».
+  google_docs: true
   # Keys.so: сбор запросов у конкурента и их очистка. При отказе включённого Keys.so (лимит,
   # таймаут) запросы подбирает модель по промпту keywords, и лог помечает это
   # «ПРОБЛЕМА С KEYS.SO».

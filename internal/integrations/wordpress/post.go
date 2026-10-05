@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -245,6 +246,13 @@ func (p PostPayload) Verify(stored StoredPost) []Mismatch {
 			add(field.Key, formatIDs(field.IDs), formatIDs(serializedIDs(stored.Fields[field.Key])))
 			continue
 		}
+		// Набор флажков тоже возвращается сериализованным массивом. Сравнивать его со Value
+		// нельзя: оно у такого поля пустое, и 28.09.2026 запись 19728 с верным prog_format
+		// была объявлена несошедшейся.
+		if len(field.Values) > 0 {
+			add(field.Key, formatValues(field.Values), formatValues(serializedStrings(stored.Fields[field.Key])))
+			continue
+		}
 		add(field.Key, field.Value, stored.Fields[field.Key])
 	}
 	return mismatches
@@ -453,6 +461,26 @@ func serializedIDs(value string) []int64 {
 	}
 	return ids
 }
+
+// serializedStrings вынимает строковые элементы сериализованного массива PHP
+// (a:1:{i:0;s:4:"dist";} → [dist]). Разбор такой же грубый, как у serializedIDs.
+func serializedStrings(value string) []string {
+	var values []string
+	for _, match := range serializedAnyString.FindAllStringSubmatch(value, -1) {
+		values = append(values, match[1])
+	}
+	return values
+}
+
+// formatValues приводит набор строк к сравнимому виду: порядок флажков не значим.
+func formatValues(values []string) string {
+	sorted := append([]string(nil), values...)
+	sort.Strings(sorted)
+	return strings.Join(sorted, ",")
+}
+
+// serializedAnyString — строковый элемент сериализованного массива PHP с любым содержимым.
+var serializedAnyString = regexp.MustCompile(`s:\d+:"([^"]*)"`)
 
 // serializedStringValue — строковый элемент сериализованного массива PHP.
 var serializedStringValue = regexp.MustCompile(`s:\d+:"(\d+)"`)

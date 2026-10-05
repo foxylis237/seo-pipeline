@@ -1,6 +1,9 @@
 package obuch2
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // Разметка модулей ровно та, что просит промпт: список без заголовков, часы в жирном зачине.
 const programMarkup = `<h2 class="wp-block-heading">Детальная программа обучения</h2>` +
@@ -99,5 +102,35 @@ func TestProgramPresetsMatchMeasuredPages(t *testing.T) {
 	}
 	if _, known := ProgramPresetOf("perepodgotovka"); known {
 		t.Fatal("незамеренный тип записи объявлен известным")
+	}
+}
+
+func TestStripModuleHoursLeavesTopicAndDescription(t *testing.T) {
+	markup := `<h2>Программа обучения</h2><ol class="wp-block-list"><li><strong>Модуль 1. Устройство крана — 16 часов.</strong> Механизмы и тормоза.</li>` +
+		`<li><strong style="display:block">Модуль 2. Итоговая аттестация — 4 часа.</strong><span>Экзамен.</span></li></ol>` +
+		`<h2>Доход</h2><p><strong>Итог — 150 часов.</strong></p>`
+	got := StripModuleHours(markup)
+	for _, want := range []string{"<strong>Модуль 1. Устройство крана.</strong> Механизмы и тормоза.", `<strong style="display:block">Модуль 2. Итоговая аттестация.</strong>`, "<strong>Итог — 150 часов.</strong>"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("StripModuleHours() lost %q in:\n%s", want, got)
+		}
+	}
+	if modules := ParseModules(markup); len(modules) != 2 || modules[0].Hours != "16" {
+		t.Fatalf("ParseModules on the stored markup = %+v, hours must still be there", modules)
+	}
+}
+
+// «Кому подойдёт эта программа» стоит первым разделом, и её список портретов разбором
+// модулей быть не должен (страница 21).
+func TestParseModulesSkipsAudienceSectionNamedProgram(t *testing.T) {
+	markup := `<h2>Кому подойдёт эта программа</h2><ul><li><strong>Новичкам.</strong> Без опыта.</li></ul>` +
+		`<h2>Детальная программа обучения</h2><ol><li><strong>Модуль 1. Материаловедение — 6 часов.</strong> Свойства металлов.</li></ol>` +
+		`<h2>Частые вопросы</h2>`
+	modules := ParseModules(markup)
+	if len(modules) != 1 || modules[0].Topic != "Материаловедение" || modules[0].Hours != "6" {
+		t.Fatalf("modules parsed from the wrong section: %+v", modules)
+	}
+	if stripped := StripModuleHours(markup); !strings.Contains(stripped, "Материаловедение.</strong>") {
+		t.Fatalf("hours were not stripped from the module section: %s", stripped)
 	}
 }

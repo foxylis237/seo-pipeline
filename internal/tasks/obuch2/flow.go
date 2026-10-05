@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"path"
 	"strings"
 	"text/template"
 	"time"
@@ -41,6 +42,7 @@ type Writer interface {
 	StageArticle(externalID, slug, prompt, text, model string) (*articleoutput.PendingArtifact, error)
 	StageFixedArticle(externalID, slug, prompt, article string) (*articleoutput.PendingArtifact, error)
 	StageHTML(externalID, slug, prompt, html string) (*articleoutput.PendingArtifact, error)
+	StageFiles(files ...articleoutput.File) (*articleoutput.PendingArtifact, error)
 	Read(relativePath string) (string, error)
 }
 
@@ -73,6 +75,8 @@ type Flow struct {
 	// blockTemplatesDir — каталог шаблонов визуальных блоков тела страницы. Поле по той же
 	// причине, что и ctaCardPath: тест подставляет свой каталог.
 	blockTemplatesDir string
+	// exportPromptPath — шаблон выгружаемого промпта; поле по той же причине, что ctaCardPath.
+	exportPromptPath string
 }
 
 // NewFlow собирает поток. publisher необязателен и может быть nil.
@@ -87,6 +91,7 @@ func NewFlow(repository Repository, writer Writer, chats taskflow.ChatFactory,
 		writer:            writer,
 		ctaCardPath:       CTACardPath,
 		blockTemplatesDir: tasks.CommonBlockTemplatesDir,
+		exportPromptPath:  ExportPromptPath,
 	}
 }
 
@@ -175,13 +180,19 @@ func (f *Flow) RunArticle(ctx context.Context, externalID string) error {
 	return nil
 }
 
+// ModelPromptFile — промпт стадии article, ушедший в модель, в каталоге prompts статьи.
+const ModelPromptFile = "article_model_prompt.txt"
+
 // articleChatOutput — то, что произвёл чат 2. Результаты названы по смыслу, а не по слотам
 // хранения: соответствие описано в saveArticleChat.
 type articleChatOutput struct {
 	articlePrompt string
-	articleText   string
-	reviewPrompt  string
-	reviewedPage  string
+	// exportPrompt — выгружаемый промпт (ExportPromptPath): он ложится в
+	// prompts/article_prompt.txt и уходит в Google Docs. Модель получает articlePrompt.
+	exportPrompt string
+	articleText  string
+	reviewPrompt string
+	reviewedPage string
 }
 
 // runArticleChat проводит два сообщения чата 2. Чат открывается и закрывается здесь же:
@@ -195,6 +206,10 @@ func (f *Flow) runArticleChat(ctx context.Context, logger *slog.Logger, input ar
 	defer f.CloseChat(chat, logger, "article_generation")
 	logger.Info("article chat started", "stage", "article_generation", "chat", 2)
 
+	// Выгружаемый промпт собирается до первого сообщения: отказ шаблона обязан стоить нисколько.
+	if out.exportPrompt, err = RenderExportPrompt(f.exportPromptPath, input, structure); err != nil {
+		return out, f.Fail(ctx, logger, input.Article, "article_generation", err)
+	}
 	if out.articlePrompt, out.articleText, err = f.Message(ctx, chat.Send,
 		StageArticle, articleData(input, structure)); err != nil {
 		return out, f.Fail(ctx, logger, input.Article, "article_generation", err)
@@ -226,7 +241,7 @@ func (f *Flow) runArticleChat(ctx context.Context, logger *slog.Logger, input ar
 // считает этап невыполненным по пустому пути и возвращался бы на него вечно.
 func (f *Flow) saveArticleChat(ctx context.Context, logger *slog.Logger, input article.GenerationInput, externalID string, chat articleChatOutput) error {
 	selected := input.Article
-	articlePending, err := f.writer.StageArticle(selected.ExternalID, selected.Slug, chat.articlePrompt, chat.articleText, "")
+	articlePending, err := f.writer.StageArticle(selected.ExternalID, selected.Slug, chat.exportPrompt, chat.articleText, "")
 	if err != nil {
 		return f.Fail(ctx, logger, selected, "save_article", err)
 	}
@@ -236,6 +251,15 @@ func (f *Flow) saveArticleChat(ctx context.Context, logger *slog.Logger, input a
 		return f.Fail(ctx, logger, selected, "save_reviewed_article", err)
 	}
 	defer finalPending.Abort()
+	// В article_prompt.txt лежит выгружаемый промпт, а тот, что ушёл в модель, — своим файлом.
+	modelPromptPending, err := f.writer.StageFiles(articleoutput.File{
+		Path:    path.Join(articleoutput.DirectoryName(selected.ExternalID, selected.Slug), articleoutput.PromptsFolder, ModelPromptFile),
+		Content: []byte(chat.articlePrompt),
+	})
+	if err != nil {
+		return f.Fail(ctx, logger, selected, "save_model_prompt", err)
+	}
+	defer modelPromptPending.Abort()
 
 	structurePath, err := f.SavedStructurePath(ctx, externalID)
 	if err != nil {
@@ -250,7 +274,7 @@ func (f *Flow) saveArticleChat(ctx context.Context, logger *slog.Logger, input a
 			return err
 		}
 		return f.repository.SaveFixedArticlePath(ctx, selected.ID, pagePath)
-	}, articlePending, finalPending)
+	}, articlePending, finalPending, modelPromptPending)
 	if commitErr != nil {
 		return f.Fail(ctx, logger, selected, "save_article_state", commitErr)
 	}
@@ -261,7 +285,7 @@ func (f *Flow) saveArticleChat(ctx context.Context, logger *slog.Logger, input a
 		ArticleID:  selected.ID,
 		ExternalID: selected.ExternalID,
 		Title:      selected.Title,
-		Prompt:     chat.articlePrompt,
+		Prompt:     chat.exportPrompt,
 		PromptPath: articlePending.Paths.ArticlePromptPath,
 	})
 	logger.Info("article artifacts saved", "stage", "article_generation",

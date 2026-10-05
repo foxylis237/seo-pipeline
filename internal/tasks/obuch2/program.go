@@ -54,14 +54,9 @@ type Module struct {
 // другой формы, а страница всё равно уже написана и оплачена. Что делать с пустым результатом,
 // решает публикация.
 func ParseModules(markup string) []Module {
-	heading := programHeadingRE.FindStringIndex(markup)
-	if heading == nil {
+	start, end, ok := programSection(markup)
+	if !ok {
 		return nil
-	}
-	start := heading[1]
-	end := len(markup)
-	if next := programNextH2RE.FindStringIndex(markup[start:]); next != nil {
-		end = start + next[0]
 	}
 	list := programListRE.FindStringSubmatch(markup[start:end])
 	if len(list) < 2 {
@@ -77,6 +72,64 @@ func ParseModules(markup string) []Module {
 		modules = append(modules, Module{Topic: topic, Hours: hours, Text: text})
 	}
 	return modules
+}
+
+// programSection находит раздел программы: от заголовка до следующего H2.
+//
+// Слово «программа» стоит не только в заголовке модулей: «Кому подойдёт эта программа»
+// скелет ставит первым разделом, и разбор по первому совпадению брал список портретов
+// аудитории (страница 21, 29.09.2026). Поэтому выигрывает раздел, чей список начинается с
+// «Модуль»; без такого — прежнее правило, первый заголовок со словом «программа».
+func programSection(markup string) (start, end int, ok bool) {
+	headings := programHeadingRE.FindAllStringIndex(markup, -1)
+	if len(headings) == 0 {
+		return 0, 0, false
+	}
+	bounds := func(heading []int) (int, int) {
+		from, to := heading[1], len(markup)
+		if next := programNextH2RE.FindStringIndex(markup[from:]); next != nil {
+			to = from + next[0]
+		}
+		return from, to
+	}
+	for _, heading := range headings {
+		from, to := bounds(heading)
+		list := programListRE.FindStringSubmatch(markup[from:to])
+		if len(list) < 2 {
+			continue
+		}
+		if item := programItemRE.FindStringSubmatch(list[1]); item != nil && moduleNumberRE.MatchString(plainText(item[1])) {
+			return from, to, true
+		}
+	}
+	start, end = bounds(headings[0])
+	return start, end, true
+}
+
+// moduleLeadRE — жирный зачин строки модуля вместе с тегами, чтобы править только его.
+var moduleLeadRE = regexp.MustCompile(`(?s)(<li[^>]*>\s*<strong[^>]*>)(.*?)(</strong>)`)
+
+// moduleLeadHoursRE — часы в зачине: «… — 18 часов.» Точка после часов остаётся концом зачина.
+var moduleLeadHoursRE = regexp.MustCompile(`\s*[—–-]\s*\d+\s*(?:ак\.?\s*)?час[а-яё]*(\.?)\s*$`)
+
+// StripModuleHours убирает часы из зачинов строк программы в теле страницы.
+//
+// Часы модулей живут в полях записи (prog_moduli_N_chasy), и аккордеон площадки печатает их
+// сам; в тексте они стояли дважды. Решение владельца 28.09.2026: в теле — тема и краткое
+// описание, часы — только в полях. Модель пишет их по-прежнему — ParseModules берёт часы
+// отсюда, — поэтому снимаются они уже после разбора, в том теле, что уходит в блог.
+// Сохранённая разметка страницы остаётся с часами: по ней программа разбирается повторно.
+func StripModuleHours(markup string) string {
+	start, end, ok := programSection(markup)
+	if !ok {
+		return markup
+	}
+	section := moduleLeadRE.ReplaceAllStringFunc(markup[start:end], func(item string) string {
+		parts := moduleLeadRE.FindStringSubmatch(item)
+		lead := moduleLeadHoursRE.ReplaceAllString(parts[2], "$1")
+		return parts[1] + lead + parts[3]
+	})
+	return markup[:start] + section + markup[end:]
 }
 
 // TotalHours — сумма часов модулей. Ноль означает, что часов нет ни у одного: у страницы без

@@ -68,6 +68,9 @@ type wordPressMappedPost struct {
 	// обучения: картинка внутри него читается как потерянная, и на всех просмотренных живых
 	// страницах она стоит сразу за лидом и плашкой параметров программы.
 	BodyImageBeforeFirstHeading bool
+	// Body правит тело записи перед отправкой, после того как раскладка разобрала из него
+	// всё нужное. nil — тело уходит как есть, так живут все раскладки, кроме услуг obuch_2.
+	Body func(string) string
 	// BodyImageSourceURL — адрес фотографии на стоке, с которой взята обложка.
 	//
 	// Пустой означает, что абзаца-ссылки под картинкой не будет вовсе. Прежний блок ведёт на
@@ -738,6 +741,8 @@ func (m plainServiceWordPressMapping) Build(
 		// и плашкой параметров, а не в середине.
 		BodyImageBeforeFirstHeading: true,
 		BodyImageSourceURL:          strings.TrimSpace(input.ImageSourceURL),
+		// Часы модулей уходят полями программы выше, а в теле остаются тема и описание.
+		Body: obuch2.StripModuleHours,
 	}, nil
 }
 

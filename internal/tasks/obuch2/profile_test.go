@@ -122,11 +122,11 @@ func TestGoogleDocsStayOffWhileFolderIsUnset(t *testing.T) {
 	}
 }
 
-// Публикация после прогона выключена, пока раскладка полей не сверена с живой записью:
-// отменить публикацию приложение не умеет.
-func TestPublishAfterRunStaysOffUntilVerified(t *testing.T) {
-	if !strings.Contains(readConfig(t), "\n  publish_after_run: false\n") {
-		t.Fatal("публикация после прогона включена, а раскладка полей площадки ещё не сверена с живой записью")
+// Публикация после прогона включена 28.09.2026: раскладка сверена с живыми записями 19540,
+// 19728 и 19731. Выключить её снова — решение владельца, а не побочный эффект правки конфига.
+func TestPublishAfterRunIsOnAfterVerification(t *testing.T) {
+	if !strings.Contains(readConfig(t), "\n  publish_after_run: true\n") {
+		t.Fatal("публикация после прогона выключена, хотя раскладка сверена с живыми записями")
 	}
 }
 

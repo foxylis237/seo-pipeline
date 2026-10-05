@@ -204,6 +204,7 @@ func newFlowFixture(t *testing.T) (*Flow, *fakeChats, *fakeRepository, *recordin
 	// файлах, что уйдут в блог, а относительный путь из потока от каталога пакета не ведёт
 	// никуда, и оформление молча не срабатывало бы.
 	flow.blockTemplatesDir = filepath.Join(projectRoot, filepath.FromSlash(tasks.CommonBlockTemplatesDir))
+	flow.exportPromptPath = filepath.Join(projectRoot, filepath.FromSlash(ExportPromptPath))
 	return flow, chats, repository, publisher, writer
 }
 
@@ -562,5 +563,15 @@ func TestFlowPublishesArticlePrompt(t *testing.T) {
 	}
 	if !strings.HasSuffix(publisher.jobs[0].PromptPath, "prompts/article_prompt.txt") {
 		t.Fatalf("промпт сохранён как %q", publisher.jobs[0].PromptPath)
+	}
+	// В Docs уходит выгружаемый промпт по шаблону владельца, а не промпт модели.
+	if prompt := publisher.jobs[0].Prompt; !strings.Contains(prompt, "# РОЛЬ") ||
+		!strings.Contains(prompt, "«Обучим Специалиста»") {
+		t.Fatalf("в публикацию ушёл не выгружаемый промпт: %.200q", prompt)
+	}
+	// Промпт, ушедший в модель, сохранён своим файлом рядом с выгружаемым.
+	modelPrompt, err := writer.Read("7-obuchenie-na-stropalshchika/prompts/" + ModelPromptFile)
+	if err != nil || strings.Contains(modelPrompt, "# РОЛЬ") || strings.TrimSpace(modelPrompt) == "" {
+		t.Fatalf("промпт модели не сохранён: %v %.100q", err, modelPrompt)
 	}
 }

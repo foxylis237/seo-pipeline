@@ -164,3 +164,41 @@ func TestCheckProgramPresetSkipsUnknownPostType(t *testing.T) {
 		t.Fatalf("незамеренный тип дал расхождения: %v", issues)
 	}
 }
+
+// Оформление блоков пересобирает шапку таблицы заработка обычной строкой, без <thead>.
+// Доход в ней — не цена курса, а одноколоночная плашка параметров сверяется по-прежнему.
+func TestCheckProgramFactsSkipsDecoratedSalaryTable(t *testing.T) {
+	markup := `<table><tbody><tr><td><strong>Разряд</strong></td><td><strong>Доход</strong></td></tr>` +
+		`<tr><td>4 разряд</td><td>от 70 000 до 100 000 ₽</td></tr></tbody></table>` +
+		`<table><tbody><tr><td><strong>Цена:</strong> от 5 000 ₽.</td></tr></tbody></table>`
+	if issues := CheckProgramFacts(markup, factsBook, nil); len(issues) > 0 {
+		t.Fatalf("salary table without thead was checked as price: %v", issues)
+	}
+	wrong := `<table><tbody><tr><td><strong>Цена:</strong> от 9 000 ₽.</td></tr></tbody></table>`
+	if issues := CheckProgramFacts(wrong, factsBook, nil); len(issues) == 0 {
+		t.Fatal("one-column parameter table with a wrong price passed the check")
+	}
+}
+
+// Доход в прозе — не цена курса; цена мимо книги в той же странице по-прежнему ловится.
+func TestCheckProgramFactsSkipsEarningsInProse(t *testing.T) {
+	markup := `<p>Спрос высокий, а работодатели предлагают зарплату от 200 000 рублей и выше.</p><p>Стоимость обучения — от 5 000 ₽.</p>`
+	if issues := CheckProgramFacts(markup, factsBook, nil); len(issues) > 0 {
+		t.Fatalf("earnings in prose were checked as price: %v", issues)
+	}
+	wrong := `<p>Зарплата высокая. Стоимость обучения — от 9 000 ₽.</p>`
+	if issues := CheckProgramFacts(wrong, factsBook, nil); len(issues) == 0 {
+		t.Fatal("a wrong course price after an earnings sentence passed the check")
+	}
+}
+
+// Доход помесячно без слов о зарплате (страница 32) и срок доставки документа (страница 42)
+// — не цена и не объём программы.
+func TestCheckProgramFactsSkipsMonthlyAmountAndTimeSpan(t *testing.T) {
+	markup := `<p>Коммунальные службы предлагают от 65 000 до 120 000 рублей в месяц.</p>` +
+		`<p>Скан удостоверения придёт на почту в течение 24 часов после экзамена.</p>` +
+		`<p>Стоимость обучения — от 5 000 ₽, объём — 150 часов.</p>`
+	if issues := CheckProgramFacts(markup, factsBook, nil); len(issues) > 0 {
+		t.Fatalf("monthly amount or time span was checked as program fact: %v", issues)
+	}
+}

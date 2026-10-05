@@ -448,6 +448,9 @@ func buildWordPressPayloadFor(
 	if err != nil {
 		return wordpress.PostPayload{}, plan, err
 	}
+	if mapped.Body != nil {
+		contentHTML = mapped.Body(contentHTML)
+	}
 	tagIDs := make([]int64, 0, len(mapped.Tags))
 	for _, tag := range mapped.Tags {
 		// Ноль бывает только в сухом прогоне — у метки, которую заведёт публикация.
@@ -944,6 +947,11 @@ func runWordPressPublishPlan(ctx context.Context, deps wordPressPublishDeps, ext
 		// именно идентификаторы: по ним человек найдёт запись в админке.
 		if len(field.IDs) > 0 {
 			fmt.Fprintf(out, "  %-22s = %s\n", field.Key, formatPlanIDs(field.IDs))
+			continue
+		}
+		// Набор флажков (prog_format) тоже уходит списком, и Value у него пустое.
+		if len(field.Values) > 0 {
+			fmt.Fprintf(out, "  %-22s = [%s]\n", field.Key, strings.Join(field.Values, ", "))
 			continue
 		}
 		value := strings.ReplaceAll(strings.TrimSpace(field.Value), "\n", " ")

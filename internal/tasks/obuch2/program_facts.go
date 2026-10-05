@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // Числа программы на странице услуги названы дважды: колонками книги они уходят в поля
@@ -33,11 +34,19 @@ var (
 	// Ритм занятий — не объём программы: «по 4 часа в день» говорит о расписании, и совпадать
 	// с колонкой книги оно не обязано.
 	factPaceRE = regexp.MustCompile(`^\s*в\s+(день|сутки|недел[юи]|месяц)`)
+	// Промежуток времени — тоже не объём: «пришлём в течение 24 часов» 29.09.2026 остановило
+	// публикацию страницы 42. Объём программы так не называют.
+	factSpanRE = regexp.MustCompile(`(?:в\s+течение|через|спустя)\s*$`)
 	// Таблица заработка: три столбца с шапкой. Её цифры — доход по разрядам, а не цена курса,
 	// и в сверку они не идут. Плашка параметров шапки не имеет — она проверяется как текст.
 	factSalaryTableRE = regexp.MustCompile(`(?s)<table[^>]*>.*?</table>`)
 	factTheadRE       = regexp.MustCompile(`(?i)<thead[\s>]`)
-	factTagRE         = regexp.MustCompile(`(?s)<[^>]+>`)
+	// Шапку <thead> оформление блоков пересобирает обычной строкой, поэтому таблица заработка
+	// узнаётся ещё и по второму столбцу: плашка параметров одноколоночная. Без этого 28.09.2026
+	// доход «от 70 000 до 100 000 ₽» страницы 3 объявлялся ценой курса мимо книги.
+	factRowRE  = regexp.MustCompile(`(?is)<tr[\s>].*?</tr>`)
+	factCellRE = regexp.MustCompile(`(?i)<t[dh][\s>]`)
+	factTagRE  = regexp.MustCompile(`(?s)<[^>]+>`)
 )
 
 // ProgramFacts — программа так, как её назвала книга импорта: числа и две формулировки,
@@ -112,6 +121,12 @@ func leadingWord(book string, words map[string]string) string {
 	return leading
 }
 
+// multiColumnTable reports a table whose first row has more than one cell.
+func multiColumnTable(table string) bool {
+	row := factRowRE.FindString(table)
+	return len(factCellRE.FindAllStringIndex(row, 2)) > 1
+}
+
 // CheckProgramFacts сверяет числа в тексте страницы с числами книги.
 //
 // Возвращает расхождения строками — по одной на каждое найденное. Пустой результат означает,
@@ -120,8 +135,9 @@ func leadingWord(book string, words map[string]string) string {
 // Пустая колонка книги свою проверку выключает: колонок не было вовсе, когда писались первые
 // страницы, и требовать по ним сверки задним числом нельзя.
 func CheckProgramFacts(markup string, facts ProgramFacts, modules []Module) []string {
+	markup = factBlockEndRE.ReplaceAllString(markup, "$0 "+factBlockMark+" ")
 	text := plainText(factSalaryTableRE.ReplaceAllStringFunc(markup, func(table string) string {
-		if factTheadRE.MatchString(table) {
+		if factTheadRE.MatchString(table) || multiColumnTable(table) {
 			return " "
 		}
 		return table
@@ -155,7 +171,7 @@ func checkHours(text, bookHours string, modules []Module) []string {
 		if value == 0 || allowed[value] || seen[value] {
 			continue
 		}
-		if factPaceRE.MatchString(text[found[1]:]) {
+		if factPaceRE.MatchString(text[found[1]:]) || factSpanRE.MatchString(text[:found[0]]) {
 			continue
 		}
 		seen[value] = true
@@ -176,7 +192,11 @@ func checkPrice(text, bookPrice string) []string {
 	seen := map[int]bool{}
 	for _, found := range factMoneyRE.FindAllStringSubmatchIndex(text, -1) {
 		value := factDigits(text[found[2]:found[3]])
-		if value == 0 || value == want || seen[value] {
+		// Сумма за период — заработок: цену курса помесячно не называют. «Коммунальные
+		// службы предлагают от 65 000 до 120 000 рублей в месяц» 29.09.2026 остановило
+		// публикацию страницы 32 — слов о зарплате в предложении нет.
+		perPeriod := factPaceRE.MatchString(text[found[1]:])
+		if value == 0 || value == want || seen[value] || perPeriod || aboutEarnings(text, found[0]) {
 			continue
 		}
 		seen[value] = true
@@ -184,6 +204,29 @@ func checkPrice(text, bookPrice string) []string {
 			value, want, factQuote(text, found[0])))
 	}
 	return issues
+}
+
+// factEarningsRE — слова о заработке. Сумма после них — доход, а не цена курса: «работодатели
+// предлагают зарплату от 200 000 рублей» 28.09.2026 остановило публикацию страницы 16.
+var factEarningsRE = regexp.MustCompile(`(?i)(зарплат|заработ|доход|оклад)[а-яё]*`)
+
+// factBlockEndRE и factBlockMark отмечают конец абзаца, строки списка и заголовка: текст
+// сверки собирается без тегов, и без метки заголовок «Уровень дохода» оказывался в одном
+// предложении с ценой курса из следующего абзаца.
+var factBlockEndRE = regexp.MustCompile(`(?i)</(?:p|li|h[1-6]|td|th)>`)
+
+const factBlockMark = "¶"
+
+// aboutEarnings reports that the money amount at offset follows earnings wording in the same
+// sentence.
+func aboutEarnings(text string, offset int) bool {
+	start := max(0, offset-80)
+	window := text[start:offset]
+	if dot := strings.LastIndexAny(window, ".!?"+factBlockMark); dot >= 0 {
+		_, size := utf8.DecodeRuneInString(window[dot:])
+		window = window[dot+size:]
+	}
+	return factEarningsRE.MatchString(window)
 }
 
 // checkTerm: срок обучения называется формой «от N недель» — той же, что стоит в колонке
