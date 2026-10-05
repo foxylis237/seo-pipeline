@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/foxylis237/seo-pipeline/internal/pipeline/pagebatch"
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/taskflow"
 )
 
@@ -307,6 +308,26 @@ func TestFlowFindsBySlugWithoutPostID(t *testing.T) {
 	}
 	if blog.calls[0] != "find:logoped" {
 		t.Fatalf("первым вызовом был %q", blog.calls[0])
+	}
+}
+
+// Leaving blog: every page fails with the same cause, only the address differs.
+func TestFlowFetchFailureStopsBatchGuard(t *testing.T) {
+	guard := pagebatch.NewFailureGuard()
+	var stop error
+	for _, source := range []string{"https://dpoprof.ru/a/logoped/", "https://dpoprof.ru/b/surdolog/"} {
+		article := testArticle()
+		article.SourceURL = source
+		blog := &fakeBlog{findErr: errors.New("connection refused")}
+		flow, _ := newTestFlow(t, &fakeArticles{article: article}, blog, &fakeChats{chat: &fakeChat{}}, nil, 0)
+		err := flow.Run(context.Background(), "2")
+		if err == nil {
+			t.Fatalf("Run %s: ожидался отказ", source)
+		}
+		stop = guard.Failed(err)
+	}
+	if !errors.Is(stop, pagebatch.ErrRunStopped) {
+		t.Fatalf("два одинаковых отказа блога не остановили пачку: %v", stop)
 	}
 }
 

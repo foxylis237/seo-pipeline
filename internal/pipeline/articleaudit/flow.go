@@ -311,7 +311,7 @@ func (f *Flow) fetch(ctx context.Context, article Article) (Post, string, error)
 	if postID == 0 {
 		found, err := f.blog.Find(ctx, article.Slug)
 		if err != nil {
-			return Post{}, "", fmt.Errorf("найти страницу %s в блоге: %w", article.SourceURL, err)
+			return Post{}, "", fmt.Errorf("найти страницу %q в блоге: %w", article.SourceURL, err)
 		}
 		foundBy, postID, link = foundBySlug, found.ID, found.Link
 	}
