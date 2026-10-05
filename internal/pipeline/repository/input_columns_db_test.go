@@ -38,10 +38,7 @@ var blogColumns = []string{"author", "links", "professions", "tags"}
 // это делать — так живут task_1 и pprof_1.
 func newTaskTestRepository(t *testing.T, taskMigrations string, profile SchemaProfile) (*ArticleRepository, *pgxpool.Pool) {
 	t.Helper()
-	databaseURL := os.Getenv("TEST_DATABASE_URL")
-	if databaseURL == "" {
-		t.Skip("TEST_DATABASE_URL is not set")
-	}
+	databaseURL := requireDatabaseURL(t)
 	ctx := context.Background()
 	admin, err := pgxpool.New(ctx, databaseURL)
 	if err != nil {

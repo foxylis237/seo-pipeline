@@ -1042,12 +1042,23 @@ func TestSaveManualKeywordsOverwritesResearchAndState(t *testing.T) {
 		"article_id = %d AND structure_path IS NOT NULL", created.ID), 1)
 }
 
+// requireDatabaseURL skips the test without a database, or fails it when REQUIRE_DATABASE_TESTS=1.
+func requireDatabaseURL(t *testing.T) string {
+	t.Helper()
+	url := os.Getenv("TEST_DATABASE_URL")
+	if url != "" {
+		return url
+	}
+	if os.Getenv("REQUIRE_DATABASE_TESTS") == "1" {
+		t.Fatal("TEST_DATABASE_URL is not set, but REQUIRE_DATABASE_TESTS=1")
+	}
+	t.Skip("TEST_DATABASE_URL is not set")
+	return ""
+}
+
 func newTestRepository(t *testing.T) (*ArticleRepository, *pgxpool.Pool) {
 	t.Helper()
-	databaseURL := os.Getenv("TEST_DATABASE_URL")
-	if databaseURL == "" {
-		t.Skip("TEST_DATABASE_URL is not set")
-	}
+	databaseURL := requireDatabaseURL(t)
 	ctx := context.Background()
 	admin, err := pgxpool.New(ctx, databaseURL)
 	if err != nil {
