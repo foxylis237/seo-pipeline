@@ -36,6 +36,18 @@ type fakeChat struct {
 	index  int
 	stages []string
 	sent   int
+	// slot — слот расписания для следующего сообщения, как у боевого чата: он же расходится
+	// с числом сообщений после SkipStage.
+	slot int
+}
+
+// SkipStage повторяет боевое поведение: стадия снимает свои неиспользованные слоты, и
+// следующее сообщение уходит под своим именем. Без этого тест не заметил бы, что сообщение
+// редактуры уехало под стадией эксперта.
+func (c *fakeChat) SkipStage(stage string) {
+	for c.slot < len(c.stages) && c.stages[c.slot] == stage {
+		c.slot++
+	}
 }
 
 func (c *fakeChat) Send(_ context.Context, prompt string) (string, error) {
@@ -50,11 +62,12 @@ func (c *fakeChat) Continue(_ context.Context, prompt string) (string, error) {
 // стадий названо при создании. Иначе тест пропустил бы в прод чат, которому не хватает
 // сообщения на кнопку.
 func (c *fakeChat) record(prompt string) (string, error) {
-	if c.sent >= len(c.stages) {
+	if c.slot >= len(c.stages) {
 		return "", fmt.Errorf("чату не хватило стадий: сообщение %d при %d стадиях", c.sent+1, len(c.stages))
 	}
-	stage := c.stages[c.sent]
+	stage := c.stages[c.slot]
 	c.sent++
+	c.slot++
 	c.owner.chats[c.index] = append(c.owner.chats[c.index], stage)
 	if pending := c.owner.queue[stage]; len(pending) > 0 {
 		c.owner.queue[stage] = pending[1:]
@@ -63,7 +76,9 @@ func (c *fakeChat) record(prompt string) (string, error) {
 	if answer, found := c.owner.answers[stage]; found {
 		return answer, nil
 	}
-	return "ответ стадии " + stage + " на промпт " + prompt, nil
+	// Точка в конце не украшение: по ней проверка обрыва отличает законченный ответ от
+	// оборванного на полуслове.
+	return "ответ стадии " + stage + " на промпт " + prompt + ".", nil
 }
 
 func (c *fakeChat) Close() error { return nil }
@@ -247,6 +262,37 @@ func TestFlowUsesThreeChats(t *testing.T) {
 		if strings.Join(chats.chats[index], ",") != strings.Join(expected, ",") {
 			t.Fatalf("чат %d: %v, ожидалось %v", index+1, chats.chats[index], expected)
 		}
+	}
+}
+
+// Оборванный ответ эксперта дописывается продолжением того же чата, а редактура после этого
+// уходит под своей стадией, а не под стадией эксперта: слоты под продолжения зарезервированы
+// заранее, и неиспользованные стадия снимает сама.
+func TestArticleChatCompletesCutExpertAnswer(t *testing.T) {
+	flow, chats, repository, _ := newFlowFixture(t)
+	chats.queue[StageExpert] = []string{
+		"H2 - Первый раздел\n\nАбзац закончен точкой. Второй обрывается на полусло",
+		"H2 - Второй раздел\n\nДописанный хвост статьи.",
+	}
+
+	ctx := context.Background()
+	if err := flow.RunStructure(ctx, "7"); err != nil {
+		t.Fatalf("structure: %v", err)
+	}
+	if err := flow.RunArticle(ctx, "7"); err != nil {
+		t.Fatalf("article: %v", err)
+	}
+
+	text := readArtifact(t, flow, repository.saved.ArticlePath)
+	if strings.Contains(text, "полусло") {
+		t.Fatalf("оборванное предложение осталось в тексте:\n%s", text)
+	}
+	if !strings.Contains(text, "Дописанный хвост статьи") {
+		t.Fatalf("продолжение не приклеилось:\n%s", text)
+	}
+	want := []string{StageExpert, StageExpert, StageReview, StageInfo}
+	if strings.Join(chats.chats[1], ",") != strings.Join(want, ",") {
+		t.Fatalf("чат 2: %v, ожидалось %v", chats.chats[1], want)
 	}
 }
 

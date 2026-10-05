@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"path"
 	"strings"
 	"text/template"
 	"time"
@@ -39,6 +40,7 @@ type Writer interface {
 	StageArticleInfo(externalID, slug, prompt, info string) (*articleoutput.PendingArtifact, error)
 	StageFixedArticle(externalID, slug, prompt, article string) (*articleoutput.PendingArtifact, error)
 	StageHTML(externalID, slug, prompt, html string) (*articleoutput.PendingArtifact, error)
+	StageFiles(files ...articleoutput.File) (*articleoutput.PendingArtifact, error)
 	Read(relativePath string) (string, error)
 }
 
@@ -240,34 +242,87 @@ type articleChatOutput struct {
 	parsedInfo    article.ArticleInfo
 }
 
-// runArticleChat проводит три сообщения чата 2. Чат открывается и закрывается здесь же:
+// articleChatStages — расписание чата 2.
+//
+// У эксперта и у редактуры есть слоты под продолжения оборванного ответа: обе стадии
+// возвращают статью целиком и упираются в предел длины одного сообщения. Метаданным слотов
+// не нужно — их ответ короткий. Неиспользованные слоты снимает skipStage, иначе сообщение
+// редактуры ушло бы под именем стадии эксперта: с её регламентом вложением и поиском в
+// интернете.
+func articleChatStages() []string {
+	stages := generation.TextChatStages(StageExpert)
+	stages = append(stages, generation.TextChatStages(StageReview)...)
+	return append(stages, StageInfo)
+}
+
+// skipStage снимает у чата неиспользованные слоты стадии.
+//
+// Признак необязательный: чат, который слотов не ведёт (подмена в тесте), ничего не делает,
+// и поток об этом знать не обязан.
+func skipStage(chat taskflow.Chat, stage string) {
+	if skipper, ok := chat.(interface{ SkipStage(string) }); ok {
+		skipper.SkipStage(stage)
+	}
+}
+
+// message превращает сообщение чата в отправку текста стадии: промпт уже отрендерен, а
+// проверка ответа на пустоту остаётся общей.
+func (f *Flow) message(send taskflow.Send, stage string) generation.TextMessage {
+	return func(ctx context.Context, prompt string) (string, error) {
+		return f.Answer(ctx, send, prompt, stage)
+	}
+}
+
+// runArticleChat проводит чат 2. Чат открывается и закрывается здесь же:
 // продолжать его снаружи нечем и незачем.
 //
 // Метаданные идут последними намеренно: TL;DR и FAQ обязаны описывать тот текст, который уйдёт
 // в блог, а не черновик до редактуры.
 func (f *Flow) runArticleChat(ctx context.Context, logger *slog.Logger, input article.GenerationInput, structure string) (articleChatOutput, error) {
 	var out articleChatOutput
-	chat, err := f.NewChat(ctx, input.Article.ID, StageExpert, StageReview, StageInfo)
+	chat, err := f.NewChat(ctx, input.Article.ID, articleChatStages()...)
 	if err != nil {
 		return out, f.Fail(ctx, logger, input.Article, "article_generation", err)
 	}
 	defer f.CloseChat(chat, logger, "article_generation")
 	logger.Info("article chat started", "stage", "article_generation", "chat", 2)
 
-	if out.expertPrompt, out.expertArticle, err = f.Message(ctx, chat.Send,
-		StageExpert, expertData(input, structure)); err != nil {
+	// Текст статьи собирается с дописыванием: ответ веб-интерфейса упирается в предел длины
+	// и обрывается посреди предложения, внешне оставаясь целым. Запись заголовков при этом
+	// приводится к одному виду — стадия html расставляет теги по ней, а модель за один прогон
+	// свободно переходит с «H2 - » на «H2:» и на Markdown.
+	if out.expertPrompt, err = f.Render(StageExpert, expertData(input, structure)); err != nil {
 		return out, f.Fail(ctx, logger, input.Article, "article_generation", err)
 	}
-	out.expertArticle = generation.NormalizeHeadings(out.expertArticle)
+	if out.expertArticle, err = generation.BuildArticleText(ctx, generation.ArticleTextRequest{
+		Structure: structure,
+		Prompt:    out.expertPrompt,
+		Send:      f.message(chat.Send, StageExpert),
+		Continue:  f.message(chat.Continue, StageExpert),
+		Logger:    logger,
+		Stage:     "article_generation",
+	}); err != nil {
+		return out, f.Fail(ctx, logger, input.Article, "article_generation", err)
+	}
+	skipStage(chat, StageExpert)
 	logger.Info("expert article generated", "stage", "article_generation", "prompt_size", len([]rune(out.expertPrompt)))
 
-	if out.reviewPrompt, out.finalArticle, err = f.Message(ctx, chat.Continue,
-		StageReview, editorData(input)); err != nil {
+	if out.reviewPrompt, err = f.Render(StageReview, editorData(input)); err != nil {
 		return out, f.Fail(ctx, logger, input.Article, "article_review", err)
 	}
-	// Запись заголовков приводится к одному виду до сохранения: стадия html расставляет теги
-	// по ней, а модель за один прогон свободно переходит с «H2 - » на «H2:» и на Markdown.
-	out.finalArticle = generation.NormalizeHeadings(out.finalArticle)
+	// Редактура возвращает статью целиком, значит упирается в тот же предел, что и эксперт, —
+	// и дописывается так же. Первое её сообщение продолжает чат: беседа начата экспертом.
+	if out.finalArticle, err = generation.BuildArticleText(ctx, generation.ArticleTextRequest{
+		Structure: structure,
+		Prompt:    out.reviewPrompt,
+		Send:      f.message(chat.Continue, StageReview),
+		Continue:  f.message(chat.Continue, StageReview),
+		Logger:    logger,
+		Stage:     "article_review",
+	}); err != nil {
+		return out, f.Fail(ctx, logger, input.Article, "article_review", err)
+	}
+	skipStage(chat, StageReview)
 	logger.Info("article review completed", "stage", "article_review")
 
 	if out.infoPrompt, out.infoText, err = f.Message(ctx, chat.Continue,
@@ -284,6 +339,9 @@ func (f *Flow) runArticleChat(ctx context.Context, logger *slog.Logger, input ar
 	logger.Info("article info generated", "stage", "metadata_generation")
 	return out, nil
 }
+
+// ExpertPromptFile — промпт стадии expert в каталоге prompts статьи.
+const ExpertPromptFile = "expert_prompt.txt"
 
 // saveArticleChat публикует артефакты чата 2 одним Commit и отдаёт базовый промпт в очередь
 // публикации.
@@ -313,6 +371,16 @@ func (f *Flow) saveArticleChat(ctx context.Context, logger *slog.Logger, input a
 		return f.Fail(ctx, logger, selected, "save_reviewed_article", err)
 	}
 	defer finalPending.Abort()
+	// Промпт стадии expert — тот, что ушёл в модель; слота у движка под него нет (в
+	// article_prompt.txt лежит базовый промпт для Google Docs), поэтому он ложится своим файлом.
+	expertPromptPending, err := f.writer.StageFiles(articleoutput.File{
+		Path:    path.Join(articleoutput.DirectoryName(selected.ExternalID, selected.Slug), articleoutput.PromptsFolder, ExpertPromptFile),
+		Content: []byte(chat.expertPrompt),
+	})
+	if err != nil {
+		return f.Fail(ctx, logger, selected, "save_expert_prompt", err)
+	}
+	defer expertPromptPending.Abort()
 
 	structurePath, err := f.SavedStructurePath(ctx, externalID)
 	if err != nil {
@@ -329,7 +397,7 @@ func (f *Flow) saveArticleChat(ctx context.Context, logger *slog.Logger, input a
 			return err
 		}
 		return f.repository.SaveFixedArticlePath(ctx, selected.ID, finalPending.Paths.FixedArticlePath)
-	}, expertPending, infoPending, finalPending)
+	}, expertPending, infoPending, finalPending, expertPromptPending)
 	if commitErr != nil {
 		return f.Fail(ctx, logger, selected, "save_article_state", commitErr)
 	}

@@ -29,6 +29,13 @@ func NormalizeHeadings(text string) string {
 
 func normalizeHeadingLine(line string) string {
 	if match := headingHashRE.FindStringSubmatch(strings.TrimSuffix(line, "\r")); match != nil {
+		// Метка уровня внутри Markdown-заголовка: «## H2 - Название». Модель пишет так,
+		// смешивая обе привычные ей формы, и без разбора вложенной метки к строке
+		// приписывался второй префикс — «H2 - H2 - Название». Уровень берётся из метки, а не
+		// из числа решёток: названный уровень точнее посчитанного.
+		if inner := headingLabelRE.FindStringSubmatch(match[2]); inner != nil {
+			return heading(int(inner[1][0]-'0'), inner[2])
+		}
 		return heading(len(match[1]), match[2])
 	}
 	if match := headingLabelRE.FindStringSubmatch(strings.TrimSuffix(line, "\r")); match != nil {
@@ -58,4 +65,23 @@ func CountHeadings(text string) int {
 		}
 	}
 	return count
+}
+
+var structureBulletRE = regexp.MustCompile(`^\s*[-*•]\s+`)
+
+// HeadingsOnly оставляет от текста одни заголовки в каноническом виде «H2 - Название».
+//
+// Ответ чата структуры — черновик страницы: под заголовками модель пишет лид, строки списков и
+// абзацы. Выгружаемому промпту нужна только композиция, и всё, что не заголовок, снимается.
+func HeadingsOnly(text string) string {
+	var headings []string
+	for _, line := range strings.Split(text, "\n") {
+		// «- **H2:** Название»: чат структуры пишет заголовки и строкой списка с жирной меткой
+		// (страница 35 obuch_2).
+		line = strings.ReplaceAll(structureBulletRE.ReplaceAllString(strings.TrimSuffix(line, "\r"), ""), "**", "")
+		if headingLabelRE.MatchString(line) || headingHashRE.MatchString(line) {
+			headings = append(headings, normalizeHeadingLine(line))
+		}
+	}
+	return strings.Join(headings, "\n")
 }

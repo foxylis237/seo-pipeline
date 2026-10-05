@@ -78,5 +78,16 @@ func (c *Chat) generate(ctx context.Context, prompt string) (string, error) {
 	return response.Text, nil
 }
 
+// SkipStage снимает у диалога неиспользованные слоты названной стадии.
+//
+// Нужен стадии, которая резервирует слоты под продолжения оборванного ответа: понадобились
+// они или нет, решается уже по ответу модели, а стадии раздаются сообщениям по порядку.
+// Диалог, который слотов не ведёт, ничего не делает — признак необязательный намеренно.
+func (c *Chat) SkipStage(stage string) {
+	if skipper, ok := c.chat.(interface{ SkipStage(string) }); ok {
+		skipper.SkipStage(stage)
+	}
+}
+
 // Close завершает диалог и освобождает ресурсы провайдера.
 func (c *Chat) Close() error { return c.chat.Close() }

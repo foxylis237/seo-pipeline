@@ -283,6 +283,7 @@ func (f *StageChatFactory) NewChatWithHistory(_ context.Context, articleID int64
 		factory: f, articleID: articleID,
 		history: append([]Message(nil), history...),
 		next:    len(history) / 2,
+		stageAt: len(history) / 2,
 	}, nil
 }
 
@@ -290,8 +291,12 @@ type stageChat struct {
 	factory   *StageChatFactory
 	articleID int64
 	next      int
-	history   []Message
-	closed    bool
+	// stageAt — слот стадии для следующего сообщения. Обычно он идёт вровень с next, но
+	// расходится с ним после SkipStage: стадия, которой отвели слоты под продолжения,
+	// снимает неиспользованные, и следующее сообщение уходит со своим именем стадии.
+	stageAt int
+	history []Message
+	closed  bool
 	// bound — target, ответивший на первое сообщение чата. Последующие стадии идут к нему же:
 	// продолжение диалога не должно попадать к другой модели, чем его начало.
 	bound *config.LLMTargetConfig
@@ -302,7 +307,7 @@ func (c *stageChat) Generate(ctx context.Context, prompt string) (Response, erro
 	if c.closed {
 		return Response{}, fmt.Errorf("LLM chat is closed")
 	}
-	if c.next >= len(c.factory.stages) {
+	if c.stageAt >= len(c.factory.stages) {
 		return Response{}, fmt.Errorf("LLM chat has no configured stage for message %d", c.next+1)
 	}
 	var transcript strings.Builder
@@ -317,7 +322,7 @@ func (c *stageChat) Generate(ctx context.Context, prompt string) (Response, erro
 		}
 		fmt.Fprintf(&transcript, "user:\n%s", prompt)
 	}
-	stage := c.factory.stages[c.next]
+	stage := c.factory.stages[c.stageAt]
 	call := Call{Stage: stage, ArticleID: c.articleID, NewChat: c.factory.isolated && c.next == 0}
 	var result RoutedResponse
 	var err error
@@ -336,7 +341,22 @@ func (c *stageChat) Generate(ctx context.Context, prompt string) (Response, erro
 	}
 	c.history = append(c.history, Message{Role: "user", Content: prompt}, Message{Role: "assistant", Content: result.Text})
 	c.next++
+	c.stageAt++
 	return result.Response, nil
+}
+
+// SkipStage снимает неиспользованные слоты названной стадии.
+//
+// Стадии раздаются сообщениям по порядку, а стадия, которая умеет дописывать оборванный
+// ответ, резервирует слоты под продолжения заранее — иначе их негде взять. Не понадобились
+// они почти всегда, и снять их обязана сама стадия: иначе следующее сообщение чата уйдёт с
+// чужим именем — с чужим промптом-регламентом, режимом ответа и сроками.
+//
+// Метод не трогает историю и счётчик сообщений: пропускается слот расписания, а не сообщение.
+func (c *stageChat) SkipStage(stage string) {
+	for c.stageAt < len(c.factory.stages) && c.factory.stages[c.stageAt] == stage {
+		c.stageAt++
+	}
 }
 
 func (c *stageChat) Close() error { c.closed = true; c.history = nil; return nil }
