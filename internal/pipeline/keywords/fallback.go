@@ -88,23 +88,47 @@ func (f *Fallback) RawKeywords(ctx context.Context, articleName string) ([]strin
 	// ArticleID намеренно нулевой: в режиме одного диалога на статью ненулевой id открыл бы
 	// беседу этой статьи и сделал подбор запросов её первым сообщением. Стадии генерации
 	// опираются на историю диалога, и посторонний первый ход им не нужен.
-	response, err := f.generator.Generate(ctx, llm.Call{
-		Stage: StageName,
-		Data:  promptData{ArticleName: articleName},
-	})
-	if err != nil {
-		return nil, &StageError{ArticleID: f.articleID, Stage: "generate", Err: err}
-	}
-	queries := Parse(response.Text)
-	if len(queries) == 0 {
-		return nil, &StageError{ArticleID: f.articleID, Stage: "parse_answer", Err: fmt.Errorf(
-			"в ответе модели нет ни одного пригодного запроса (получено %d символов)",
-			len([]rune(response.Text)),
+	//
+	// Непригодный ответ спрашивается ещё раз: 25.09.2026 модель на статье 29 obuch_1 вместо
+	// списка на полторы тысячи символов выдала 82 тысячи без единой строки-запроса, и статья
+	// упала целиком. Сбой разовый, а запрос короткий — повтор дешевле потерянной статьи.
+	var lastErr error
+	for attempt := 1; attempt <= parseAttempts; attempt++ {
+		response, err := f.generator.Generate(ctx, llm.Call{
+			Stage: StageName,
+			Data:  promptData{ArticleName: articleName},
+		})
+		if err != nil {
+			return nil, &StageError{ArticleID: f.articleID, Stage: "generate", Err: err}
+		}
+		queries := Parse(response.Text)
+		if len(queries) > 0 {
+			f.logger.Info("резервный подбор запросов выполнен", "provider", response.Provider,
+				"model", response.Model, "keywords_count", len(queries), "attempt", attempt)
+			return queries, nil
+		}
+		lastErr = &StageError{ArticleID: f.articleID, Stage: "parse_answer", Err: fmt.Errorf(
+			"в ответе модели нет ни одного пригодного запроса (получено %d символов, попыток: %d, начало ответа: %q)",
+			len([]rune(response.Text)), attempt, answerSample(response.Text),
 		)}
+		f.logger.Warn("резервный подбор: в ответе нет пригодных запросов",
+			"attempt", attempt, "max_attempts", parseAttempts, "error", lastErr)
 	}
-	f.logger.Info("резервный подбор запросов выполнен",
-		"provider", response.Provider, "model", response.Model, "keywords_count", len(queries))
-	return queries, nil
+	return nil, lastErr
+}
+
+// parseAttempts — сколько раз спрашивать модель, пока ответ не даст ни одного запроса.
+const parseAttempts = 2
+
+// answerSampleRunes ограничивает выдержку из непригодного ответа в тексте ошибки.
+const answerSampleRunes = 200
+
+func answerSample(text string) string {
+	runes := []rune(strings.TrimSpace(text))
+	if len(runes) > answerSampleRunes {
+		return string(runes[:answerSampleRunes]) + "…"
+	}
+	return string(runes)
 }
 
 func (f *Fallback) articleIDSafe() int64 {

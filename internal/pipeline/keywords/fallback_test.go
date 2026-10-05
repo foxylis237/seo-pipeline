@@ -15,9 +15,11 @@ import (
 // того, что она ответила.
 type fakeGenerator struct {
 	answer string
-	err    error
-	calls  int
-	call   llm.Call
+	// answers — ответы по очереди; после последнего повторяется answer.
+	answers []string
+	err     error
+	calls   int
+	call    llm.Call
 }
 
 func (g *fakeGenerator) Generate(_ context.Context, call llm.Call) (llm.RoutedResponse, error) {
@@ -26,8 +28,12 @@ func (g *fakeGenerator) Generate(_ context.Context, call llm.Call) (llm.RoutedRe
 	if g.err != nil {
 		return llm.RoutedResponse{}, g.err
 	}
+	answer := g.answer
+	if g.calls <= len(g.answers) {
+		answer = g.answers[g.calls-1]
+	}
 	return llm.RoutedResponse{
-		Response: llm.Response{Text: g.answer}, Provider: "deepseek_web", Model: "deepseek-web",
+		Response: llm.Response{Text: answer}, Provider: "deepseek_web", Model: "deepseek-web",
 	}, nil
 }
 
@@ -133,10 +139,14 @@ func TestRawKeywordsFailsWhenAnswerHasNoUsableQueries(t *testing.T) {
 		"нумерованный спис": "1. обучение бариста\n2. работа бариста",
 	} {
 		t.Run(name, func(t *testing.T) {
-			fallback := NewFallback(&fakeGenerator{answer: answer}, 7, nil)
+			generator := &fakeGenerator{answer: answer}
+			fallback := NewFallback(generator, 7, nil)
 
 			queries, err := fallback.RawKeywords(context.Background(), "Как стать бариста")
 
+			if generator.calls != parseAttempts {
+				t.Fatalf("модель спрошена %d раз, want %d", generator.calls, parseAttempts)
+			}
 			if err == nil {
 				t.Fatalf("пустой разбор не привёл к ошибке, queries = %v", queries)
 			}
@@ -175,5 +185,24 @@ func TestRawKeywordsRejectsEmptyArticleName(t *testing.T) {
 	}
 	if generator.calls != 0 {
 		t.Fatalf("модель вызвана %d раз при пустом названии статьи", generator.calls)
+	}
+}
+
+// TestRawKeywordsRetriesUnusableAnswer: разовый сбой модели (статья 29 obuch_1, 25.09.2026 —
+// 82 тысячи символов без единого запроса) не должен ронять статью, если повтор отвечает
+// нормально.
+func TestRawKeywordsRetriesUnusableAnswer(t *testing.T) {
+	generator := &fakeGenerator{answers: []string{"1. сбой\n2. сбой", "слесарь механик\nслесарь и механик разница"}}
+	fallback := NewFallback(generator, 29, nil)
+
+	queries, err := fallback.RawKeywords(context.Background(), "Слесарь и механик")
+	if err != nil {
+		t.Fatalf("повтор не спас подбор: %v", err)
+	}
+	if generator.calls != 2 {
+		t.Fatalf("модель спрошена %d раз, want 2", generator.calls)
+	}
+	if want := []string{"слесарь механик", "слесарь и механик разница"}; !reflect.DeepEqual(queries, want) {
+		t.Fatalf("queries = %v, want %v", queries, want)
 	}
 }
