@@ -27,7 +27,11 @@ const (
 	responseHeartbeat = 30 * time.Second
 	// clipboardMarker кладётся в буфер перед нажатием «Копировать», чтобы прежнее значение
 	// нельзя было принять за новый ответ.
-	clipboardMarker       = "__seo_pipeline_clipboard__"
+	clipboardMarker = "__seo_pipeline_clipboard__"
+	// answerActionsGrace — сколько после «ответ дописан» ждать панель действий под ответом,
+	// если признаком конца сработала стабилизация текста, а не сама панель. Без панели нет
+	// кнопки «Копировать», и ответ читался бы из недописанного блока кода.
+	answerActionsGrace    = 3 * time.Minute
 	clipboardTimeout      = 5 * time.Second
 	clipboardPollInterval = 200 * time.Millisecond
 
@@ -36,6 +40,14 @@ const (
 	// ровный машинный ритм, по которому нагрузка выглядит агрессивной.
 	minRequestInterval = 20 * time.Second
 	requestJitter      = 40 * time.Second
+
+	// sessionBreakEvery, sessionBreakMin и sessionBreakJitter — длинный перерыв после
+	// каждых 30 запросов: 15 минут плюс случайные 0–15. Пауза между запросами убирает
+	// ровный ритм, но не длительность: 25.09.2026 прогоны шли без перерыва почти 13 часов,
+	// а так с веб-интерфейсом человек не работает. 30 запросов — это 4–5 статей.
+	sessionBreakEvery  = 30
+	sessionBreakMin    = 15 * time.Minute
+	sessionBreakJitter = 15 * time.Minute
 
 	// blockCooldown — на сколько клиент перестаёт открывать браузер после того, как увидел
 	// страницу блокировки. Реальные блокировки длятся дольше, но ложное срабатывание на

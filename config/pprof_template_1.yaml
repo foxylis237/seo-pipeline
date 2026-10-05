@@ -24,7 +24,9 @@ llm:
       chat_url: https://chat.deepseek.com/
       login_url: https://chat.deepseek.com/sign_in
       profile_dir: data/browser/deepseek
-      headless: true
+      # Обычное окно, не headless: headless-сборка представляется DeepSeek как HeadlessChrome
+      # с программной видеокартой и без плагинов, а аккаунт уже блокировали за автоматизацию.
+      headless: false
       # Один диалог на статью: без него браузерный клиент открывал бы новую беседу на каждое
       # сообщение, и история внутри чата 3 терялась бы — info пишет метаданные по тексту,
       # который вернуло ревью, и повторно этот текст не передаётся.

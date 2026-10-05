@@ -92,6 +92,7 @@ func blockedStateOptions(sentTexts []string) map[string]any {
 	return map[string]any{
 		"blockedSelector": blockedSelector,
 		"answerSelector":  answerSelector,
+		"itemSelector":    itemSelector,
 		// Отправленное в этой беседе: его текст на странице наш, и состоянием площадки не
 		// является. Без него промпт стадии html объявлял блокировкой любую статью, где
 		// встретилась фраза-маркер, — см. noticeTextJS.
@@ -110,5 +111,11 @@ func (c *Client) detectBlocked(page playwright.Page) (string, bool) {
 	if !ok || strings.TrimSpace(reason) == "" {
 		return "", false
 	}
+	// Снимок обязателен: ложная блокировка выключает провайдера на час, и без страницы
+	// её не отличить от настоящей (27.09.2026 разбирать ложный terms_violation было нечем).
+	c.mu.Lock()
+	articleID := c.openArticleID
+	c.mu.Unlock()
+	c.saveDiagnostics(page, "blocked_"+reason, articleID)
 	return reason, true
 }

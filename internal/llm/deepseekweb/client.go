@@ -21,6 +21,8 @@ type Client struct {
 
 	pace          pacing
 	lastRequestAt time.Time
+	// requestsSinceBreak считает запросы после последнего длинного перерыва.
+	requestsSinceBreak int
 
 	// openArticleID — статья, диалог которой сейчас открыт в браузере. Ноль означает, что
 	// открытой беседы нет и следующий запрос должен начать новую.
@@ -138,6 +140,7 @@ func (c *Client) generate(ctx context.Context, request llm.Request) (llm.Respons
 	if err := c.waitForAnswer(ctx, page, mark, request.ArticleID); err != nil {
 		return llm.Response{}, err
 	}
+	c.waitForAnswerActions(ctx, page)
 	sources, err := c.readAnswerSources(page)
 	if err != nil {
 		return llm.Response{}, c.browserError(ctx, "read DeepSeek answer", err)
@@ -211,6 +214,36 @@ func (c *Client) waitForAnswer(ctx context.Context, page playwright.Page, mark a
 		state = responseState(page, mark)
 		c.stage("waiting_response", "elapsed", time.Since(started).Round(time.Second).String(), "state", state)
 	}
+}
+
+// waitForAnswerActions waits for the action panel under the last answer before it is read.
+//
+// Без панели нет кнопки «Копировать», и ответ читался бы из блока кода, который ещё
+// печатается. Не дождавшись панели, чтение идёт как прежде — разметку страницы могли
+// поменять, — но это пишется предупреждением: такой ответ может оказаться оборванным.
+func (c *Client) waitForAnswerActions(ctx context.Context, page playwright.Page) {
+	ready, err := page.Evaluate(answerActionsReadyJS, map[string]any{"answerSelector": answerSelector})
+	if err == nil {
+		if ok, _ := ready.(bool); ok {
+			return
+		}
+	}
+	wait := answerActionsGrace
+	if deadline, ok := ctx.Deadline(); ok {
+		wait = min(wait, time.Until(deadline))
+	}
+	if wait <= 0 {
+		c.stage("answer_actions_missing", "waited", "0s")
+		return
+	}
+	started := time.Now()
+	if _, err := page.WaitForFunction(answerActionsReadyJS, map[string]any{"answerSelector": answerSelector},
+		playwright.PageWaitForFunctionOptions{Timeout: playwright.Float(float64(wait.Milliseconds()))}); err != nil {
+		c.logger.Warn("DeepSeek answer action panel did not appear, the answer may be cut off",
+			"waited", time.Since(started).Round(time.Second).String(), "error", err.Error())
+		return
+	}
+	c.stage("answer_actions_ready", "waited", time.Since(started).Round(time.Second).String())
 }
 
 // readAnswerSources собирает все доступные представления последнего ответа.

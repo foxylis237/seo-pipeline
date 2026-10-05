@@ -221,3 +221,32 @@ func TestGenerateRejectedDuringCooldownWithoutBrowser(t *testing.T) {
 		t.Fatal("во время cooldown был запущен браузер")
 	}
 }
+
+// TestLongBreakAfterSeriesOfRequests: после серии запросов клиент делает длинный перерыв, а
+// не продолжает ровно — 25.09.2026 прогоны шли без перерыва почти 13 часов.
+func TestLongBreakAfterSeriesOfRequests(t *testing.T) {
+	clock := time.Date(2026, 9, 27, 10, 0, 0, 0, time.UTC)
+	var slept []time.Duration
+	client := testClient(t, t.TempDir(), &clock, 0, &slept)
+	client.pace.breakEvery = 3
+	client.pace.breakMin = 15 * time.Minute
+
+	for i := 0; i < 4; i++ {
+		if err := client.WaitBeforeRequest(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		client.markRequestFinished()
+	}
+	if len(slept) != 3 {
+		t.Fatalf("пауз %d, want 3: %v", len(slept), slept)
+	}
+	if slept[0] != minRequestInterval || slept[1] != minRequestInterval {
+		t.Fatalf("обычные паузы = %v, want %v", slept[:2], minRequestInterval)
+	}
+	if slept[2] != 15*time.Minute {
+		t.Fatalf("после трёх запросов пауза %v, want 15m", slept[2])
+	}
+	if client.requestsSinceBreak != 1 {
+		t.Fatalf("счётчик после перерыва = %d, want 1", client.requestsSinceBreak)
+	}
+}

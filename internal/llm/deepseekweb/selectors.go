@@ -63,6 +63,21 @@ const chatReadyJS = `(options) => {
 // блокировкой аккаунта: провайдер выключался на час, статья вставала, а с аккаунтом всё было
 // в порядке. Ответ модели уже вырезался, промпт — нет.
 //
+// Короткие строки отправленного (меньше 40 символов) вырезаются только целой строкой
+// страницы: по подстроке они совпали бы со случайным местом, а целиком — это наша же
+// строка, отрисованная в сообщении. Ловушка снята с прогона 25.09.2026: запросы Wordstat
+// статьи 39 obuch_1 («нарушение правил …») уходят в промпт expert по строке на запрос,
+// каждая короче порога, и на стадии info беседа объявила terms_violation за 24 мс, ещё
+// до отправки. Провайдер встал на час, прогон был остановлен как забаненный.
+//
+// Пробелы внутри строки сравниваются схлопнутыми: запрос уходит строкой
+// «нарушение правил эксплуатации крана<TAB>140», а на странице табуляция отрисована иначе,
+// и дословное сравнение 27.09.2026 промахнулось на той же статье второй раз.
+//
+// Третья ловушка того же прогона (27.09.2026, снимок blocked_terms_violation статьи 39):
+// у DeepSeek появилась панель со списком сообщений беседы, где промпт отрисован одной
+// строкой вне элементов треда. Фраза-маркер из запросов жила именно там.
+//
 // Текст берётся целиком. Раньше просматривались первые 8000 символов, и это работало, пока
 // проверка означала подменённую страницу: отказ в ответ на отправленное сообщение приходит
 // под последним сообщением, то есть в конце длинной беседы. Окна здесь не хватит никакого —
@@ -75,10 +90,41 @@ const noticeTextJS = `
       const answerText = answer.innerText || "";
       if (answerText.length > 0) page = page.split(answerText).join(" ");
     }
+    // История беседы — наш текст и ответы модели, включая блок рассуждений, которого нет
+    // в answerSelector. Плашка отказа приходит в последнем сообщении, поэтому оно остаётся.
+    const threadItems = Array.from(document.querySelectorAll(options.itemSelector));
+    for (let index = 0; index < threadItems.length - 1; index++) {
+      const itemText = threadItems[index].innerText || "";
+      if (itemText.length > 0) page = page.split(itemText).join(" ");
+    }
+    const squash = (value) => value.replace(/\s+/g, " ").trim();
+    page = page.split("\n").map(squash).join("\n");
+    const shortLines = new Set();
     for (const sent of (options.sentTexts || [])) {
       for (const line of String(sent).split("\n")) {
-        const piece = line.trim();
+        const piece = squash(line);
         if (piece.length >= 40) page = page.split(piece).join(" ");
+        else if (piece.length > 0) shortLines.add(piece);
+      }
+    }
+    page = page.split("\n").filter((line) => !shortLines.has(line)).join("\n");
+    // Панель навигации по беседе показывает каждое наше сообщение одной строкой, без
+    // переводов строк, и вне элементов треда. Построчное вырезание её не узнаёт, поэтому
+    // сообщения вырезаются ещё и целиком, со схлопнутыми пробелами.
+    page = squash(page);
+    const wholes = (options.sentTexts || []).map((sent) => squash(String(sent)));
+    for (let index = 0; index < threadItems.length - 1; index++) wholes.push(squash(threadItems[index].innerText || ""));
+    for (const whole of wholes) {
+      if (whole.length >= 40) page = page.split(whole).join(" ");
+    }
+    // И каждая строка отправленного — где угодно на странице. Целиком сообщение совпадает не
+    // всегда (вёрстка правит пробелы и символы), а виртуальный список к моменту проверки
+    // может ещё не смонтировать беседу, и наш промпт окажется «последним сообщением».
+    // Строка промпта не бывает частью плашки площадки: у запроса на конце частотность.
+    for (const sent of (options.sentTexts || [])) {
+      for (const line of String(sent).split("\n")) {
+        const piece = squash(line);
+        if (piece.length >= 8) page = page.split(piece).join(" ");
       }
     }
     return page.toLowerCase();
@@ -162,6 +208,24 @@ const copyLastAnswerJS = `(options) => {
   return "clicked";
 }`
 
+// answerActionsReadyJS сообщает, что под последним ответом отрисована панель действий. Та же
+// геометрия, что у copyLastAnswerJS, но без нажатия: это проверка, а не действие.
+//
+// Панель появляется только после конца генерации. Запасной признак completedAnswerJS —
+// неизменность текста — 28.09.2026 принял за конец ответ, который ещё печатался в блоке кода:
+// кнопки «Копировать» не было (no_button), и структура страницы 2 obuch_2 сохранилась
+// оборванной на «СТРО» посреди списка модулей.
+const answerActionsReadyJS = `(options) => {
+  const answers = Array.from(document.querySelectorAll(options.answerSelector));
+  const last = answers[answers.length - 1];
+  if (!last) return false;
+  let block = last;
+  for (let i = 0; i < 3 && block.parentElement; i++) block = block.parentElement;
+  const answerBottom = last.getBoundingClientRect().bottom;
+  return Array.from(block.querySelectorAll('[role="button"]'))
+    .some((button) => button.getBoundingClientRect().top >= answerBottom - 4);
+}`
+
 // lastItemKeyJS возвращает наибольший ключ в треде или -1, если список пуст либо не
 // виртуализирован. Значение снимается перед отправкой промпта и служит границей «нового».
 const lastItemKeyJS = `(options) => {
@@ -240,7 +304,11 @@ const freshAnswerJS = `
     for (const item of items) {
       const key = Number(item.getAttribute(options.itemKeyAttribute));
       if (!Number.isFinite(key) || key <= options.previousKey || key < bestKey) continue;
-      const answer = item.querySelector(options.answerSelector);
+      // Последний узел, а не первый: с включённым DeepThink в сообщении два узла .ds-markdown —
+      // сначала рассуждение, потом ответ. Первый 28.09.2026 переставал меняться раньше, чем
+      // начинался ответ, и в структуру страницы ложилось «Теперь я дам ответ…».
+      const nodes = item.querySelectorAll(options.answerSelector);
+      const answer = nodes.length > 0 ? nodes[nodes.length - 1] : null;
       if (!answer) continue;
       bestKey = key;
       found = answer;
@@ -374,8 +442,9 @@ const selectModeJS = `(options) => {
 // подписи (reasoningLabels против searchLabels), а не селектор: своих атрибутов у кнопок нет.
 const searchToggleSelector = `.ds-toggle-button, [class*="toggle-button"]`
 
-// searchLabels — подписи тумблера поиска, обе локали.
-var searchLabels = []string{"search", "поиск"}
+// searchLabels — подписи тумблера поиска, обе локали. «Умный поиск» — подпись с 28.09.2026
+// (снимок enable_search статьи 2 obuch_2): точное сравнение со старой «Поиск» её не узнавало.
+var searchLabels = []string{"search", "поиск", "smart search", "умный поиск"}
 
 // toggleSearchJS включает поиск, если он ещё не включён.
 //

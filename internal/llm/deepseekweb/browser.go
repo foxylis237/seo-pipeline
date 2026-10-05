@@ -48,6 +48,18 @@ func launchBrowser(profileDir string, headless bool) (*browserSession, error) {
 	}
 	browserContext, err := pw.Chromium.LaunchPersistentContext(profileDir, playwright.BrowserTypeLaunchPersistentContextOptions{
 		Headless: playwright.Bool(headless),
+		// Playwright по умолчанию помечает браузер как управляемый: navigator.webdriver=true
+		// и плашка автоматизации. Это первое, что проверяет антибот, а DeepSeek уже
+		// блокировал аккаунт за автоматизацию (24.09.2026). Метка снимается, больше ничего
+		// не подменяется: остальной отпечаток у обычного окна и так настоящий.
+		IgnoreDefaultArgs: []string{"--enable-automation"},
+		Args: []string{
+			"--disable-blink-features=AutomationControlled",
+			// Окно за другими окнами macOS притормаживает, и ответ модели дописывается
+			// рывками; прогон идёт в фоне, поэтому окно почти всегда заслонено.
+			"--disable-backgrounding-occluded-windows",
+			"--disable-renderer-backgrounding",
+		},
 		// Разрешение выдаётся только этому профилю: исходную разметку ответа отдаёт
 		// кнопка «Копировать», а прочитать её можно лишь из буфера обмена.
 		Permissions: []string{"clipboard-read", "clipboard-write"},

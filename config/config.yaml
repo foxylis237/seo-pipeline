@@ -14,7 +14,9 @@ llm:
       chat_url: https://chat.deepseek.com/
       login_url: https://chat.deepseek.com/sign_in
       profile_dir: data/browser/deepseek
-      headless: true
+      # Обычное окно, не headless: headless-сборка представляется DeepSeek как HeadlessChrome
+      # с программной видеокартой и без плагинов, а аккаунт уже блокировали за автоматизацию.
+      headless: false
 
   # Режим ответа DeepSeek: значение сверяется с data-model-type переключателя над полем
   # ввода — expert («Expert») рассуждает, default («Instant») отвечает сразу. Подписи

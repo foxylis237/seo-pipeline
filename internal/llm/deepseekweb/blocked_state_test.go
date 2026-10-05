@@ -43,3 +43,38 @@ func TestSentTextCutKeepsShortLinesOut(t *testing.T) {
 		t.Fatal("порог длины строки пропал: вырезание станет непредсказуемым")
 	}
 }
+
+// Короткая строка промпта снимается только целой строкой страницы: запрос Wordstat
+// «нарушение правил …» статьи 39 obuch_1 объявил terms_violation на собственной беседе.
+func TestSentTextCutRemovesShortLinesAsWholeLines(t *testing.T) {
+	if !strings.Contains(noticeTextJS, "shortLines.has(line)") {
+		t.Fatal("короткие строки отправленного не снимаются: запрос-маркер снова станет блокировкой")
+	}
+}
+
+// История беседы в проверку не входит: 27.09.2026 terms_violation второй раз сработал на
+// беседе статьи 39 obuch_1, где фраза-маркер была только в наших сообщениях и в ответах.
+func TestNoticeTextSkipsConversationHistory(t *testing.T) {
+	if !strings.Contains(noticeTextJS, "threadItems.length - 1") {
+		t.Fatal("история беседы снова читается как состояние страницы")
+	}
+	if _, ok := blockedStateOptions(nil)["itemSelector"]; !ok {
+		t.Fatal("blockedStateOptions не передаёт itemSelector")
+	}
+}
+
+// Панель навигации DeepSeek повторяет наши сообщения одной строкой вне треда: вырезать их
+// обязано и целиком, со схлопнутыми пробелами (снимок статьи 39 obuch_1, 27.09.2026).
+func TestNoticeTextCutsSentMessagesAsSingleLine(t *testing.T) {
+	if !strings.Contains(noticeTextJS, "page = squash(page)") || !strings.Contains(noticeTextJS, "wholes") {
+		t.Fatal("сообщение, отрисованное одной строкой, снова станет плашкой блокировки")
+	}
+}
+
+// Каждая строка отправленного вырезается где угодно: 28.09.2026 наш промпт на беседе
+// статьи 39 obuch_1 оказался последним смонтированным сообщением и остался в проверке.
+func TestNoticeTextCutsEverySentLineAnywhere(t *testing.T) {
+	if !strings.Contains(noticeTextJS, "piece.length >= 8") {
+		t.Fatal("строки отправленного снова не вырезаются вне своего сообщения")
+	}
+}
