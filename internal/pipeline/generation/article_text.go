@@ -104,6 +104,7 @@ func BuildArticleText(ctx context.Context, request ArticleTextRequest) (string, 
 		if !errors.Is(completeErr, ErrTextIncomplete) || request.Continue == nil {
 			break
 		}
+		untrimmed := text
 		text = trimIncompleteText(text)
 		logger.Warn("текст статьи оборвался, просим модель дописать",
 			"stage", stage, "attempt", attempt, "text_runes", len([]rune(text)),
@@ -115,7 +116,7 @@ func BuildArticleText(ctx context.Context, request ArticleTextRequest) (string, 
 		if isTextDone(part) {
 			logger.Info("модель считает текст законченным, продолжение не требуется",
 				"stage", stage, "attempt", attempt)
-			return text, nil
+			return untrimmed, nil
 		}
 		text = joinTextParts(text, NormalizeHeadings(part))
 		completeErr = ValidateArticleTextComplete(request.Structure, text)

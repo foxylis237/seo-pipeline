@@ -82,6 +82,24 @@ func TestBuildArticleTextAcceptsDoneAnswer(t *testing.T) {
 	}
 }
 
+// A line without a final period is not a cut sentence once the model says it is done.
+func TestBuildArticleTextDoneKeepsUntrimmedTail(t *testing.T) {
+	short := "H2 - Первый раздел\n\nТекст.\n\nH2 - Второй раздел и вопросы\n\nТекст.\n\nИсточник: https://hh.ru"
+
+	text, err := BuildArticleText(context.Background(), ArticleTextRequest{
+		Structure: testStructure,
+		Prompt:    "промпт",
+		Send:      func(context.Context, string) (string, error) { return short, nil },
+		Continue:  func(context.Context, string) (string, error) { return "ГОТОВО", nil },
+	})
+	if err != nil {
+		t.Fatalf("ответ «ГОТОВО» не принят: %v", err)
+	}
+	if text != short {
+		t.Fatalf("после ответа «ГОТОВО» текст обрезан:\n%s", text)
+	}
+}
+
 // Не дописанный и после продолжений текст — отказ стадии: половина статьи пройдёт разметку
 // и публикацию молча, а стоит это дороже повторного прогона.
 func TestBuildArticleTextFailsAfterContinuations(t *testing.T) {
