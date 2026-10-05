@@ -42,11 +42,6 @@ func TestRegistryResolvesArticleAuditTasks(t *testing.T) {
 		if profile.ArticleAudit == nil {
 			t.Fatalf("задача %q разрешилась в профиль без признака аудита", want)
 		}
-		// Признаки не совмещаются: аудит и правка — разные потоки, и задача, у которой
-		// непусты оба поля, ушла бы на первую же ветку composition root.
-		if profile.ArticleFix != nil {
-			t.Fatalf("задача %q объявлена и правкой, и аудитом", want)
-		}
 	}
 	if len(articleAuditProfiles()) < 2 {
 		t.Fatalf("задач аудита в реестре %d, ожидалось не меньше двух", len(articleAuditProfiles()))

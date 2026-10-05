@@ -131,32 +131,10 @@ func main() {
 
 	logger.Info("подключение к PostgreSQL успешно установлено")
 
-	// Задачи правки опубликованных статей идут своей веткой, до общей обвязки: таблицы у них
-	// свои, и проверка схемы движка искала бы в их схемах article_inputs и article_metadata,
-	// которых там нет по замыслу. Ветка одна на весь файл и стоит ровно здесь, потому что
-	// пул уже есть, а writer, роутер логов и репозиторий движка этим задачам не нужны.
-	// Условие — признак из профиля, а не имя задачи: следующая задача правки добавляется
-	// своим пакетом и строкой реестра, не трогая этот файл.
-	if profile.ArticleFix != nil {
-		fixLogger := logger.With("task", profile.Name, "operation", command.Name)
-		if fixErr := runArticleFix(ctx, articleFixDeps{
-			profile: profile, command: command, cfg: cfg, pool: pool, logger: fixLogger, output: os.Stdout,
-		}); fixErr != nil {
-			if isGracefulCancellation(ctx, fixErr) {
-				fixLogger.Info("завершение приложения по сигналу", "stage", "shutdown")
-				return
-			}
-			fixLogger.Error("операция не выполнена", "error", fixErr)
-			os.Exit(1)
-		}
-		return
-	}
-
-	// Задачи аудита идут своей веткой и ровно по той же причине, что задачи правки: таблицы у
-	// них свои, article_inputs и article_metadata у них нет по замыслу, и проверка схемы
-	// движка искала бы их напрасно. Ветка отдельная от правки, а не общая, потому что
-	// различие содержательное: правка пишет в живой блог, аудит не пишет в него ничего — и
-	// поток у него другой, с читающим интерфейсом площадки.
+	// Задачи аудита идут своей веткой, до общей обвязки: таблицы у них свои, article_inputs и
+	// article_metadata у них нет по замыслу, и проверка схемы движка искала бы их напрасно.
+	// Ветка стоит ровно здесь, потому что пул уже есть, а writer, роутер логов и репозиторий
+	// движка этим задачам не нужны. Условие — признак из профиля, а не имя задачи.
 	if profile.ArticleAudit != nil {
 		auditLogger := logger.With("task", profile.Name, "operation", command.Name)
 		if auditErr := runArticleAudit(ctx, articleAuditDeps{
