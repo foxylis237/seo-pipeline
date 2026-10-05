@@ -10,11 +10,6 @@
 | `migrations/pprof_2/` | `pprof_2` | только руками, только к своей схеме |
 | `migrations/obuch_1/` | `obuch_1` | только руками, только к своей схеме |
 | `migrations/obuch_2/` | `obuch_2` | только руками, только к своей схеме |
-| `migrations/pprof_fix_1/` | `pprof_fix_1` | только руками, только к своей схеме |
-| `migrations/pprof_fix_2/` | `pprof_fix_2` | только руками, только к своей схеме |
-| `migrations/pprof_fix_3/` | `pprof_fix_3` | только руками, только к своей схеме |
-| `migrations/pprof_fix_4/` | `pprof_fix_4` | только руками, только к своей схеме |
-| `migrations/pprof_fix_5/` | `pprof_fix_5` | только руками, только к своей схеме |
 | `migrations/pprof_audit_1/` | `pprof_audit_1` | только руками, только к своей схеме |
 | `migrations/pprof_audit_2/` | `pprof_audit_2` | только руками, только к своей схеме |
 | `migrations/site/` | `site` | только руками; каталог dpoprof.ru, не принадлежит задаче |
