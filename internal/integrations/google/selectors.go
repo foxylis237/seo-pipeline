@@ -37,7 +37,9 @@ const (
 	// documentSavedMarker — индикатор «все изменения сохранены на Диске».
 	documentSavedMarker = `[aria-label*="Сохранено на Диске"], [aria-label*="Saved to Drive"], .docs-save-indicator-saved`
 	// driveSearchResultRow — строка результата поиска в Drive.
-	driveSearchResultRow = `div[role="row"][data-id], div[role="listitem"][data-id]`
+	// С сентября 2026 Drive рисует результаты таблицей: строка — tr[role="row"], и прежние
+	// div-селекторы не находили ни одного документа — публикация заводила бы дубли.
+	driveSearchResultRow = `tr[role="row"][data-id], div[role="row"][data-id], div[role="listitem"][data-id]`
 	// driveSearchResultName — имя файла внутри строки результата.
 	driveSearchResultName = `[data-tooltip], [aria-label]`
 )
@@ -56,3 +58,10 @@ const visibleElementJS = `selector => {
 // writeClipboardJS кладёт текст в буфер обмена. Промпт вставляется, а не набирается: набор
 // текста на десятки тысяч символов занимает минуты и рвётся на автозамене Docs.
 const writeClipboardJS = `text => navigator.clipboard.writeText(text)`
+
+// writeRichClipboardJS кладёт в буфер текст и HTML одним элементом: Docs при вставке берёт
+// оформление из HTML, а текст остаётся запасным вариантом для получателя без HTML.
+const writeRichClipboardJS = `([text, html]) => navigator.clipboard.write([new ClipboardItem({
+	'text/plain': new Blob([text], {type: 'text/plain'}),
+	'text/html': new Blob([html], {type: 'text/html'}),
+})])`

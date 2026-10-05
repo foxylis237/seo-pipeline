@@ -66,17 +66,19 @@ func (s *playwrightSession) FindDocument(ctx context.Context, title string) (str
 	if err := pause(ctx); err != nil {
 		return "", false, err
 	}
+	// Результаты приходят отдельным запросом уже после загрузки страницы: прочитанные сразу,
+	// они пусты почти всегда (27.09.2026 так «не нашлись» 48 документов из 50). Ненайденная
+	// строка — законный исход (документа ещё нет), поэтому ожидание ошибкой не считается.
+	_ = s.session.page.Locator(driveSearchResultRow).First().WaitFor(playwright.LocatorWaitForOptions{
+		Timeout: playwright.Float(float64(searchResultsWait.Milliseconds())),
+	})
 
 	rows, err := s.session.page.Locator(driveSearchResultRow).All()
 	if err != nil {
 		return "", false, s.fail(ctx, "find_document", true, fmt.Errorf("прочитать результаты поиска: %w", err))
 	}
 	for _, row := range rows {
-		name, nameErr := rowTitle(row)
-		if nameErr != nil {
-			continue
-		}
-		if strings.TrimSpace(name) != strings.TrimSpace(title) {
+		if !rowHasTitle(row, title) {
 			continue
 		}
 		id, idErr := row.GetAttribute("data-id")
@@ -88,16 +90,37 @@ func (s *playwrightSession) FindDocument(ctx context.Context, title string) (str
 	return "", false, nil
 }
 
-// rowTitle достаёт имя файла из строки результата.
-func rowTitle(row playwright.Locator) (string, error) {
+// rowHasTitle сверяет имя файла в строке результата с искомым.
+//
+// Имя в строке лежит в разных местах в зависимости от вёрстки: в aria-label строки, в
+// подсказке имени или первой строкой текста (табличная вёрстка 2026 года, где у строки нет
+// ни того, ни другого). Сверяется точное совпадение с любым из них.
+func rowHasTitle(row playwright.Locator, title string) bool {
+	want := strings.TrimSpace(title)
+	for _, name := range rowTitles(row) {
+		if strings.TrimSpace(name) == want {
+			return true
+		}
+	}
+	return false
+}
+
+// rowTitles перечисляет, что в строке результата может быть именем файла.
+func rowTitles(row playwright.Locator) []string {
+	var names []string
 	if value, err := row.GetAttribute("aria-label"); err == nil && strings.TrimSpace(value) != "" {
-		return value, nil
+		names = append(names, value)
 	}
 	name := row.Locator(driveSearchResultName).First()
 	if value, err := name.GetAttribute("data-tooltip"); err == nil && strings.TrimSpace(value) != "" {
-		return value, nil
+		names = append(names, value)
 	}
-	return name.InnerText()
+	if text, err := row.InnerText(); err == nil {
+		if first, _, _ := strings.Cut(strings.TrimSpace(text), "\n"); first != "" {
+			names = append(names, first)
+		}
+	}
+	return names
 }
 
 // CreateDocument создаёт документ сразу в нужной папке и заполняет его.
@@ -149,7 +172,11 @@ func (s *playwrightSession) renameDocument(ctx context.Context, title string) er
 // символов, набор занял бы минуты и попал бы под автозамену Docs. Select-all перед вставкой
 // и даёт полную перезапись без версий и копий.
 func (s *playwrightSession) writeBody(ctx context.Context, body, stage string) error {
-	if _, err := s.session.page.Evaluate(writeClipboardJS, body); err != nil {
+	script, arg := writeClipboardJS, any(body)
+	if rich, ok := promptHTML(body); ok {
+		script, arg = writeRichClipboardJS, []string{body, rich}
+	}
+	if _, err := s.session.page.Evaluate(script, arg); err != nil {
 		return s.fail(ctx, stage, true, fmt.Errorf("положить промпт в буфер обмена: %w", err))
 	}
 	canvas := s.session.page.Locator(documentCanvas).First()

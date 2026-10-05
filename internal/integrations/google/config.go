@@ -20,6 +20,8 @@ const (
 
 	// defaultOperationTimeout ограничивает одно браузерное ожидание.
 	defaultOperationTimeout = 45 * time.Second
+	// searchResultsWait — сколько ждать первую строку результатов поиска в Drive.
+	searchResultsWait = 10 * time.Second
 	// defaultPublishTimeout — бюджет одной попытки публикации целиком.
 	defaultPublishTimeout = 3 * time.Minute
 	// defaultLoginTimeout — сколько ждём человека за браузером. Столько же, сколько у
