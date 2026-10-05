@@ -267,6 +267,17 @@ func (s FAQScheme) withDefaults() FAQScheme {
 	return s
 }
 
+// validate checks that both field formats carry exactly one %d.
+func (s FAQScheme) validate() error {
+	s = s.withDefaults()
+	for _, format := range []string{s.Question, s.Answer} {
+		if strings.Count(format, "%d") != 1 {
+			return fmt.Errorf("формат поля FAQ %q: нужен ровно один %%d — номер вопроса", format)
+		}
+	}
+	return nil
+}
+
 // questionRE собирает из формата имени выражение, которым вопросы узнаются в полях записи.
 //
 // Формат экранируется целиком, и только %d становится числом: имена полей содержат

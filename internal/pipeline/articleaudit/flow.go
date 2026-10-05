@@ -107,6 +107,9 @@ func NewFlow(repository Articles, blog Blog, chats taskflow.ChatFactory, artifac
 	if logger == nil {
 		logger = slog.New(slog.DiscardHandler)
 	}
+	if err := options.FAQ.validate(); err != nil {
+		return nil, err
+	}
 	prompt, err := parseFile("промпт аудита", promptPath)
 	if err != nil {
 		return nil, err

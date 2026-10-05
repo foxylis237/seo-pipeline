@@ -542,3 +542,26 @@ func TestFlowKeepsQuietOnFittingSEOFields(t *testing.T) {
 		t.Fatalf("отчёт пожаловался на поля, которые в пределах:\n%s", report)
 	}
 }
+
+// A FAQ field format without %d must fail at start, not panic after the blog read.
+func TestNewFlowRejectsFAQFormatWithoutIndex(t *testing.T) {
+	root := t.TempDir()
+	promptPath := filepath.Join(root, "audit.txt")
+	templatePath := filepath.Join(root, "result.md.tmpl")
+	for _, path := range []string{promptPath, templatePath} {
+		if err := os.WriteFile(path, []byte("{{.Title}}"), 0o644); err != nil {
+			t.Fatalf("подготовить файл: %v", err)
+		}
+	}
+	for _, scheme := range []FAQScheme{
+		{Question: "blog_faq_question"},
+		{Answer: "blog_faq_answer"},
+		{Question: "faq_%d_%d"},
+	} {
+		_, err := NewFlow(nil, nil, nil, NewArtifacts(root), promptPath, templatePath,
+			Options{FAQ: scheme}, nil)
+		if err == nil {
+			t.Fatalf("NewFlow принял формат %+v", scheme)
+		}
+	}
+}
