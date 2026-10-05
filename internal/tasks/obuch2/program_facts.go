@@ -30,7 +30,7 @@ var (
 	// намеренно: «возраст от 18 лет» — требование к слушателю, а не срок обучения, и
 	// программ длиной в год у площадки нет. Книга, назвавшая срок годами, свою проверку
 	// выключит — это дешевле, чем ронять публикацию на требованиях к возрасту.
-	factTermRE = regexp.MustCompile(`от\s+(\d+)\s+(недел|дн|месяц)[а-яё]*`)
+	factTermRE = regexp.MustCompile(`(?i)от\s+(\d+)\s+(недел|дн|месяц)[а-яё]*`)
 	// Ритм занятий — не объём программы: «по 4 часа в день» говорит о расписании, и совпадать
 	// с колонкой книги оно не обязано.
 	factPaceRE = regexp.MustCompile(`^\s*в\s+(день|сутки|недел[юи]|месяц)`)
@@ -217,11 +217,16 @@ var factBlockEndRE = regexp.MustCompile(`(?i)</(?:p|li|h[1-6]|td|th)>`)
 
 const factBlockMark = "¶"
 
+// factEarningsWindowRunes bounds the earnings lookback; the sentence boundary usually comes first.
+const factEarningsWindowRunes = 160
+
 // aboutEarnings reports that the money amount at offset follows earnings wording in the same
 // sentence.
 func aboutEarnings(text string, offset int) bool {
-	start := max(0, offset-80)
-	window := text[start:offset]
+	window := text[:offset]
+	if runes := []rune(window); len(runes) > factEarningsWindowRunes {
+		window = string(runes[len(runes)-factEarningsWindowRunes:])
+	}
 	if dot := strings.LastIndexAny(window, ".!?"+factBlockMark); dot >= 0 {
 		_, size := utf8.DecodeRuneInString(window[dot:])
 		window = window[dot+size:]
@@ -243,7 +248,7 @@ func checkTerm(text, bookDuration string) []string {
 		if err != nil {
 			continue
 		}
-		if value == wantValue && found[2] == wantUnit {
+		if value == wantValue && strings.ToLower(found[2]) == wantUnit {
 			continue
 		}
 		key := found[0]

@@ -98,6 +98,25 @@ func TestCheckProgramFactsFindsForeignTerm(t *testing.T) {
 	}
 }
 
+func TestCheckProgramFactsFindsCapitalizedForeignTerm(t *testing.T) {
+	markup := factsMarkup + `<p>От 5 недель длится обучение.</p>`
+
+	issues := CheckProgramFacts(markup, factsBook, ParseModules(markup))
+
+	if len(issues) != 1 || !strings.Contains(issues[0], "От 5 недель") {
+		t.Fatalf("расхождение по сроку в начале предложения не найдено: %v", issues)
+	}
+}
+
+// Earnings wording far from the amount, but in the same sentence, is still earnings.
+func TestCheckProgramFactsSkipsDistantEarningsWording(t *testing.T) {
+	markup := `<p>Зарплата опытного специалиста на крупных строительных объектах Москвы и области начинается от 90 000 рублей.</p>` +
+		`<p>Стоимость обучения — от 5 000 ₽.</p>`
+	if issues := CheckProgramFacts(markup, factsBook, nil); len(issues) > 0 {
+		t.Fatalf("earnings in a long sentence were checked as price: %v", issues)
+	}
+}
+
 // Пустая колонка книги выключает свою проверку: первые страницы задачи писались, когда
 // колонок не было вовсе, и требовать по ним сверки задним числом нельзя.
 func TestCheckProgramFactsSkipsEmptyBookColumns(t *testing.T) {
