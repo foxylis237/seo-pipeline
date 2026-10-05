@@ -64,7 +64,6 @@ func (s Summary) WriteFixes(path string) error {
 	if err != nil {
 		return fmt.Errorf("собрать таблицу правок %q: %w", path, err)
 	}
-	// Through temp+rename: an interrupted write must not leave a broken book under the final name.
 	pending, err := output.NewWriter(filepath.Dir(path)).StageFiles(
 		output.File{Path: filepath.Base(path), Content: buffer.Bytes()})
 	if err != nil {

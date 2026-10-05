@@ -355,8 +355,7 @@ func matchesSource(current Post, article Article) error {
 	return nil
 }
 
-// answer returns the model's verdict, paying for it at most once: an answer saved by an
-// earlier failed run is reused, a fresh one is committed before anything else can fail.
+// answer reuses an answer saved by a failed run, so each page is paid for once.
 func (f *Flow) answer(ctx context.Context, article Article, current Post, logger *slog.Logger) (Paths, string, error) {
 	if article.AuditPath != "" {
 		saved, err := f.artifacts.Read(article.AuditPath)

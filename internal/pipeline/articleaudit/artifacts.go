@@ -74,8 +74,7 @@ func (a Artifacts) StageOriginal(externalID, slug, html string, fields map[strin
 	return pending, paths, nil
 }
 
-// StageAnswer готовит промпт и сырой ответ модели. Ложится сразу после ответа, отдельно от
-// отчёта: оплаченный ответ не должен зависеть от того, соберётся ли отчёт.
+// StageAnswer готовит промпт и сырой ответ модели.
 func (a Artifacts) StageAnswer(externalID, slug, prompt, answer string) (
 	*output.PendingArtifact, Paths, error) {
 	paths := Paths{

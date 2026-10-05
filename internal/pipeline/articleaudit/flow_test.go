@@ -320,7 +320,7 @@ func TestFlowFindsBySlugWithoutPostID(t *testing.T) {
 	}
 }
 
-// Leaving blog: every page fails with the same cause, only the address differs.
+// Same blog failure on different pages stops the batch.
 func TestFlowFetchFailureStopsBatchGuard(t *testing.T) {
 	guard := pagebatch.NewFailureGuard()
 	var stop error
@@ -552,7 +552,6 @@ func TestFlowKeepsQuietOnFittingSEOFields(t *testing.T) {
 	}
 }
 
-// A FAQ field format without %d must fail at start, not panic after the blog read.
 func TestNewFlowRejectsFAQFormatWithoutIndex(t *testing.T) {
 	root := t.TempDir()
 	promptPath := filepath.Join(root, "audit.txt")
@@ -575,7 +574,6 @@ func TestNewFlowRejectsFAQFormatWithoutIndex(t *testing.T) {
 	}
 }
 
-// Ctrl+C mid-run must still record the failure, or the page stays in processing.
 func TestFlowMarksFailedAfterCancel(t *testing.T) {
 	articles := &fakeArticles{article: testArticle()}
 	blog := &fakeBlog{post: testPost(), found: Post{ID: 22314}}
@@ -592,7 +590,6 @@ func TestFlowMarksFailedAfterCancel(t *testing.T) {
 	}
 }
 
-// flowWithTemplate builds a flow over a given artifact root with its own report template.
 func flowWithTemplate(t *testing.T, root, report string, articles Articles, blog Blog,
 	chats taskflow.ChatFactory) *Flow {
 	t.Helper()
@@ -611,7 +608,6 @@ func flowWithTemplate(t *testing.T, root, report string, articles Articles, blog
 	return flow
 }
 
-// A failure after the model must not throw the paid answer away, and the retry must not pay again.
 func TestFlowKeepsPaidAnswerAcrossFailure(t *testing.T) {
 	root := t.TempDir()
 	articles := &fakeArticles{article: testArticle()}
