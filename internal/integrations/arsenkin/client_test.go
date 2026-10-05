@@ -277,7 +277,7 @@ func TestSelectNewWordstatTaskAcceptsOnlyTheTaskOfThisRun(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			got, err := selectNewWordstatTask(test.known, test.completed)
+			got, err := selectNewWordstatTask(test.known, untitledTasks(test.completed), nil)
 			if test.wantErr {
 				if err == nil {
 					t.Fatalf("чужая задача принята как новая: %q", got)
@@ -344,6 +344,20 @@ type fakeWordstatTaskList struct {
 	readsBeforeRender int
 	rendered          bool
 	readErr           error
+	// titles — подпись строки истории (первая фраза задачи) по идентификатору.
+	titles map[string]string
+	slept  time.Duration
+}
+
+func untitledTasks(ids []string) []wordstatTask {
+	if ids == nil {
+		return nil
+	}
+	tasks := make([]wordstatTask, 0, len(ids))
+	for _, id := range ids {
+		tasks = append(tasks, wordstatTask{ID: id})
+	}
+	return tasks
 }
 
 func (f *fakeWordstatTaskList) current() []string {
@@ -368,14 +382,18 @@ func (f *fakeWordstatTaskList) list() wordstatTaskList {
 			f.rendered = true
 			return nil
 		},
-		taskIDs: func() ([]string, error) {
+		tasks: func() ([]wordstatTask, error) {
 			if f.readErr != nil {
 				return nil, f.readErr
 			}
 			if !f.rendered {
 				f.readsBeforeRender++
 			}
-			return f.current(), nil
+			tasks := untitledTasks(f.current())
+			for i := range tasks {
+				tasks[i].Title = f.titles[tasks[i].ID]
+			}
+			return tasks, nil
 		},
 		reload: func() error {
 			f.reloads++
@@ -389,6 +407,11 @@ func (f *fakeWordstatTaskList) list() wordstatTaskList {
 			return nil
 		},
 		now: func() time.Time { return f.clock },
+		sleep: func(_ context.Context, d time.Duration) error {
+			f.slept += d
+			f.clock = f.clock.Add(d)
+			return nil
+		},
 	}
 }
 
@@ -403,7 +426,7 @@ func TestWaitWordstatTaskCreatedSeesTaskOnlyAfterReload(t *testing.T) {
 		{"9001", "9002", "9003"},
 	}}
 
-	taskID, err := waitWordstatTaskCreated(context.Background(), []string{"9001", "9002"}, page.list(), nil)
+	taskID, err := waitWordstatTaskCreated(context.Background(), []string{"9001", "9002"}, nil, page.list(), nil)
 	if err != nil {
 		t.Fatalf("новая задача не найдена: %v", err)
 	}
@@ -425,7 +448,7 @@ func TestWaitWordstatTaskCreatedToleratesDelayedTask(t *testing.T) {
 	page := &fakeWordstatTaskList{renders: renders}
 	started := page.clock
 
-	taskID, err := waitWordstatTaskCreated(context.Background(), []string{"9001"}, page.list(), nil)
+	taskID, err := waitWordstatTaskCreated(context.Background(), []string{"9001"}, nil, page.list(), nil)
 	if err != nil {
 		t.Fatalf("задача с задержкой создания отклонена: %v", err)
 	}
@@ -444,7 +467,7 @@ func TestWaitWordstatTaskCreatedRejectsMissingTaskFast(t *testing.T) {
 	page := &fakeWordstatTaskList{renders: [][]string{{"9001", "9002"}}}
 	started := page.clock
 
-	taskID, err := waitWordstatTaskCreated(context.Background(), []string{"9001", "9002"}, page.list(), nil)
+	taskID, err := waitWordstatTaskCreated(context.Background(), []string{"9001", "9002"}, nil, page.list(), nil)
 	if err == nil {
 		t.Fatalf("несозданная задача принята: %q", taskID)
 	}
@@ -471,7 +494,7 @@ func TestWaitWordstatTaskCreatedRejectsMissingTaskFast(t *testing.T) {
 func TestWaitWordstatTaskCreatedRejectsSeveralNewTasks(t *testing.T) {
 	page := &fakeWordstatTaskList{renders: [][]string{{"9001", "9003", "9004"}}}
 
-	taskID, err := waitWordstatTaskCreated(context.Background(), []string{"9001"}, page.list(), nil)
+	taskID, err := waitWordstatTaskCreated(context.Background(), []string{"9001"}, nil, page.list(), nil)
 	if err == nil {
 		t.Fatalf("неразличимые задачи приняты: %q", taskID)
 	}
@@ -488,7 +511,7 @@ func TestWaitWordstatTaskCreatedRejectsSeveralNewTasks(t *testing.T) {
 func TestWaitWordstatTaskCreatedAcceptsFirstTaskOfCleanProfile(t *testing.T) {
 	page := &fakeWordstatTaskList{renders: [][]string{{}, {"9010"}}}
 
-	taskID, err := waitWordstatTaskCreated(context.Background(), nil, page.list(), nil)
+	taskID, err := waitWordstatTaskCreated(context.Background(), nil, nil, page.list(), nil)
 	if err != nil {
 		t.Fatalf("первая задача чистого профиля отклонена: %v", err)
 	}
@@ -502,7 +525,7 @@ func TestWaitWordstatTaskCreatedStopsOnCancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	if _, err := waitWordstatTaskCreated(ctx, []string{"9001"}, page.list(), nil); !errors.Is(err, context.Canceled) {
+	if _, err := waitWordstatTaskCreated(ctx, []string{"9001"}, nil, page.list(), nil); !errors.Is(err, context.Canceled) {
 		t.Fatalf("error = %v, want context.Canceled", err)
 	}
 }
@@ -517,7 +540,7 @@ func TestWaitWordstatTaskCreatedWaitsForRenderedHistoryBeforeReload(t *testing.T
 		renderDelay: 12 * time.Second, // дольше прежних 5 с, но в пределах wordstatHistoryTimeout
 	}
 
-	taskID, err := waitWordstatTaskCreated(context.Background(), []string{"9001"}, page.list(), nil)
+	taskID, err := waitWordstatTaskCreated(context.Background(), []string{"9001"}, nil, page.list(), nil)
 	if err != nil {
 		t.Fatalf("задача не найдена при медленной отрисовке списка: %v", err)
 	}
@@ -538,7 +561,7 @@ func TestWaitWordstatTaskCreatedSeparatesUnrenderedHistoryFromMissingTask(t *tes
 		renderDelay: (wordstatHistoryTimeout + 5_000) * time.Millisecond,
 	}
 
-	_, err := waitWordstatTaskCreated(context.Background(), []string{"9001"}, page.list(), nil)
+	_, err := waitWordstatTaskCreated(context.Background(), []string{"9001"}, nil, page.list(), nil)
 	if err == nil {
 		t.Fatal("неотрисованный список принят за ответ")
 	}
@@ -792,5 +815,58 @@ func TestWordstatProgressReporterReportsEachThresholdOnce(t *testing.T) {
 	}
 	if crossed := reporter.crossed(100); len(crossed) != 0 {
 		t.Fatalf("после последней ступени сообщено %v", crossed)
+	}
+}
+
+// TestWaitWordstatTaskCreatedSkipsForeignLateTask закрывает прогон 25.09.2026: задача
+// прошлой статьи, не дождавшейся подтверждения, появилась в истории во время следующей, и
+// следующая скачала её результат. Чужая новая строка узнаётся по подписи и пропускается,
+// своя находится после неё.
+func TestWaitWordstatTaskCreatedSkipsForeignLateTask(t *testing.T) {
+	page := &fakeWordstatTaskList{
+		renders: [][]string{
+			{"9001", "9002"},
+			{"9001", "9002", "9003"},
+			{"9001", "9002", "9003", "9004"},
+		},
+		titles: map[string]string{"9003": "экскаваторщик и бульдозерист", "9004": "Группы  допуска"},
+	}
+	submitted := []string{"группы допуска", "группа по электробезопасности"}
+
+	taskID, err := waitWordstatTaskCreated(context.Background(), []string{"9001", "9002"}, submitted, page.list(), nil)
+	if err != nil {
+		t.Fatalf("своя задача не найдена: %v", err)
+	}
+	if taskID != "9004" {
+		t.Fatalf("task_id = %q, want %q: чужая опоздавшая задача принята за свою", taskID, "9004")
+	}
+}
+
+func TestSelectNewWordstatTaskReportsOnlyForeignTasks(t *testing.T) {
+	_, err := selectNewWordstatTask([]string{"9001"},
+		[]wordstatTask{{ID: "9001"}, {ID: "9003", Title: "токарь чпу"}}, []string{"стропальщик"})
+	if !errors.Is(err, errWordstatTaskNotCreated) {
+		t.Fatalf("error = %v, want errWordstatTaskNotCreated", err)
+	}
+	if !strings.Contains(err.Error(), "новых чужих: 1") {
+		t.Fatalf("ошибка не называет чужую задачу: %v", err)
+	}
+}
+
+// TestWaitWordstatTaskCreatedPacesReloads: список отрисовывается мгновенно, и без паузы
+// клиент перезагружал историю 460 раз за пять минут (25.09.2026).
+func TestWaitWordstatTaskCreatedPacesReloads(t *testing.T) {
+	page := &fakeWordstatTaskList{renders: [][]string{{"9001"}}}
+
+	_, err := waitWordstatTaskCreated(context.Background(), []string{"9001"}, nil, page.list(), nil)
+	if !errors.Is(err, errWordstatTaskNotCreated) {
+		t.Fatalf("error = %v, want errWordstatTaskNotCreated", err)
+	}
+	limit := int(wordstatStartTimeout/wordstatStartPollInterval) + 1
+	if page.reloads > limit {
+		t.Fatalf("перезагрузок %d, не больше %d при паузе %d мс", page.reloads, limit, wordstatStartPollInterval)
+	}
+	if page.slept == 0 {
+		t.Fatal("между перезагрузками не было паузы")
 	}
 }

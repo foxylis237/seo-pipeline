@@ -52,9 +52,15 @@ const (
 	// wordstatPollInterval — шаг ожидания между перезагрузками списка задач.
 	wordstatPollInterval = 20_000
 	// wordstatStartTimeout — бюджет подтверждения того, что Arsenkin принял запросы.
-	// Задача заводится сразу после submit, поэтому её отсутствие через полторы минуты —
-	// это отказ приёма, а не медленный расчёт: ждать такое весь бюджет результата незачем.
-	wordstatStartTimeout = 90_000
+	// Задача заводится не сразу после submit: у Arsenkin очередь, и 25.09.2026 задача
+	// статьи 49 obuch_1 появилась в истории через две с половиной минуты — прежних
+	// полутора минут не хватило 23 статьям подряд, а каждая опоздавшая задача доставалась
+	// следующей статье. Пять минут всё ещё вдвое короче бюджета результата.
+	wordstatStartTimeout = 300_000
+	// wordstatStartPollInterval — не чаще одной перезагрузки истории за столько. Список
+	// отрисовывается за доли секунды, и без паузы 25.09.2026 клиент перезагрузил страницу
+	// 460 раз за пять минут — долбить так сервис, где у аккаунта лимиты, нельзя.
+	wordstatStartPollInterval = 5_000
 	// submitObservationWindow — окно наблюдения за отправкой: сколько ждём POST-запрос
 	// после клика и состояние кнопки. Обработчик страницы блокирует кнопку в beforeSend,
 	// то есть до самого запроса, поэтому длинного окна тут не нужно.
@@ -395,7 +401,7 @@ func (s *Service) runWordstat(ctx context.Context, queries []string) ([]KeywordF
 	// страницы не меняется, и отказ приёма выглядит ровно как принятый запрос. Признак
 	// приёма один — в списке задач аккаунта появился идентификатор, которого до запуска
 	// не было.
-	taskID, err := s.confirmWordstatTaskCreated(ctx, knownTaskIDs, len(queries))
+	taskID, err := s.confirmWordstatTaskCreated(ctx, knownTaskIDs, queries)
 	if err != nil {
 		return nil, err
 	}
@@ -433,7 +439,11 @@ func (s *Service) snapshotWordstatTasks(ctx context.Context) ([]string, error) {
 		s.log(slog.LevelWarn, "история задач Wordstat пуста или не отрисовалась", "wordstat_start",
 			"locator", wordstatTaskRowSelector, "timeout_ms", wordstatHistoryTimeout, "error", err)
 	}
-	return s.wordstatTaskIDs()
+	tasks, err := s.wordstatTasks()
+	if err != nil {
+		return nil, err
+	}
+	return wordstatTaskIDsOf(tasks), nil
 }
 
 // waitWordstatHistoryRendered waits until the account task list is drawn in the document.
@@ -487,62 +497,104 @@ func normalizeWordstatPhrase(value string) string {
 	return strings.Join(strings.Fields(strings.ReplaceAll(strings.ToLower(strings.TrimSpace(value)), "ё", "е")), " ")
 }
 
+// wordstatTask is one row of the account task history. Title is the first phrase of the
+// task as Arsenkin shows it (attribute title of the row); empty when the layout has none.
+type wordstatTask struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+}
+
+func wordstatTaskIDsOf(tasks []wordstatTask) []string {
+	ids := make([]string, 0, len(tasks))
+	for _, task := range tasks {
+		ids = append(ids, task.ID)
+	}
+	return ids
+}
+
 // selectNewWordstatTask returns the task created by this run: the single task on the page
-// that was not there before the start. Its errWordstatTaskNotCreated result is a state to
-// wait through while the list is still being refreshed, not yet a verdict.
-func selectNewWordstatTask(known, visible []string) (string, error) {
+// that was not there before the start and whose title is one of the submitted phrases.
+// Its errWordstatTaskNotCreated result is a state to wait through while the list is still
+// being refreshed, not yet a verdict.
+//
+// Новизны мало: у Arsenkin очередь, и задача прошлой статьи, не дождавшейся подтверждения,
+// появляется в истории уже во время следующей — 25.09.2026 так восемь статей obuch_1
+// скачали чужой результат. Строка истории подписана первой фразой задачи, поэтому чужая
+// новая задача узнаётся до скачивания и просто пропускается. Строка без подписи (вёрстка
+// поменялась) принимается по одной новизне, как раньше: последней защитой остаётся
+// acceptWordstatResult.
+func selectNewWordstatTask(known []string, visible []wordstatTask, submitted []string) (string, error) {
 	seen := make(map[string]struct{}, len(known))
 	for _, taskID := range known {
 		if trimmed := strings.TrimSpace(taskID); trimmed != "" {
 			seen[trimmed] = struct{}{}
 		}
 	}
+	phrases := make(map[string]struct{}, len(submitted))
+	for _, query := range submitted {
+		if normalized := normalizeWordstatPhrase(query); normalized != "" {
+			phrases[normalized] = struct{}{}
+		}
+	}
 	fresh := make([]string, 0, 1)
-	for _, taskID := range visible {
-		trimmed := strings.TrimSpace(taskID)
+	foreign := make([]string, 0)
+	for _, task := range visible {
+		trimmed := strings.TrimSpace(task.ID)
 		if trimmed == "" {
 			continue
 		}
 		if _, found := seen[trimmed]; found {
 			continue
 		}
-		if !slices.Contains(fresh, trimmed) {
-			fresh = append(fresh, trimmed)
+		if slices.Contains(fresh, trimmed) || slices.Contains(foreign, trimmed) {
+			continue
 		}
+		if title := normalizeWordstatPhrase(task.Title); title != "" && len(phrases) > 0 {
+			if _, ours := phrases[title]; !ours {
+				foreign = append(foreign, trimmed)
+				continue
+			}
+		}
+		fresh = append(fresh, trimmed)
 	}
 	switch len(fresh) {
 	case 1:
 		return fresh[0], nil
 	case 0:
 		return "", fmt.Errorf(
-			"%w: на странице только прежние результаты (задач до запуска: %d, сейчас на странице: %d)",
-			errWordstatTaskNotCreated, len(known), len(visible),
+			"%w: на странице только прежние результаты (задач до запуска: %d, сейчас на странице: %d, новых чужих: %d %v)",
+			errWordstatTaskNotCreated, len(known), len(visible), len(foreign), foreign,
 		)
 	default:
 		return "", fmt.Errorf("Wordstat показал несколько новых задач %v: определить свою невозможно", fresh)
 	}
 }
 
-func (s *Service) wordstatTaskIDs() ([]string, error) {
-	raw, err := s.page.Locator("body").Evaluate(`body => Array.from(new Set(
-		Array.from(body.querySelectorAll('[data-task-id]')).map(element => element.getAttribute('data-task-id')).filter(Boolean)
-	))`, nil)
+func (s *Service) wordstatTasks() ([]wordstatTask, error) {
+	raw, err := s.page.Locator("body").Evaluate(`body => {
+		const tasks = new Map();
+		for (const element of body.querySelectorAll('[data-task-id]')) {
+			const id = element.getAttribute('data-task-id');
+			if (!id) continue;
+			const title = element.matches('[data-arshis-history-open]') ? (element.getAttribute('title') || '') : '';
+			const task = tasks.get(id) || {id, title: ''};
+			if (title && !task.title) task.title = title;
+			tasks.set(id, task);
+		}
+		return Array.from(tasks.values());
+	}`, nil)
 	if err != nil {
 		return nil, fmt.Errorf("read existing Wordstat task IDs: %w", err)
 	}
-	return decodeTaskIDs(raw, "existing Wordstat task IDs")
-}
-
-func decodeTaskIDs(raw any, reason string) ([]string, error) {
 	encoded, err := json.Marshal(raw)
 	if err != nil {
-		return nil, fmt.Errorf("encode %s: %w", reason, err)
+		return nil, fmt.Errorf("encode existing Wordstat tasks: %w", err)
 	}
-	var taskIDs []string
-	if err := json.Unmarshal(encoded, &taskIDs); err != nil {
-		return nil, fmt.Errorf("decode %s: %w", reason, err)
+	var tasks []wordstatTask
+	if err := json.Unmarshal(encoded, &tasks); err != nil {
+		return nil, fmt.Errorf("decode existing Wordstat tasks: %w", err)
 	}
-	return taskIDs, nil
+	return tasks, nil
 }
 
 // wordstatInputState is what the textarea really holds after Fill. Сами запросы сюда не
@@ -849,11 +901,24 @@ func truncateRunes(value string, limit int) string {
 type wordstatTaskList struct {
 	// waitRendered blocks until the task list of the account is drawn in the document.
 	waitRendered func(timeout time.Duration) error
-	// taskIDs returns every task identifier currently rendered.
-	taskIDs func() ([]string, error)
+	// tasks returns every task currently rendered.
+	tasks func() ([]wordstatTask, error)
 	// reload re-renders the list: the page fills it on load only.
 	reload func() error
 	now    func() time.Time
+	// sleep pauses between reloads; it returns early with the context error.
+	sleep func(ctx context.Context, d time.Duration) error
+}
+
+func sleepContext(ctx context.Context, d time.Duration) error {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 // confirmWordstatTaskCreated proves that Arsenkin accepted the queries and opened a task.
@@ -861,18 +926,19 @@ type wordstatTaskList struct {
 // Без этой проверки отказ приёма неотличим от медленного расчёта: страница остаётся на том
 // же адресе, прогресс не появляется, и прогон молча выбирает весь бюджет ожидания
 // результата. Теперь несозданная задача — быстрая ошибка с диагностикой страницы.
-func (s *Service) confirmWordstatTaskCreated(ctx context.Context, knownTaskIDs []string, submitted int) (string, error) {
-	taskID, err := waitWordstatTaskCreated(ctx, knownTaskIDs, wordstatTaskList{
+func (s *Service) confirmWordstatTaskCreated(ctx context.Context, knownTaskIDs, queries []string) (string, error) {
+	taskID, err := waitWordstatTaskCreated(ctx, knownTaskIDs, queries, wordstatTaskList{
 		waitRendered: s.waitWordstatHistoryRendered,
-		taskIDs:      s.wordstatTaskIDs,
+		tasks:        s.wordstatTasks,
 		reload:       func() error { return s.reloadWordstatHistory(ctx) },
 		now:          time.Now,
+		sleep:        sleepContext,
 	}, func(attempt int, remaining time.Duration) {
 		s.logCtx(ctx, slog.LevelDebug, "подтверждение приёма запросов Wordstat", "wordstat_start",
 			"attempt", attempt, "known_task_count", len(knownTaskIDs), "remaining_ms", remaining.Milliseconds())
 	})
 	if err != nil {
-		s.saveDebugArtifacts(ctx, "wordstat_start", err, debugState{KnownTaskIDs: knownTaskIDs, SubmittedCount: submitted})
+		s.saveDebugArtifacts(ctx, "wordstat_start", err, debugState{KnownTaskIDs: knownTaskIDs, SubmittedCount: len(queries)})
 		return "", err
 	}
 	return taskID, nil
@@ -886,10 +952,11 @@ func (s *Service) confirmWordstatTaskCreated(ctx context.Context, knownTaskIDs [
 // перезагружать». Список приходит отдельным XHR, и перезагрузка раньше срока обрывала его:
 // каждая попытка видела пустую страницу, а этап заканчивался выводом «задача не создана»,
 // хотя список ни разу не был прочитан отрисованным.
-func waitWordstatTaskCreated(ctx context.Context, known []string, list wordstatTaskList, onAttempt func(int, time.Duration)) (string, error) {
+func waitWordstatTaskCreated(ctx context.Context, known, submitted []string, list wordstatTaskList, onAttempt func(int, time.Duration)) (string, error) {
 	deadline := list.now().Add(wordstatStartTimeout * time.Millisecond)
-	lastVisible, renderedAtLeastOnce := 0, false
+	lastVisible, lastForeign, renderedAtLeastOnce := 0, 0, false
 	for attempt := 1; ; attempt++ {
+		attemptStarted := list.now()
 		if err := ctx.Err(); err != nil {
 			return "", err
 		}
@@ -904,8 +971,9 @@ func waitWordstatTaskCreated(ctx context.Context, known []string, list wordstatT
 			}
 			return "", fmt.Errorf(
 				"%w за %s: Arsenkin не принял запросы, отрисованный список задач не изменился "+
-					"(задач до запуска: %d, в последнем списке: %d, попыток: %d)",
-				errWordstatTaskNotCreated, wordstatStartTimeout*time.Millisecond, len(known), lastVisible, attempt-1,
+					"(задач до запуска: %d, в последнем списке: %d, новых чужих: %d, попыток: %d)",
+				errWordstatTaskNotCreated, wordstatStartTimeout*time.Millisecond, len(known), lastVisible,
+				lastForeign, attempt-1,
 			)
 		}
 		if onAttempt != nil {
@@ -914,24 +982,59 @@ func waitWordstatTaskCreated(ctx context.Context, known []string, list wordstatT
 		// Бюджет отрисовки — тот же, что и у снимка до запуска: там он уже доказал, что
 		// списка достаточно дождаться, а не угадывать шаг опроса.
 		rendered := list.waitRendered(min(wordstatHistoryTimeout*time.Millisecond, remaining)) == nil
-		visible, readErr := list.taskIDs()
+		visible, readErr := list.tasks()
 		if readErr != nil {
 			return "", readErr
 		}
 		if rendered || len(visible) > 0 {
 			renderedAtLeastOnce = true
 			lastVisible = len(visible)
-			taskID, selectErr := selectNewWordstatTask(known, visible)
+			lastForeign = countForeignWordstatTasks(known, visible, submitted)
+			taskID, selectErr := selectNewWordstatTask(known, visible, submitted)
 			// «Пока не создана» — повод перезагрузить список, а не ответ. Всё остальное,
 			// включая несколько новых задач сразу, повтором не лечится.
 			if selectErr == nil || !errors.Is(selectErr, errWordstatTaskNotCreated) {
 				return taskID, selectErr
 			}
 		}
+		if list.sleep != nil {
+			pause := wordstatStartPollInterval*time.Millisecond - list.now().Sub(attemptStarted)
+			if left := deadline.Sub(list.now()); pause > left {
+				pause = left
+			}
+			if pause > 0 {
+				if err := list.sleep(ctx, pause); err != nil {
+					return "", err
+				}
+			}
+		}
 		if err := list.reload(); err != nil {
 			return "", err
 		}
 	}
+}
+
+// countForeignWordstatTasks counts new rows signed with a phrase this run did not submit.
+func countForeignWordstatTasks(known []string, visible []wordstatTask, submitted []string) int {
+	seen := make(map[string]struct{}, len(known))
+	for _, id := range known {
+		seen[strings.TrimSpace(id)] = struct{}{}
+	}
+	phrases := make(map[string]struct{}, len(submitted))
+	for _, query := range submitted {
+		phrases[normalizeWordstatPhrase(query)] = struct{}{}
+	}
+	count := 0
+	for _, task := range visible {
+		if _, old := seen[strings.TrimSpace(task.ID)]; old {
+			continue
+		}
+		title := normalizeWordstatPhrase(task.Title)
+		if _, ours := phrases[title]; title != "" && !ours {
+			count++
+		}
+	}
+	return count
 }
 
 // waitWordstatTaskCompleted waits for the task created by this run to become downloadable.
@@ -1113,6 +1216,9 @@ func (s *Service) runCopywriters(ctx context.Context, keywords []KeywordFrequenc
 
 	for _, threshold := range []int{25, 50, 75} {
 		if err := s.waitCopywritersProgressOrResult(ctx, threshold, previousTask.ID); err != nil {
+			// Зависший прогресс (25.09.2026, статья 33 obuch_1: 25% и ни шагу за десять минут)
+			// без снимка страницы разобрать нечем.
+			s.saveDebugArtifacts(ctx, "copywriters_progress", err, debugState{SubmittedCount: len(copywriterQueries)})
 			return Result{}, err
 		}
 		progress, err := s.copywritersProgress(previousTask.ID)
@@ -1124,6 +1230,7 @@ func (s *Service) runCopywriters(ctx context.Context, keywords []KeywordFrequenc
 		}
 	}
 	if err := s.waitCopywritersResult(ctx, previousTask.ID); err != nil {
+		s.saveDebugArtifacts(ctx, "copywriters_result", err, debugState{SubmittedCount: len(copywriterQueries)})
 		return Result{}, err
 	}
 	s.log(slog.LevelInfo, "Copywriters progress 100", "copywriters_progress")
@@ -1752,7 +1859,8 @@ func (s *Service) saveDebugArtifacts(ctx context.Context, stage string, failure 
 	} else if state, ok := value.(string); ok {
 		readyState = state
 	}
-	pageTaskIDs, taskIDsErr := s.wordstatTaskIDs()
+	pageTasks, taskIDsErr := s.wordstatTasks()
+	pageTaskIDs := wordstatTaskIDsOf(pageTasks)
 	if taskIDsErr != nil {
 		s.logCtx(ctx, slog.LevelWarn, "не удалось прочитать задачи Wordstat для диагностики", stage, "error", taskIDsErr)
 	}
