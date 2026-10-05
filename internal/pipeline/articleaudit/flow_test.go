@@ -51,7 +51,10 @@ func (f *fakeArticles) MarkAudited(_ context.Context, _ string, paths Paths,
 	return nil
 }
 
-func (f *fakeArticles) MarkFailed(_ context.Context, _ string, cause error) error {
+func (f *fakeArticles) MarkFailed(ctx context.Context, _ string, cause error) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	f.failed = cause
 	f.calls = append(f.calls, "failed")
 	return nil
@@ -563,5 +566,22 @@ func TestNewFlowRejectsFAQFormatWithoutIndex(t *testing.T) {
 		if err == nil {
 			t.Fatalf("NewFlow принял формат %+v", scheme)
 		}
+	}
+}
+
+// Ctrl+C mid-run must still record the failure, or the page stays in processing.
+func TestFlowMarksFailedAfterCancel(t *testing.T) {
+	articles := &fakeArticles{article: testArticle()}
+	blog := &fakeBlog{post: testPost(), found: Post{ID: 22314}}
+	chats := &fakeChats{chat: &fakeChat{err: context.Canceled}}
+	flow, _ := newTestFlow(t, articles, blog, chats, nil, 0)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if err := flow.Run(ctx, "2"); err == nil {
+		t.Fatal("Run: ожидался отказ")
+	}
+	if articles.failed == nil {
+		t.Fatalf("ошибка страницы не записана после отмены, вызовы: %v", articles.calls)
 	}
 }

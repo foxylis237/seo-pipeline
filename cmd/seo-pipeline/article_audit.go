@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"strings"
 	"text/tabwriter"
@@ -16,6 +15,7 @@ import (
 	"github.com/foxylis237/seo-pipeline/internal/config"
 	"github.com/foxylis237/seo-pipeline/internal/integrations/wordpress"
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/articleaudit"
+	"github.com/foxylis237/seo-pipeline/internal/pipeline/output"
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/pagebatch"
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/taskflow"
 	"github.com/foxylis237/seo-pipeline/internal/tasks"
@@ -151,7 +151,12 @@ func runArticleAuditReport(ctx context.Context, repository *articleaudit.Reposit
 		articleAuditOptions(deps.profile))
 	text := summary.Render(deps.profile.Name)
 	path := filepath.Join(deps.cfg.OutputDir, articleaudit.SummaryFile)
-	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+	pending, err := output.NewWriter(deps.cfg.OutputDir).StageFiles(
+		output.File{Path: articleaudit.SummaryFile, Content: []byte(text)})
+	if err != nil {
+		return fmt.Errorf("подготовить сводку %q: %w", path, err)
+	}
+	if err := output.Commit(func() error { return nil }, pending); err != nil {
 		return fmt.Errorf("записать сводку %q: %w", path, err)
 	}
 	deps.logger.Info("сводка собрана", "pages", len(summary.Pages), "failed", len(summary.Failed),

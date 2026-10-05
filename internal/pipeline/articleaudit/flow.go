@@ -198,7 +198,7 @@ func (f *Flow) Run(ctx context.Context, externalID string) error {
 		return err
 	}
 	if err := f.run(ctx, article); err != nil {
-		if markErr := f.repository.MarkFailed(ctx, externalID, err); markErr != nil {
+		if markErr := f.repository.MarkFailed(context.WithoutCancel(ctx), externalID, err); markErr != nil {
 			f.logger.Error("не удалось сохранить ошибку страницы", "external_id", externalID, "error", markErr)
 		}
 		return err
