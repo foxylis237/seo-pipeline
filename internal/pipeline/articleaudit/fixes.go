@@ -2,9 +2,12 @@ package articleaudit
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/xuri/excelize/v2"
+
+	"github.com/foxylis237/seo-pipeline/internal/pipeline/output"
 )
 
 // FixesFile — имя таблицы правок в корне артефактов задачи.
@@ -57,7 +60,17 @@ func (s Summary) WriteFixes(path string) error {
 	if err := decorateFixes(book, line); err != nil {
 		return err
 	}
-	if err := book.SaveAs(path); err != nil {
+	buffer, err := book.WriteToBuffer()
+	if err != nil {
+		return fmt.Errorf("собрать таблицу правок %q: %w", path, err)
+	}
+	// Through temp+rename: an interrupted write must not leave a broken book under the final name.
+	pending, err := output.NewWriter(filepath.Dir(path)).StageFiles(
+		output.File{Path: filepath.Base(path), Content: buffer.Bytes()})
+	if err != nil {
+		return fmt.Errorf("подготовить таблицу правок %q: %w", path, err)
+	}
+	if err := output.Commit(func() error { return nil }, pending); err != nil {
 		return fmt.Errorf("сохранить таблицу правок %q: %w", path, err)
 	}
 	return nil
