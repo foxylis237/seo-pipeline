@@ -50,8 +50,10 @@ func runSelectedArticles(
 			"article_id", selectedArticle.ID,
 			"external_id", selectedArticle.ExternalID,
 			"operation", operation,
-			"status", selectedArticle.Status,
-			"current_step", step,
+			// Статус и этап — на момент выборки: итог статьи пишет её собственный лог, а
+			// под этими именами строка «completed» читалась как «status=failed».
+			"status_before", selectedArticle.Status,
+			"step_before", step,
 		)
 		articleStarted := time.Now()
 		articleLogger.Info("batch article started", "stage", "article_start")
