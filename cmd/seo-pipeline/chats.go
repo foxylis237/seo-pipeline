@@ -16,10 +16,6 @@ import (
 // Схема одна (наложения у задач, работающих по опубликованным страницам, нет), поэтому
 // резолвер режимов здесь не нужен: выбирать между Gemini и DeepSeek не из чего, а конвейер
 // generation.Pipeline такая задача не использует вовсе — ей нужен только чат.
-//
-// Общий у правки и аудита: подъём клиентов, сбор их закрывателей и оборачивание роутера в
-// фабрику чатов у них совпадают дословно, а второй копии этого кода в composition root быть
-// не должно — разойдётся она молча, и одна из задач останется с незакрытым Chromium.
 func newSingleSchemeChats(ctx context.Context, profile tasks.Profile, debugDirs diagnosticsDirs,
 	logger *slog.Logger) (taskflow.ChatFactory, func() error, error) {
 	noop := func() error { return nil }

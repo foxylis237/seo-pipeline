@@ -39,10 +39,7 @@ type Paths struct {
 
 // Artifacts пишет файлы проверки в OUTPUT_DIR.
 //
-// Поверх output.Writer, а не своим os.WriteFile, как у задач правки: отчёт — единственный
-// результат оплаченного прогона, и публиковаться он обязан вместе с записью в базу. Оборванная
-// на середине запись оставила бы половину отчёта под именем готового, а в базе — путь,
-// который на него указывает.
+// Поверх output.Writer, а не os.WriteFile: отчёт публикуется вместе с записью в базу.
 type Artifacts struct{ writer *output.Writer }
 
 func NewArtifacts(root string) Artifacts { return Artifacts{writer: output.NewWriter(root)} }
@@ -52,8 +49,7 @@ func DirectoryName(externalID, slug string) string { return externalID + "-" + s
 
 // StageOriginal готовит копию прочитанной записи: текст страницы и её поля.
 //
-// Ложится на диск до обращения к модели — по образцу задач правки. Смысл тот же: то, что
-// проверяют, обязано быть сохранено раньше, чем за проверку заплачено.
+// Ложится на диск до обращения к модели.
 func (a Artifacts) StageOriginal(externalID, slug, html string, fields map[string]string) (
 	*output.PendingArtifact, Paths, error) {
 	encoded, err := json.MarshalIndent(fields, "", "  ")

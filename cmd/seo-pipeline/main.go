@@ -194,7 +194,7 @@ func main() {
 	// нет, и запрос, который её называет, упал бы на «column does not exist».
 	articleRepository.UseMetadataWithoutTLDR(profile.MetadataFAQOnly)
 	resultService := resultassembly.NewService(articleRepository, writer, taskLogger, profile.TemplatePath)
-	// Связанные курсы под статьёй. Признак — из профиля: у task_1, pprof_2 и задач правки
+	// Связанные курсы под статьёй. Признак — из профиля: у task_1 и pprof_2
 	// такого блока нет, и каталог им не нужен вовсе. Один и тот же подборщик уходит и в лист,
 	// и в публикацию: в result.md человек смотрит затем, чтобы увидеть, что уйдёт в блог.
 	catalogStore, storeErr := catalogStoreFor(profile, pool)

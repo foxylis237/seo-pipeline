@@ -124,8 +124,6 @@ func (deps articleAuditDeps) pageBatch() pageBatchDeps {
 //
 // Блог этим не затрагивается вовсе — аудит в него ничего и не писал. Но отчёты, за которые
 // заплачено, сброс удаляет безвозвратно, и следующий run заплатит за них снова.
-//
-// Сам сброс общий у задач правки и аудита (runPageBatchReset): различаются только слова.
 func runArticleAuditReset(ctx context.Context, repository *articleaudit.Repository, deps articleAuditDeps) error {
 	return runPageBatchReset(ctx, repository, deps.pageBatch())
 }
@@ -177,7 +175,7 @@ func runArticleAuditReport(ctx context.Context, repository *articleaudit.Reposit
 
 // runArticleAuditRun проводит страницы через проверку: из блога в модель и в отчёт.
 //
-// Порядок шагов тот же, что у задач правки: список страниц → площадка → план (до модели) →
+// Порядок шагов: список страниц → площадка → план (до модели) →
 // промпт → чаты → поток → предохранитель. План возвращает управление раньше подъёма LLM
 // намеренно: браузерный профиль под flock стоит дорого, а плану он не нужен.
 func runArticleAuditRun(ctx context.Context, repository *articleaudit.Repository, deps articleAuditDeps) error {
@@ -383,21 +381,13 @@ func articleAuditArticles(ctx context.Context, repository *articleaudit.Reposito
 
 // articleAuditBlog — переходник от контракта потока к клиенту WordPress.
 //
-// Методов два, и оба читающие. Своего типа, а не общего с задачами правки, именно поэтому:
-// у того есть Write, и один переходник на обе задачи означал бы, что «аудит не пишет в блог»
-// держится тем, что его никто не позвал.
+// Методов два, и оба читающие: метода записи у переходника аудита быть не должно.
 type articleAuditBlog struct{ client *wordpress.Client }
 
 // articleAuditPostTypes — где искать страницу по слагу и в каком порядке.
 //
-// Список свой, а не общий с задачами правки: у тех пачки медицинские, и трёх типов им хватает,
-// а аудит проверяет услуги площадки целиком — повышение квалификации, переподготовку,
-// безопасность, аттестацию. Их слаги в списке правки не ищутся вовсе, и страница падала бы с
-// «в WordPress нет записи типа obuch_med, post, page».
-//
-// Типы услуг берутся у каталога (catalog.PostTypes) — там этот список закрытый и уже описан;
-// второй его копии в composition root быть не должно. За ними идут обычные записи и страницы:
-// на них услуга не заводится, но искать её там дешевле, чем объявлять ненайденной.
+// Аудит проверяет услуги площадки целиком, поэтому типы услуг берутся у каталога
+// (catalog.PostTypes); за ними — обычные записи и страницы.
 var articleAuditPostTypes = append(catalog.PostTypes(), "post", "page")
 
 func (b articleAuditBlog) Find(ctx context.Context, slug string) (articleaudit.Post, error) {
@@ -422,9 +412,7 @@ func (b articleAuditBlog) Read(ctx context.Context, postID int64) (articleaudit.
 
 // newArticleAuditChats поднимает диалоги с моделью по схеме стадий задачи.
 //
-// Тот же подъём, что у задач правки, и по той же причине: схема одна, наложения нет, выбирать
-// между провайдерами не из чего, а конвейер generation.Pipeline задача не использует вовсе —
-// ей нужен только чат.
+// Схема одна, выбирать между провайдерами не из чего, а generation.Pipeline задаче не нужен.
 func newArticleAuditChats(ctx context.Context, profile tasks.Profile, debugDirs diagnosticsDirs,
 	logger *slog.Logger) (taskflow.ChatFactory, func() error, error) {
 	return newSingleSchemeChats(ctx, profile, debugDirs, logger)

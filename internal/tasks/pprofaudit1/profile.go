@@ -5,7 +5,7 @@
 //
 // Технически это выражено непустым ArticleAudit: composition root уводит задачу на поток
 // internal/pipeline/articleaudit, у которого интерфейс площадки состоит из двух читающих
-// методов. Ни от задач правки, ни от pprofaudit2 пакет не зависит и зависеть не должен.
+// методов. От pprofaudit2 пакет не зависит.
 package pprofaudit1
 
 import (
@@ -97,7 +97,7 @@ func Profile() tasks.Profile {
 		DBSchema:         Name,
 		EnvPrefix:        "PPROF_AUDIT_1_",
 		// Таблиц движка у задачи нет вовсе: её схема описана migrations/pprof_audit_1 и
-		// проверяется ею самой. Метаданных она не пишет, как и задачи правки.
+		// проверяется ею самой. Метаданных она не пишет.
 		WithoutMetadataStage: true,
 		LLMStages:            Stages,
 		// Непустое поле и есть признак задачи аудита: по нему composition root уводит её на
