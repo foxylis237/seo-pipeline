@@ -67,6 +67,7 @@ type Articles interface {
 	Get(ctx context.Context, externalID string) (Article, error)
 	MarkProcessing(ctx context.Context, externalID string) error
 	SaveFetched(ctx context.Context, externalID string, postID int64, postType, originalPath, fieldsPath string) error
+	SaveAnswer(ctx context.Context, externalID, promptPath, auditPath string) error
 	MarkAudited(ctx context.Context, externalID string, paths Paths, score, scoreMax *int, findings, missingFields int) error
 	MarkFailed(ctx context.Context, externalID string, cause error) error
 }
@@ -226,7 +227,7 @@ func (f *Flow) run(ctx context.Context, article Article) error {
 		return err
 	}
 
-	prompt, answer, err := f.audit(ctx, article, current, logger)
+	paths, answer, err := f.answer(ctx, article, current, logger)
 	if err != nil {
 		return err
 	}
@@ -243,10 +244,11 @@ func (f *Flow) run(ctx context.Context, article Article) error {
 	if err != nil {
 		return err
 	}
-	pending, paths, err := f.artifacts.StageReport(article.ExternalID, article.Slug, prompt, answer, report)
+	pending, resultPath, err := f.artifacts.StageReport(article.ExternalID, article.Slug, report)
 	if err != nil {
 		return err
 	}
+	paths.ResultPath = resultPath
 	score, scoreMax := scorePointers(parsed)
 	return output.Commit(func() error {
 		return f.repository.MarkAudited(ctx, article.ExternalID, paths, score, scoreMax,
@@ -351,6 +353,37 @@ func matchesSource(current Post, article Article) error {
 			current.ID, current.Slug, article.ExternalID, article.Slug)
 	}
 	return nil
+}
+
+// answer returns the model's verdict, paying for it at most once: an answer saved by an
+// earlier failed run is reused, a fresh one is committed before anything else can fail.
+func (f *Flow) answer(ctx context.Context, article Article, current Post, logger *slog.Logger) (Paths, string, error) {
+	if article.AuditPath != "" {
+		saved, err := f.artifacts.Read(article.AuditPath)
+		if err == nil && strings.TrimSpace(saved) != "" {
+			logger.Info("ответ модели взят из прошлого прогона", "stage", StageAudit, "file", article.AuditPath)
+			return Paths{PromptPath: article.PromptPath, AuditPath: article.AuditPath}, saved, nil
+		}
+		logger.Warn("сохранённый ответ модели не прочитан, спрашиваем заново",
+			"stage", StageAudit, "file", article.AuditPath, "error", err)
+	}
+	prompt, answer, err := f.audit(ctx, article, current, logger)
+	if err != nil {
+		return Paths{}, "", err
+	}
+	if strings.TrimSpace(answer) == "" {
+		return Paths{}, "", ErrEmptyAnswer
+	}
+	pending, paths, err := f.artifacts.StageAnswer(article.ExternalID, article.Slug, prompt, answer)
+	if err != nil {
+		return Paths{}, "", err
+	}
+	if err := output.Commit(func() error {
+		return f.repository.SaveAnswer(ctx, article.ExternalID, paths.PromptPath, paths.AuditPath)
+	}, pending); err != nil {
+		return Paths{}, "", err
+	}
+	return paths, answer, nil
 }
 
 // audit отдаёт страницу модели и возвращает отрендеренный промпт и сырой ответ.

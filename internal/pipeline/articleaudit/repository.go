@@ -248,6 +248,13 @@ func (r *Repository) SaveFetched(ctx context.Context, externalID string, postID 
 		externalID, postID, postType, originalPath, fieldsPath)
 }
 
+// SaveAnswer сохраняет пути промпта и ответа модели. По ним повтор берёт уже оплаченный ответ.
+func (r *Repository) SaveAnswer(ctx context.Context, externalID, promptPath, auditPath string) error {
+	return r.exec(ctx, externalID, `UPDATE articles
+		SET prompt_path = $2, audit_path = $3, updated_at = NOW() WHERE external_id = $1`,
+		externalID, promptPath, auditPath)
+}
+
 // MarkAudited отмечает страницу проверенной. Эта отметка и защищает от повтора.
 //
 // Оценка передаётся указателем: ненайденная в ответе оценка обязана лечь в базу как NULL, а

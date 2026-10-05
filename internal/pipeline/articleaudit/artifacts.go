@@ -74,23 +74,32 @@ func (a Artifacts) StageOriginal(externalID, slug, html string, fields map[strin
 	return pending, paths, nil
 }
 
-// StageReport готовит то, что осталось после модели: промпт, сырой ответ и отчёт.
-func (a Artifacts) StageReport(externalID, slug, prompt, answer, report string) (
+// StageAnswer готовит промпт и сырой ответ модели. Ложится сразу после ответа, отдельно от
+// отчёта: оплаченный ответ не должен зависеть от того, соберётся ли отчёт.
+func (a Artifacts) StageAnswer(externalID, slug, prompt, answer string) (
 	*output.PendingArtifact, Paths, error) {
 	paths := Paths{
 		PromptPath: artifactPath(externalID, slug, PromptsFolder, PromptFile),
 		AuditPath:  artifactPath(externalID, slug, GeneratedFolder, AuditFile),
-		ResultPath: artifactPath(externalID, slug, ".", ResultFile),
 	}
 	pending, err := a.writer.StageFiles(
 		output.File{Path: paths.PromptPath, Content: []byte(prompt)},
 		output.File{Path: paths.AuditPath, Content: []byte(answer)},
-		output.File{Path: paths.ResultPath, Content: []byte(report)},
 	)
 	if err != nil {
-		return nil, Paths{}, fmt.Errorf("подготовить отчёт: %w", err)
+		return nil, Paths{}, fmt.Errorf("подготовить ответ модели: %w", err)
 	}
 	return pending, paths, nil
+}
+
+// StageReport готовит отчёт и возвращает его путь.
+func (a Artifacts) StageReport(externalID, slug, report string) (*output.PendingArtifact, string, error) {
+	resultPath := artifactPath(externalID, slug, ".", ResultFile)
+	pending, err := a.writer.StageFiles(output.File{Path: resultPath, Content: []byte(report)})
+	if err != nil {
+		return nil, "", fmt.Errorf("подготовить отчёт: %w", err)
+	}
+	return pending, resultPath, nil
 }
 
 // Read читает сохранённый артефакт по пути из базы.

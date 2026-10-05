@@ -43,6 +43,12 @@ func (f *fakeArticles) SaveFetched(_ context.Context, _ string, postID int64,
 	return nil
 }
 
+func (f *fakeArticles) SaveAnswer(_ context.Context, _ string, promptPath, auditPath string) error {
+	f.calls = append(f.calls, "answer:"+auditPath)
+	f.article.PromptPath, f.article.AuditPath = promptPath, auditPath
+	return nil
+}
+
 func (f *fakeArticles) MarkAudited(_ context.Context, _ string, paths Paths,
 	score, scoreMax *int, findings, missingFields int) error {
 	f.calls = append(f.calls, "audited:"+paths.ResultPath)
@@ -583,5 +589,53 @@ func TestFlowMarksFailedAfterCancel(t *testing.T) {
 	}
 	if articles.failed == nil {
 		t.Fatalf("ошибка страницы не записана после отмены, вызовы: %v", articles.calls)
+	}
+}
+
+// flowWithTemplate builds a flow over a given artifact root with its own report template.
+func flowWithTemplate(t *testing.T, root, report string, articles Articles, blog Blog,
+	chats taskflow.ChatFactory) *Flow {
+	t.Helper()
+	promptPath := filepath.Join(root, "audit.txt")
+	if err := os.WriteFile(promptPath, []byte("Проверь статью {{.Title}}\n{{.OriginalHTML}}"), 0o644); err != nil {
+		t.Fatalf("подготовить промпт: %v", err)
+	}
+	templatePath := filepath.Join(root, "result.md.tmpl")
+	if err := os.WriteFile(templatePath, []byte(report), 0o644); err != nil {
+		t.Fatalf("подготовить шаблон: %v", err)
+	}
+	flow, err := NewFlow(articles, blog, chats, NewArtifacts(root), promptPath, templatePath, Options{}, nil)
+	if err != nil {
+		t.Fatalf("NewFlow: %v", err)
+	}
+	return flow
+}
+
+// A failure after the model must not throw the paid answer away, and the retry must not pay again.
+func TestFlowKeepsPaidAnswerAcrossFailure(t *testing.T) {
+	root := t.TempDir()
+	articles := &fakeArticles{article: testArticle()}
+	blog := &fakeBlog{post: testPost(), found: Post{ID: 22314}}
+
+	broken := flowWithTemplate(t, root, "{{.NoSuchField}}", articles, blog,
+		&fakeChats{chat: &fakeChat{answers: []string{fullAnswer}}})
+	if err := broken.Run(context.Background(), "2"); err == nil {
+		t.Fatal("Run: ожидался отказ шаблона отчёта")
+	}
+	saved, err := os.ReadFile(filepath.Join(root, "2-logoped", GeneratedFolder, AuditFile))
+	if err != nil || string(saved) != fullAnswer {
+		t.Fatalf("оплаченный ответ не сохранён: %v", err)
+	}
+
+	chat := &fakeChat{}
+	retry := flowWithTemplate(t, root, auditTemplate, articles, blog, &fakeChats{chat: chat})
+	if err := retry.Run(context.Background(), "2"); err != nil {
+		t.Fatalf("повтор: %v", err)
+	}
+	if chat.sent != 0 {
+		t.Fatalf("за повтор заплачено ещё раз: сообщений %d", chat.sent)
+	}
+	if articles.audited.paths.AuditPath == "" || articles.audited.paths.ResultPath == "" {
+		t.Fatalf("пути отчёта не записаны: %+v", articles.audited.paths)
 	}
 }
