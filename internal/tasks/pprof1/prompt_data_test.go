@@ -54,3 +54,20 @@ func TestHTMLPromptCarriesInternalLinks(t *testing.T) {
 		t.Fatalf("промпт стадии html содержит незаполненные поля:\n%s", prepared.Prompt)
 	}
 }
+
+// Объём черновика считает код и называет редактуре, на сколько сократить.
+func TestVolumeTaskAsksToCutOverLimit(t *testing.T) {
+	if got := articleVolume("ab c\nd"); got != 4 {
+		t.Fatalf("articleVolume = %d, want 4", got)
+	}
+	task := volumeTask(22000)
+	if !strings.Contains(task, "22000") || !strings.Contains(task, "Подрежь её примерно на 5500") {
+		t.Fatalf("задание на сокращение: %s", task)
+	}
+	if !strings.Contains(volumeTask(12000), "Допиши примерно 3000") {
+		t.Fatal("короткой статье не задано дописать")
+	}
+	if !strings.Contains(volumeTask(16000), "в норме") {
+		t.Fatal("статья в норме названа ненормальной")
+	}
+}

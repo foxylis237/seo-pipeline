@@ -246,13 +246,18 @@ func (f *Flow) runArticleChat(ctx context.Context, logger *slog.Logger, input ar
 	logger.Info("expert article generated", "stage", "article_generation", "prompt_size", len([]rune(out.expertPrompt)))
 
 	if out.reviewPrompt, out.finalArticle, err = f.Message(ctx, chat.Continue,
-		StageReview, editorData(input)); err != nil {
+		StageReview, editorData(input, out.expertArticle)); err != nil {
 		return out, f.Fail(ctx, logger, input.Article, "article_review", err)
 	}
 	// Запись заголовков приводится к одному виду до сохранения: стадия html расставляет теги
 	// по ней, а модель за один прогон свободно переходит с «H2 - » на «H2:» и на Markdown.
 	out.finalArticle = generation.NormalizeHeadings(out.finalArticle)
-	logger.Info("article review completed", "stage", "article_review")
+	logger.Info("article review completed", "stage", "article_review",
+		"volume_before", articleVolume(out.expertArticle), "volume_after", articleVolume(out.finalArticle))
+	if volume := articleVolume(out.finalArticle); volume > maxArticleVolume || volume < minArticleVolume {
+		logger.Warn("объём статьи после редактуры вне нормы", "stage", "article_review",
+			"volume", volume, "min", minArticleVolume, "max", maxArticleVolume)
+	}
 
 	if out.infoPrompt, out.infoText, err = f.Message(ctx, chat.Continue,
 		StageInfo, struct{}{}); err != nil {
@@ -440,6 +445,13 @@ func (f *Flow) completeHTMLPage(logger *slog.Logger, page, markup string) string
 	if !generation.LeadKept(page, markup) {
 		markup = generation.RestoreLead(page, markup)
 		logger.Warn("вводный абзац возвращён в разметку кодом", "stage", "html_generation")
+	}
+	if cut, dropped := dropFAQSection(markup); dropped {
+		markup = cut
+		logger.Warn("блок частых вопросов вырезан из разметки кодом", "stage", "html_generation")
+	}
+	if split, ok := splitCallToAction(markup); ok {
+		markup = split
 	}
 	if left := generation.LeftoverBlockMarkers(markup); len(left) > 0 {
 		logger.Warn("вёрстка не узнала метки визуальных блоков, они остались в разметке текстом",
