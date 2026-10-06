@@ -450,6 +450,7 @@ func main() {
 			logger:     taskLogger,
 			publisher:  promptPublisher,
 			programs:   siteCatalog,
+			linkNames:  newSitePageClient(),
 		}); err != nil {
 			break
 		}

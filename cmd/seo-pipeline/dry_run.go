@@ -266,9 +266,7 @@ func runDryRun(
 	// task_1 — общим конвейером. Иначе dry-run проверял бы не ту схему, которая выполнится:
 	// у pprof_1 он падал на стадии fix, которой у задачи нет вовсе, а у pprof_2 — на полях
 	// чужого промпта.
-	flow, err := newTaskFlow(profile, taskFlowDeps{
-		repository: articleRepository, writer: writer, router: router, logger: logger,
-	})
+	flow, err := newTaskFlow(profile, dryRunTaskFlowDeps(articleRepository, writer, router, logger))
 	if err != nil {
 		return fmt.Errorf("dry-run build task flow: %w", err)
 	}
@@ -300,6 +298,11 @@ func runDryRun(
 		logger.Info("dry-run article verified", "article_id", selected.ID, "external_id", selected.ExternalID, "status", "completed", "result_path", paths.ResultPath)
 	}
 	return nil
+}
+
+// dryRunTaskFlowDeps leaves linkNames empty: the offline run must not reach the live site.
+func dryRunTaskFlowDeps(articleRepository *repository.ArticleRepository, writer *articleoutput.Writer, router *llm.Router, logger *slog.Logger) taskFlowDeps {
+	return taskFlowDeps{repository: articleRepository, writer: writer, router: router, logger: logger}
 }
 
 // runDryRunTaskFlow проводит статью по собственному потоку задачи: три чата, затем сборка

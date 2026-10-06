@@ -141,3 +141,9 @@ func TestDryRunHTMLCoversDryRunArticle(t *testing.T) {
 		t.Fatalf("разметка заглушки не покрывает её текст: %v", err)
 	}
 }
+
+func TestDryRunTaskFlowDepsDoNotReachSite(t *testing.T) {
+	if deps := dryRunTaskFlowDeps(nil, nil, nil, nil); deps.linkNames != nil {
+		t.Fatal("dry-run flow reads program titles from the live site")
+	}
+}

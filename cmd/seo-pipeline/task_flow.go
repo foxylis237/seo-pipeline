@@ -40,6 +40,12 @@ type taskFlowDeps struct {
 	// нему адрес кнопки призыва), читается лениво, и задаче без собранного каталога ничего не
 	// стоит: List зовётся только тогда, когда о каталоге спросили.
 	programs *catalogCourses
+	// linkNames reads program titles from the live site; nil keeps links as bare URLs.
+	linkNames linkNames
+}
+
+type linkNames interface {
+	Name(ctx context.Context, url string) (string, error)
 }
 
 // newTaskFlow собирает поток задачи. nil без ошибки означает «у задачи своего потока нет» —

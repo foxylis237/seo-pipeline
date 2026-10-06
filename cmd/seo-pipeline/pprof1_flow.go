@@ -29,5 +29,5 @@ func newPProf1Flow(deps taskFlowDeps) (taskFlow, error) {
 		return nil, fmt.Errorf("схема стадий pprof_1 не загружена")
 	}
 	return pprof1.NewFlow(deps.repository, deps.writer, taskflow.NewRouterChats(deps.router),
-		deps.router, deps.logger, deps.publisher, newSitePageClient()), nil
+		deps.router, deps.logger, deps.publisher, deps.linkNames), nil
 }
