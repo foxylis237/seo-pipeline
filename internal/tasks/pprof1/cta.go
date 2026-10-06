@@ -3,6 +3,7 @@ package pprof1
 import (
 	"fmt"
 	"html"
+	"net/url"
 	"os"
 	"regexp"
 	"sort"
@@ -36,6 +37,7 @@ type ctaCard struct {
 	Intro         string
 	Qualification string
 	Document      string
+	DocumentNote  string
 	Format        string
 	ButtonURL     string
 }
@@ -68,13 +70,12 @@ func ctaSlotsPrompt(title, courseURL string) string {
 
 Кнопка ведёт сюда: %s — строки пиши про эту программу (если адрес ведёт на раздел сайта, а не на одну программу, — про обучение по теме статьи в целом).
 
-Ответь ровно шестью строками в формате «ключ ;; значение», без нумерации, без пояснений и без кодового блока:
+Ответь ровно пятью строками в формате «ключ ;; значение», без нумерации, без пояснений и без кодового блока:
 
 бейдж ;; вид обучения, 2–4 слова, например «Повышение квалификации», «Профессиональное обучение», «Обучение по охране труда»
 заголовок ;; призыв с пользой для читателя, 5–9 слов, глагол в повелительном наклонении, например «Повысьте разряд электрогазосварщика без отрыва от работы»
 описание ;; чему учит программа и что читатель получит на выходе, 25–40 слов, одним абзацем, по фактам статьи; без обещаний трудоустройства, скидок и сроков, которых нет в статье
 квалификация ;; что получает выпускник, 3–6 слов, например «Разряды с 2-го по 6-й», «Профессия рабочего с разрядом»
-документ ;; какой документ выдаётся и куда вносятся сведения о нём, 3–6 слов, например «Удостоверение, сведения в ФИС ФРДО»; для охраны труда и других проверок знаний — свой реестр, не ФИС ФРДО
 формат ;; как проходит обучение, 3–6 слов, например «Дистанционно, в своём темпе»`, title, courseURL)
 }
 
@@ -84,7 +85,7 @@ var ctaNumberingRE = regexp.MustCompile(`^(?:[-*•]\s*)?(?:\d+[.)]\s*)?`)
 // ctaSlotKeys — ключи, которые разбирает parseCTASlots. Список закрытый: строку с чужим
 // ключом разбор молча пропускает.
 var ctaSlotKeys = map[string]struct{}{
-	"бейдж": {}, "заголовок": {}, "описание": {}, "квалификация": {}, "документ": {}, "формат": {},
+	"бейдж": {}, "заголовок": {}, "описание": {}, "квалификация": {}, "формат": {},
 }
 
 // parseCTASlots разбирает ответ модели построчно.
@@ -128,7 +129,6 @@ func buildCTACard(slots map[string]string, courseURL string) (ctaCard, []string)
 		"заголовок":    &card.Heading,
 		"описание":     &card.Intro,
 		"квалификация": &card.Qualification,
-		"документ":     &card.Document,
 		"формат":       &card.Format,
 	} {
 		if value, ok := slots[key]; ok {
@@ -137,6 +137,9 @@ func buildCTACard(slots map[string]string, courseURL string) (ctaCard, []string)
 			missing = append(missing, key)
 		}
 	}
+	doc := documentOf(courseURL)
+	card.Document = html.EscapeString(doc.Name)
+	card.DocumentNote = html.EscapeString(doc.Note)
 	card.ButtonURL = html.EscapeString(courseURL)
 	sort.Strings(missing)
 	return card, missing
@@ -152,9 +155,43 @@ func defaultCTACard() ctaCard {
 		Heading:       "Получите профессию без отрыва от работы",
 		Intro:         "ДПО ПРОФ ведёт профессиональное обучение, переподготовку и повышение квалификации по лицензии. Теорию вы проходите дистанционно, а после итоговой аттестации получаете документ установленного образца.",
 		Qualification: "Профессия или разряд по ЕТКС",
-		Document:      "Документ в госреестре",
 		Format:        "Дистанционно, в своём темпе",
 	}
+}
+
+// courseDocument — что выдаётся по окончании программы и куда вносятся сведения о нём.
+type courseDocument struct {
+	Name string
+	Note string
+}
+
+// courseDocuments — документ по разделу адреса программы. Значения сняты с блока
+// «Получаемые документы» страниц программ dpoprof.ru 06.10.2026: внутри раздела он одинаков у
+// всех программ. Модель страницы программы не видит и документ угадывала. Ключ — первый
+// сегмент пути, у attestaciya и bezopasnost блок общий для всех подразделов.
+var courseDocuments = map[string]courseDocument{
+	"obuchenie":              {"Свидетельство и удостоверение", "Сведения вносятся в ФИС ФРДО"},
+	"perepodgotovka":         {"Диплом о переподготовке", "Сведения вносятся в ФИС ФРДО"},
+	"povyshenie":             {"Удостоверение о повышении квалификации", "Сведения вносятся в ФИС ФРДО"},
+	"obuchenie-medpersonala": {"Удостоверение или диплом", "Сведения вносятся в ФИС ФРДО"},
+	"bezopasnost":            {"Свидетельство или удостоверение", "Сведения вносятся в ФИС ФРДО"},
+	"attestaciya":            {"Свидетельство и удостоверение", "Сведения вносятся в реестр ЕИСОТ Минтруда"},
+}
+
+// defaultCourseDocument — для адреса вне таблицы: рубрика, общий каталог.
+var defaultCourseDocument = courseDocument{"Документ установленного образца", "Сведения вносятся в ФИС ФРДО"}
+
+// documentOf выбирает документ по первому сегменту пути адреса кнопки.
+func documentOf(courseURL string) courseDocument {
+	parsed, err := url.Parse(strings.TrimSpace(courseURL))
+	if err != nil {
+		return defaultCourseDocument
+	}
+	section, _, _ := strings.Cut(strings.Trim(parsed.Path, "/"), "/")
+	if doc, ok := courseDocuments[section]; ok {
+		return doc
+	}
+	return defaultCourseDocument
 }
 
 // renderCTACard подставляет слоты в шаблон.
@@ -173,4 +210,28 @@ func appendCTACard(markup, card string) (string, bool) {
 		return markup, false
 	}
 	return strings.TrimSpace(markup) + "\n\n" + card, true
+}
+
+var (
+	paragraphRE = regexp.MustCompile(`(?s)<p\b[^>]*>(.*?)</p>`)
+	callSplitRE = regexp.MustCompile(`([.!?…»])\s+(<strong>[^<]{3,}</strong>)`)
+)
+
+// splitCallToAction выносит призыв («Оставьте заявку…») из последнего абзаца статьи в
+// отдельный абзац. Призыв узнаётся по жирному началу последнего предложения: так его
+// выделяет промпт редактуры. Нет такого предложения — разметка не меняется.
+func splitCallToAction(markup string) (string, bool) {
+	paragraphs := paragraphRE.FindAllStringSubmatchIndex(markup, -1)
+	if len(paragraphs) == 0 {
+		return markup, false
+	}
+	last := paragraphs[len(paragraphs)-1]
+	body := markup[last[2]:last[3]]
+	splits := callSplitRE.FindAllStringSubmatchIndex(body, -1)
+	if len(splits) == 0 {
+		return markup, false
+	}
+	at := splits[len(splits)-1]
+	split := body[:at[3]] + "</p>\n\n<p>" + body[at[4]:]
+	return markup[:last[2]] + split + markup[last[3]:], true
 }

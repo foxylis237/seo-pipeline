@@ -66,11 +66,15 @@ func TestHTMLStageAppendsCTACard(t *testing.T) {
 	}
 	for _, want := range []string{
 		`class="sp-cta-card"`, `href="https://example.test/course"`, "Профессиональное обучение",
-		"Станьте логопедом &lt;за 3 месяца&gt;", "Диплом в госреестре", "Записаться на обучение",
+		"Станьте логопедом &lt;за 3 месяца&gt;", "Документ установленного образца",
+		"Сведения вносятся в ФИС ФРДО", "Записаться на обучение",
 	} {
 		if !strings.Contains(saved, want) {
 			t.Fatalf("в карточке нет %q: %s", want, saved)
 		}
+	}
+	if strings.Contains(saved, "Диплом в госреестре") {
+		t.Fatal("документ взят у модели, а не по адресу программы")
 	}
 	if strings.Index(saved, "sp-cta-card") < strings.Index(saved, "логопеда</a>") {
 		t.Fatal("карточка стоит не в конце статьи")
@@ -88,8 +92,8 @@ func TestAppendCTACardSkipsExistingButton(t *testing.T) {
 // Пустой ответ модели карточку не отменяет: она собирается на умолчаниях.
 func TestBuildCTACardFallsBackToDefaults(t *testing.T) {
 	card, missing := buildCTACard(parseCTASlots("не понял задачу"), "https://example.test/course")
-	if len(missing) != 6 {
-		t.Fatalf("умолчаниями заменено %v, ожидалось шесть слотов", missing)
+	if len(missing) != 5 {
+		t.Fatalf("умолчаниями заменено %v, ожидалось пять слотов", missing)
 	}
 	if card.Heading == "" || card.ButtonURL != "https://example.test/course" {
 		t.Fatalf("карточка на умолчаниях собрана неверно: %+v", card)
@@ -105,5 +109,38 @@ func TestStructureRequiresCourseURL(t *testing.T) {
 	}
 	if len(chats.chats) != 0 {
 		t.Fatalf("чат открыт до проверки адреса: %v", chats.chats)
+	}
+}
+
+// Документ ставится по разделу адреса программы, а не со слов модели.
+func TestDocumentOfCourseURL(t *testing.T) {
+	for courseURL, want := range map[string]string{
+		"https://dpoprof.ru/obuchenie/barista-obuchenie/":                                          "Свидетельство и удостоверение",
+		"https://dpoprof.ru/perepodgotovka/logist-perepodgotovka/":                                 "Диплом о переподготовке",
+		"https://dpoprof.ru/povyshenie/logist-povyshenie-kvalifikaczii/":                           "Удостоверение о повышении квалификации",
+		"https://dpoprof.ru/attestaciya/prombezopasnost/attestacziya-b-7-1/":                       "Свидетельство и удостоверение",
+		"https://dpoprof.ru/bezopasnost/ohrana-truda/obuchenie-po-ohrane-truda-i-proverki-znanij/": "Свидетельство или удостоверение",
+		"https://dpoprof.ru/vse-napravleniya/":                                                     defaultCourseDocument.Name,
+		"":                                                                                         defaultCourseDocument.Name,
+	} {
+		if got := documentOf(courseURL).Name; got != want {
+			t.Errorf("documentOf(%q) = %q, want %q", courseURL, got, want)
+		}
+	}
+	if note := documentOf("https://dpoprof.ru/attestaciya/elektrobezopasnost/3-gruppa/").Note; !strings.Contains(note, "ЕИСОТ") {
+		t.Errorf("у аттестации реестр %q, ожидался ЕИСОТ", note)
+	}
+}
+
+// Призыв из последнего абзаца уходит в свой абзац, остальной текст не меняется.
+func TestSplitCallToAction(t *testing.T) {
+	markup := "<p>Первый.</p>\n<p>Итог статьи. В <strong>ДПО ПРОФ</strong> учат дистанционно. <strong>Оставьте заявку на обучение</strong> — методист перезвонит.</p>"
+	got, ok := splitCallToAction(markup)
+	want := "<p>Первый.</p>\n<p>Итог статьи. В <strong>ДПО ПРОФ</strong> учат дистанционно.</p>\n\n<p><strong>Оставьте заявку на обучение</strong> — методист перезвонит.</p>"
+	if !ok || got != want {
+		t.Fatalf("got %q", got)
+	}
+	if _, ok := splitCallToAction("<p>Без призыва. Просто текст.</p>"); ok {
+		t.Fatal("абзац без жирного призыва разбит")
 	}
 }
