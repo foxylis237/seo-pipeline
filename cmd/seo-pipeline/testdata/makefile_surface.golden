@@ -1,0 +1,2020 @@
+make help
+  | SEO Pipeline. [ID] — external_id из Excel, необязателен: без него берутся все
+  | подходящие статьи. ID без скобок — обязателен.
+  | 
+  | pprof_1 — DeepSeek-only, три чата
+  |   make pprof-1 import [limit]       импорт статей из Excel
+  |   make pprof-1 import-check [ID]    сверка импорта с Excel
+  |   make pprof-1 errors [ID]          статьи с текущей ошибкой
+  |   make pprof-1 keywords ID          вставить запросы вместо сбора Keys.so
+  |   make pprof-1 prepare [ID]         research Keys.so и Arsenkin
+  |   make pprof-1 generate [ID]        полный прогон, он же run
+  |   make pprof-1 article [ID]         чат 2 целиком
+  |   make pprof-1 info [ID]            чат 2 целиком, то же
+  |   make pprof-1 review [ID]          чат 2 целиком, то же
+  |   make pprof-1 fix [ID]             чат 2 целиком, то же
+  |   make pprof-1 html [ID]            чат 3: HTML и перелинковка
+  |   make pprof-1 run [ID]             полный прогон, возобновляемый
+  |   make pprof-1 run plan [ID]        где возобновится, без запуска
+  |   make pprof-1 retry [ID]           снять ошибку и прогнать
+  |   make pprof-1 regenerate ID        пересоздать статью целиком и выложить
+  |   make pprof-1 result [ID]          собрать result.md
+  |   make pprof-1 demo-generate [ID]   пересобрать каталог DEMO
+  |   make pprof-1 google-publish [ID]  промпты в Google Docs
+  |   make pprof-1 wordpress-check      проверка доступа к WordPress, без записи
+  |   make pprof-1 catalog-sync         собрать каталог услуг сайта, без записи в блог
+  |   make pprof-1 catalog-show ID      какие курсы подберутся статье, без записи
+  |   make pprof-1 publish [ID]         опубликовать в WordPress; без ID — все готовые
+  |   make pprof-1 publish plan [ID]    что именно уйдёт в WordPress, без записи
+  |   make pprof-1 republish ID         переписать тело уже опубликованной записи
+  |   make pprof-1 mark-published ID [post_id]привязать к существующей записи блога
+  |   make pprof-1 dry-run              офлайн-прогон без сервисов
+  |   make pprof-1 clear ID             статью к состоянию импорта
+  |   make pprof-1 reset [ID]           статью или всю pprof_1 к нулю
+  | 
+  | pprof_2 — DeepSeek-only, три чата, свой набор полей Excel
+  |   make pprof-2 import [limit]       импорт страниц из Excel
+  |   make pprof-2 import-check [ID]    сверка импорта с Excel
+  |   make pprof-2 errors [ID]          страницы с текущей ошибкой
+  |   make pprof-2 keywords ID          вставить запросы вместо сбора Keys.so
+  |   make pprof-2 prepare [ID]         research Keys.so и Arsenkin
+  |   make pprof-2 generate [ID]        полный прогон, он же run
+  |   make pprof-2 article [ID]         чат 2 целиком
+  |   make pprof-2 review [ID]          чат 2 целиком, то же
+  |   make pprof-2 fix [ID]             чат 2 целиком, то же
+  |   make pprof-2 html [ID]            чат 3: HTML и перелинковка
+  |   make pprof-2 run [ID]             полный прогон, возобновляемый
+  |   make pprof-2 run plan [ID]        где возобновится, без запуска
+  |   make pprof-2 retry [ID]           снять ошибку и прогнать
+  |   make pprof-2 regenerate ID        пересоздать страницу целиком и выложить
+  |   make pprof-2 result [ID]          собрать result.md
+  |   make pprof-2 demo-generate [ID]   пересобрать каталог DEMO
+  |   make pprof-2 google-publish [ID]  промпты в Google Docs
+  |   make pprof-2 wordpress-check      проверка доступа к WordPress, без записи
+  |   make pprof-2 publish [ID]         опубликовать в WordPress; без ID — все готовые
+  |   make pprof-2 publish plan [ID]    что именно уйдёт в WordPress, без записи
+  |   make pprof-2 mark-published ID [post_id]привязать к существующей записи блога
+  |   make pprof-2 dry-run              офлайн-прогон без сервисов
+  |   make pprof-2 clear ID             страницу к состоянию импорта
+  |   make pprof-2 reset [ID]           страницу или всю pprof_2 к нулю
+  |                                     
+  |   obuch-1 — те же статьи блога, другая площадка:
+  |   make obuch-1 import               импорт статей из Excel [limit]
+  |   make obuch-1 prepare              research Keys.so и Arsenkin [ID]
+  |   make obuch-1 run                  полный прогон, возобновляемый [ID]
+  |   make obuch-1 article              чат 2 целиком [ID]
+  |   make obuch-1 html                 чат 3: HTML и перелинковка [ID]
+  |   make obuch-1 wordpress-check      проверка доступа к своему сайту, без записи
+  |   make obuch-1 dry-run              офлайн-прогон без сервисов
+  |                                     
+  |   obuch-2 — страницы услуг той же второй площадки:
+  |   make obuch-2 import               импорт страниц из Excel [limit]
+  |   make obuch-2 import-check         сверка импорта с Excel [ID]
+  |   make obuch-2 prepare              research Keys.so и Arsenkin [ID]
+  |   make obuch-2 run                  полный прогон, возобновляемый [ID]
+  |   make obuch-2 article              чат 2 целиком [ID]
+  |   make obuch-2 html                 чат 3: HTML и надпись кнопки [ID]
+  |   make obuch-2 result               собрать result.md [ID]
+  |   make obuch-2 wordpress-check      проверка доступа к своему сайту, без записи
+  |   make obuch-2 publish plan [ID]    что именно уйдёт в WordPress, без записи
+  |   make obuch-2 publish [ID]         опубликовать в WordPress
+  |   make obuch-2 dry-run              офлайн-прогон без сервисов
+  |                                     
+  |   pprof-audit-1,2 - проверка опубликованных страниц, в блог не пишет:
+  |   make pprof-audit-1 import         индексы и ссылки из файла в input/pprof_audit_1
+  |   make pprof-audit-1 run plan [ID]  что будет проверено и какие поля пусты
+  |   make pprof-audit-1 run [ID]       проверить статьи блога, отчёт в result.md
+  |   make pprof-audit-2 import         индексы и ссылки из файла в input/pprof_audit_2
+  |   make pprof-audit-2 run plan [ID]  что будет проверено и какие поля пусты
+  |   make pprof-audit-2 run [ID]       проверить страницы услуг, отчёт в result.md
+  |   make pprof-audit-2 report         сводка по пачке: оценки, пробелы, частые ошибки
+  | 
+  | Вход в сервисы — общий для задач
+  |   make login deepseek               ручной вход в DeepSeek
+  |   make login google                 ручной вход в Google
+  | 
+  | Проект
+  |   make docker-up                    поднять PostgreSQL и дождаться
+  |   make docker-start                 запустить и дождаться
+  |   make docker-stop                  остановить контейнеры
+  |   make docker-down                  удалить контейнеры и сеть
+  |   make docker-restart               перезапустить и дождаться
+  |   make docker-logs                  следить за логами
+  |   make docker-ps                    состояние сервисов
+  |   make test                         все тесты
+  |   make test-race                    тесты с race detector
+  |   make fmt                          форматирование
+  |   make vet                          статический анализ
+  |   make lint                         golangci-lint по .golangci.yml
+  |   make lint-fix                     golangci-lint с автоправками
+  |   make build                        бинарник в bin/seo-pipeline
+  | 
+  | Тратят деньги и ходят наружу: prepare, generate, article, info, review, fix,
+  | html, run, retry, regenerate, demo-generate, google-publish. Необратимы:
+  | clear и reset. У pprof_1 article, info, review и fix — одно действие: чат 2
+  | целиком.
+  | run и regenerate выкладывают статью в блог, если у задачи включён
+  | pipeline.publish_after_run (у pprof_2 включён). Уже выложенную regenerate
+  | заново не публикует.
+  | Перед первым запуском pprof-1 и pprof-2 создать их схемы PostgreSQL — см. README.md
+  | У pprof_2 стадии info нет: TL;DR и FAQ он не генерирует.
+  exit 0
+make login
+  | Service is required.
+  | 
+  | Example:
+  | 
+  | make login deepseek
+  exit 2
+make login deepseek
+  | run ./cmd/seo-pipeline login deepseek
+  exit 0
+make login deepseek extra
+  | run ./cmd/seo-pipeline login deepseek
+  | Unknown command: extra
+  | 
+  | Run make help to see available commands.
+  exit 2
+make unknown-target
+  | Unknown command: unknown-target
+  | 
+  | Run make help to see available commands.
+  exit 2
+make build
+  | build -o bin/seo-pipeline ./cmd/seo-pipeline
+  exit 0
+make test
+  | test ./...
+  exit 0
+make lint
+  | run ./...
+  exit 0
+make task-1
+  | Operation is required.
+  | 
+  | Example:
+  | 
+  | make task-1 generate 37
+  | 
+  | Run make help to see all task-1 operations.
+  exit 2
+make task-1 unknown
+  | Unknown task-1 operation: unknown
+  | 
+  | Run make help to see all task-1 operations.
+  exit 2
+make task-1 import 0
+  | Import limit must be a positive integer.
+  | 
+  | Example:
+  | 
+  | make task-1 import 10
+  exit 2
+make task-1 prepare wrong
+  | ID must be a positive integer.
+  | 
+  | Example:
+  | 
+  | make task-1 prepare 37
+  exit 2
+make task-1 run 37 38
+  | Too many arguments.
+  | 
+  | Example:
+  | 
+  | make task-1 run 37
+  exit 2
+make task-1 run plan
+  | run ./cmd/seo-pipeline task-1 run --plan
+  exit 0
+make task-1 run plan 5
+  | run ./cmd/seo-pipeline task-1 run --plan 5
+  exit 0
+make task-1 publish plan
+  | run ./cmd/seo-pipeline task-1 publish --plan
+  exit 0
+make task-1 publish plan 5
+  | run ./cmd/seo-pipeline task-1 publish --plan 5
+  exit 0
+make task-1 mark-published 16 21593
+  | run ./cmd/seo-pipeline task-1 mark-published 16 21593
+  exit 0
+make task-1 mark-published 16 x
+  | wordpress_post_id must be a positive integer.
+  | 
+  | Example:
+  | 
+  | make task-1 mark-published 16 21593
+  exit 2
+make task-1 dry-run 1
+  | dry-run does not accept arguments.
+  | 
+  | Example:
+  | 
+  | make task-1 dry-run
+  exit 2
+make task-1 deepseek-login 1
+  | deepseek-login does not accept arguments.
+  | 
+  | Example:
+  | 
+  | make task-1 deepseek-login
+  exit 2
+make task-1 google-login 1
+  | google-login does not accept arguments.
+  | 
+  | Example:
+  | 
+  | make task-1 google-login
+  exit 2
+make task-1 import
+  | run ./cmd/seo-pipeline task-1 import
+  exit 0
+make task-1 import 37
+  | run ./cmd/seo-pipeline task-1 import 37
+  exit 0
+make task-1 import-check
+  | run ./cmd/seo-pipeline task-1 import-check
+  exit 0
+make task-1 import-check 37
+  | run ./cmd/seo-pipeline task-1 import-check 37
+  exit 0
+make task-1 errors
+  | run ./cmd/seo-pipeline task-1 errors
+  exit 0
+make task-1 errors 37
+  | run ./cmd/seo-pipeline task-1 errors 37
+  exit 0
+make task-1 keywords
+  | run ./cmd/seo-pipeline task-1 keywords
+  exit 0
+make task-1 keywords 37
+  | run ./cmd/seo-pipeline task-1 keywords 37
+  exit 0
+make task-1 retry
+  | run ./cmd/seo-pipeline task-1 retry
+  exit 0
+make task-1 retry 37
+  | run ./cmd/seo-pipeline task-1 retry 37
+  exit 0
+make task-1 run
+  | run ./cmd/seo-pipeline task-1 run
+  exit 0
+make task-1 run 37
+  | run ./cmd/seo-pipeline task-1 run 37
+  exit 0
+make task-1 regenerate
+  | run ./cmd/seo-pipeline task-1 regenerate
+  exit 0
+make task-1 regenerate 37
+  | run ./cmd/seo-pipeline task-1 regenerate 37
+  exit 0
+make task-1 dry-run
+  | up -d --wait postgres-dry-run
+  | test ./...
+  | vet ./...
+  | run ./cmd/seo-pipeline task-1 run --dry-run
+  exit 0
+make task-1 dry-run 37
+  | dry-run does not accept arguments.
+  | 
+  | Example:
+  | 
+  | make task-1 dry-run
+  exit 2
+make task-1 prepare
+  | run ./cmd/seo-pipeline task-1 prepare
+  exit 0
+make task-1 prepare 37
+  | run ./cmd/seo-pipeline task-1 prepare 37
+  exit 0
+make task-1 generate
+  | run ./cmd/seo-pipeline task-1 generate
+  exit 0
+make task-1 generate 37
+  | run ./cmd/seo-pipeline task-1 generate 37
+  exit 0
+make task-1 demo-generate
+  | run ./cmd/seo-pipeline task-1 demo-generate
+  exit 0
+make task-1 demo-generate 37
+  | run ./cmd/seo-pipeline task-1 demo-generate 37
+  exit 0
+make task-1 article
+  | run ./cmd/seo-pipeline task-1 article
+  exit 0
+make task-1 article 37
+  | run ./cmd/seo-pipeline task-1 article 37
+  exit 0
+make task-1 info
+  | run ./cmd/seo-pipeline task-1 info
+  exit 0
+make task-1 info 37
+  | run ./cmd/seo-pipeline task-1 info 37
+  exit 0
+make task-1 review
+  | run ./cmd/seo-pipeline task-1 review
+  exit 0
+make task-1 review 37
+  | run ./cmd/seo-pipeline task-1 review 37
+  exit 0
+make task-1 fix
+  | run ./cmd/seo-pipeline task-1 fix
+  exit 0
+make task-1 fix 37
+  | run ./cmd/seo-pipeline task-1 fix 37
+  exit 0
+make task-1 html
+  | run ./cmd/seo-pipeline task-1 html
+  exit 0
+make task-1 html 37
+  | run ./cmd/seo-pipeline task-1 html 37
+  exit 0
+make task-1 result
+  | run ./cmd/seo-pipeline task-1 result
+  exit 0
+make task-1 result 37
+  | run ./cmd/seo-pipeline task-1 result 37
+  exit 0
+make task-1 report
+  | run ./cmd/seo-pipeline task-1 report
+  exit 0
+make task-1 report 37
+  | run ./cmd/seo-pipeline task-1 report 37
+  exit 0
+make task-1 clear
+  | run ./cmd/seo-pipeline task-1 clear
+  exit 0
+make task-1 clear 37
+  | run ./cmd/seo-pipeline task-1 clear 37
+  exit 0
+make task-1 reset
+  | run ./cmd/seo-pipeline task-1 reset
+  exit 0
+make task-1 reset 37
+  | run ./cmd/seo-pipeline task-1 reset 37
+  exit 0
+make task-1 google-login
+  | run ./cmd/seo-pipeline task-1 google-login
+  exit 0
+make task-1 google-login 37
+  | google-login does not accept arguments.
+  | 
+  | Example:
+  | 
+  | make task-1 google-login
+  exit 2
+make task-1 google-publish
+  | run ./cmd/seo-pipeline task-1 google-publish
+  exit 0
+make task-1 google-publish 37
+  | run ./cmd/seo-pipeline task-1 google-publish 37
+  exit 0
+make task-1 deepseek-login
+  | run ./cmd/seo-pipeline task-1 deepseek-login
+  exit 0
+make task-1 deepseek-login 37
+  | deepseek-login does not accept arguments.
+  | 
+  | Example:
+  | 
+  | make task-1 deepseek-login
+  exit 2
+make task-1 wordpress-check
+  | run ./cmd/seo-pipeline task-1 wordpress-check
+  exit 0
+make task-1 wordpress-check 37
+  | run ./cmd/seo-pipeline task-1 wordpress-check 37
+  exit 0
+make task-1 publish
+  | run ./cmd/seo-pipeline task-1 publish
+  exit 0
+make task-1 publish 37
+  | run ./cmd/seo-pipeline task-1 publish 37
+  exit 0
+make task-1 republish
+  | run ./cmd/seo-pipeline task-1 republish
+  exit 0
+make task-1 republish 37
+  | run ./cmd/seo-pipeline task-1 republish 37
+  exit 0
+make task-1 mark-published
+  | run ./cmd/seo-pipeline task-1 mark-published
+  exit 0
+make task-1 mark-published 37
+  | run ./cmd/seo-pipeline task-1 mark-published 37
+  exit 0
+make task-1 catalog-sync
+  | run ./cmd/seo-pipeline task-1 catalog-sync
+  exit 0
+make task-1 catalog-sync 37
+  | run ./cmd/seo-pipeline task-1 catalog-sync 37
+  exit 0
+make task-1 catalog-show
+  | run ./cmd/seo-pipeline task-1 catalog-show
+  exit 0
+make task-1 catalog-show 37
+  | run ./cmd/seo-pipeline task-1 catalog-show 37
+  exit 0
+make pprof-1
+  | Operation is required.
+  | 
+  | Example:
+  | 
+  | make pprof-1 generate 37
+  | 
+  | Run make help to see all pprof-1 operations.
+  exit 2
+make pprof-1 unknown
+  | Unknown pprof-1 operation: unknown
+  | 
+  | Run make help to see all pprof-1 operations.
+  exit 2
+make pprof-1 import 0
+  | Import limit must be a positive integer.
+  | 
+  | Example:
+  | 
+  | make pprof-1 import 10
+  exit 2
+make pprof-1 prepare wrong
+  | ID must be a positive integer.
+  | 
+  | Example:
+  | 
+  | make pprof-1 prepare 37
+  exit 2
+make pprof-1 run 37 38
+  | Too many arguments.
+  | 
+  | Example:
+  | 
+  | make pprof-1 run 37
+  exit 2
+make pprof-1 run plan
+  | run ./cmd/seo-pipeline pprof-1 run --plan
+  exit 0
+make pprof-1 run plan 5
+  | run ./cmd/seo-pipeline pprof-1 run --plan 5
+  exit 0
+make pprof-1 publish plan
+  | run ./cmd/seo-pipeline pprof-1 publish --plan
+  exit 0
+make pprof-1 publish plan 5
+  | run ./cmd/seo-pipeline pprof-1 publish --plan 5
+  exit 0
+make pprof-1 mark-published 16 21593
+  | run ./cmd/seo-pipeline pprof-1 mark-published 16 21593
+  exit 0
+make pprof-1 mark-published 16 x
+  | wordpress_post_id must be a positive integer.
+  | 
+  | Example:
+  | 
+  | make pprof-1 mark-published 16 21593
+  exit 2
+make pprof-1 dry-run 1
+  | dry-run does not accept arguments.
+  | 
+  | Example:
+  | 
+  | make pprof-1 dry-run
+  exit 2
+make pprof-1 deepseek-login 1
+  | deepseek-login does not accept arguments.
+  | 
+  | Example:
+  | 
+  | make pprof-1 deepseek-login
+  exit 2
+make pprof-1 google-login 1
+  | google-login does not accept arguments.
+  | 
+  | Example:
+  | 
+  | make pprof-1 google-login
+  exit 2
+make pprof-1 import
+  | run ./cmd/seo-pipeline pprof-1 import
+  exit 0
+make pprof-1 import 37
+  | run ./cmd/seo-pipeline pprof-1 import 37
+  exit 0
+make pprof-1 import-check
+  | run ./cmd/seo-pipeline pprof-1 import-check
+  exit 0
+make pprof-1 import-check 37
+  | run ./cmd/seo-pipeline pprof-1 import-check 37
+  exit 0
+make pprof-1 errors
+  | run ./cmd/seo-pipeline pprof-1 errors
+  exit 0
+make pprof-1 errors 37
+  | run ./cmd/seo-pipeline pprof-1 errors 37
+  exit 0
+make pprof-1 keywords
+  | run ./cmd/seo-pipeline pprof-1 keywords
+  exit 0
+make pprof-1 keywords 37
+  | run ./cmd/seo-pipeline pprof-1 keywords 37
+  exit 0
+make pprof-1 retry
+  | run ./cmd/seo-pipeline pprof-1 retry
+  exit 0
+make pprof-1 retry 37
+  | run ./cmd/seo-pipeline pprof-1 retry 37
+  exit 0
+make pprof-1 run
+  | run ./cmd/seo-pipeline pprof-1 run
+  exit 0
+make pprof-1 run 37
+  | run ./cmd/seo-pipeline pprof-1 run 37
+  exit 0
+make pprof-1 regenerate
+  | run ./cmd/seo-pipeline pprof-1 regenerate
+  exit 0
+make pprof-1 regenerate 37
+  | run ./cmd/seo-pipeline pprof-1 regenerate 37
+  exit 0
+make pprof-1 dry-run
+  | up -d --wait postgres-dry-run
+  | test ./...
+  | vet ./...
+  | run ./cmd/seo-pipeline pprof-1 run --dry-run
+  exit 0
+make pprof-1 dry-run 37
+  | dry-run does not accept arguments.
+  | 
+  | Example:
+  | 
+  | make pprof-1 dry-run
+  exit 2
+make pprof-1 prepare
+  | run ./cmd/seo-pipeline pprof-1 prepare
+  exit 0
+make pprof-1 prepare 37
+  | run ./cmd/seo-pipeline pprof-1 prepare 37
+  exit 0
+make pprof-1 generate
+  | run ./cmd/seo-pipeline pprof-1 generate
+  exit 0
+make pprof-1 generate 37
+  | run ./cmd/seo-pipeline pprof-1 generate 37
+  exit 0
+make pprof-1 demo-generate
+  | run ./cmd/seo-pipeline pprof-1 demo-generate
+  exit 0
+make pprof-1 demo-generate 37
+  | run ./cmd/seo-pipeline pprof-1 demo-generate 37
+  exit 0
+make pprof-1 article
+  | run ./cmd/seo-pipeline pprof-1 article
+  exit 0
+make pprof-1 article 37
+  | run ./cmd/seo-pipeline pprof-1 article 37
+  exit 0
+make pprof-1 info
+  | run ./cmd/seo-pipeline pprof-1 info
+  exit 0
+make pprof-1 info 37
+  | run ./cmd/seo-pipeline pprof-1 info 37
+  exit 0
+make pprof-1 review
+  | run ./cmd/seo-pipeline pprof-1 review
+  exit 0
+make pprof-1 review 37
+  | run ./cmd/seo-pipeline pprof-1 review 37
+  exit 0
+make pprof-1 fix
+  | run ./cmd/seo-pipeline pprof-1 fix
+  exit 0
+make pprof-1 fix 37
+  | run ./cmd/seo-pipeline pprof-1 fix 37
+  exit 0
+make pprof-1 html
+  | run ./cmd/seo-pipeline pprof-1 html
+  exit 0
+make pprof-1 html 37
+  | run ./cmd/seo-pipeline pprof-1 html 37
+  exit 0
+make pprof-1 result
+  | run ./cmd/seo-pipeline pprof-1 result
+  exit 0
+make pprof-1 result 37
+  | run ./cmd/seo-pipeline pprof-1 result 37
+  exit 0
+make pprof-1 report
+  | run ./cmd/seo-pipeline pprof-1 report
+  exit 0
+make pprof-1 report 37
+  | run ./cmd/seo-pipeline pprof-1 report 37
+  exit 0
+make pprof-1 clear
+  | run ./cmd/seo-pipeline pprof-1 clear
+  exit 0
+make pprof-1 clear 37
+  | run ./cmd/seo-pipeline pprof-1 clear 37
+  exit 0
+make pprof-1 reset
+  | run ./cmd/seo-pipeline pprof-1 reset
+  exit 0
+make pprof-1 reset 37
+  | run ./cmd/seo-pipeline pprof-1 reset 37
+  exit 0
+make pprof-1 google-login
+  | run ./cmd/seo-pipeline pprof-1 google-login
+  exit 0
+make pprof-1 google-login 37
+  | google-login does not accept arguments.
+  | 
+  | Example:
+  | 
+  | make pprof-1 google-login
+  exit 2
+make pprof-1 google-publish
+  | run ./cmd/seo-pipeline pprof-1 google-publish
+  exit 0
+make pprof-1 google-publish 37
+  | run ./cmd/seo-pipeline pprof-1 google-publish 37
+  exit 0
+make pprof-1 deepseek-login
+  | run ./cmd/seo-pipeline pprof-1 deepseek-login
+  exit 0
+make pprof-1 deepseek-login 37
+  | deepseek-login does not accept arguments.
+  | 
+  | Example:
+  | 
+  | make pprof-1 deepseek-login
+  exit 2
+make pprof-1 wordpress-check
+  | run ./cmd/seo-pipeline pprof-1 wordpress-check
+  exit 0
+make pprof-1 wordpress-check 37
+  | run ./cmd/seo-pipeline pprof-1 wordpress-check 37
+  exit 0
+make pprof-1 publish
+  | run ./cmd/seo-pipeline pprof-1 publish
+  exit 0
+make pprof-1 publish 37
+  | run ./cmd/seo-pipeline pprof-1 publish 37
+  exit 0
+make pprof-1 republish
+  | run ./cmd/seo-pipeline pprof-1 republish
+  exit 0
+make pprof-1 republish 37
+  | run ./cmd/seo-pipeline pprof-1 republish 37
+  exit 0
+make pprof-1 mark-published
+  | run ./cmd/seo-pipeline pprof-1 mark-published
+  exit 0
+make pprof-1 mark-published 37
+  | run ./cmd/seo-pipeline pprof-1 mark-published 37
+  exit 0
+make pprof-1 catalog-sync
+  | run ./cmd/seo-pipeline pprof-1 catalog-sync
+  exit 0
+make pprof-1 catalog-sync 37
+  | run ./cmd/seo-pipeline pprof-1 catalog-sync 37
+  exit 0
+make pprof-1 catalog-show
+  | run ./cmd/seo-pipeline pprof-1 catalog-show
+  exit 0
+make pprof-1 catalog-show 37
+  | run ./cmd/seo-pipeline pprof-1 catalog-show 37
+  exit 0
+make pprof-2
+  | Operation is required.
+  | 
+  | Example:
+  | 
+  | make pprof-2 generate 37
+  | 
+  | Run make help to see all pprof-2 operations.
+  exit 2
+make pprof-2 unknown
+  | Unknown pprof-2 operation: unknown
+  | 
+  | Run make help to see all pprof-2 operations.
+  exit 2
+make pprof-2 import 0
+  | Import limit must be a positive integer.
+  | 
+  | Example:
+  | 
+  | make pprof-2 import 10
+  exit 2
+make pprof-2 prepare wrong
+  | ID must be a positive integer.
+  | 
+  | Example:
+  | 
+  | make pprof-2 prepare 37
+  exit 2
+make pprof-2 run 37 38
+  | Too many arguments.
+  | 
+  | Example:
+  | 
+  | make pprof-2 run 37
+  exit 2
+make pprof-2 run plan
+  | run ./cmd/seo-pipeline pprof-2 run --plan
+  exit 0
+make pprof-2 run plan 5
+  | run ./cmd/seo-pipeline pprof-2 run --plan 5
+  exit 0
+make pprof-2 publish plan
+  | run ./cmd/seo-pipeline pprof-2 publish --plan
+  exit 0
+make pprof-2 publish plan 5
+  | run ./cmd/seo-pipeline pprof-2 publish --plan 5
+  exit 0
+make pprof-2 mark-published 16 21593
+  | run ./cmd/seo-pipeline pprof-2 mark-published 16 21593
+  exit 0
+make pprof-2 mark-published 16 x
+  | wordpress_post_id must be a positive integer.
+  | 
+  | Example:
+  | 
+  | make pprof-2 mark-published 16 21593
+  exit 2
+make pprof-2 dry-run 1
+  | dry-run does not accept arguments.
+  | 
+  | Example:
+  | 
+  | make pprof-2 dry-run
+  exit 2
+make pprof-2 deepseek-login 1
+  | deepseek-login does not accept arguments.
+  | 
+  | Example:
+  | 
+  | make pprof-2 deepseek-login
+  exit 2
+make pprof-2 google-login 1
+  | google-login does not accept arguments.
+  | 
+  | Example:
+  | 
+  | make pprof-2 google-login
+  exit 2
+make pprof-2 import
+  | run ./cmd/seo-pipeline pprof-2 import
+  exit 0
+make pprof-2 import 37
+  | run ./cmd/seo-pipeline pprof-2 import 37
+  exit 0
+make pprof-2 import-check
+  | run ./cmd/seo-pipeline pprof-2 import-check
+  exit 0
+make pprof-2 import-check 37
+  | run ./cmd/seo-pipeline pprof-2 import-check 37
+  exit 0
+make pprof-2 errors
+  | run ./cmd/seo-pipeline pprof-2 errors
+  exit 0
+make pprof-2 errors 37
+  | run ./cmd/seo-pipeline pprof-2 errors 37
+  exit 0
+make pprof-2 keywords
+  | run ./cmd/seo-pipeline pprof-2 keywords
+  exit 0
+make pprof-2 keywords 37
+  | run ./cmd/seo-pipeline pprof-2 keywords 37
+  exit 0
+make pprof-2 retry
+  | run ./cmd/seo-pipeline pprof-2 retry
+  exit 0
+make pprof-2 retry 37
+  | run ./cmd/seo-pipeline pprof-2 retry 37
+  exit 0
+make pprof-2 run
+  | run ./cmd/seo-pipeline pprof-2 run
+  exit 0
+make pprof-2 run 37
+  | run ./cmd/seo-pipeline pprof-2 run 37
+  exit 0
+make pprof-2 regenerate
+  | run ./cmd/seo-pipeline pprof-2 regenerate
+  exit 0
+make pprof-2 regenerate 37
+  | run ./cmd/seo-pipeline pprof-2 regenerate 37
+  exit 0
+make pprof-2 dry-run
+  | up -d --wait postgres-dry-run
+  | test ./...
+  | vet ./...
+  | run ./cmd/seo-pipeline pprof-2 run --dry-run
+  exit 0
+make pprof-2 dry-run 37
+  | dry-run does not accept arguments.
+  | 
+  | Example:
+  | 
+  | make pprof-2 dry-run
+  exit 2
+make pprof-2 prepare
+  | run ./cmd/seo-pipeline pprof-2 prepare
+  exit 0
+make pprof-2 prepare 37
+  | run ./cmd/seo-pipeline pprof-2 prepare 37
+  exit 0
+make pprof-2 generate
+  | run ./cmd/seo-pipeline pprof-2 generate
+  exit 0
+make pprof-2 generate 37
+  | run ./cmd/seo-pipeline pprof-2 generate 37
+  exit 0
+make pprof-2 demo-generate
+  | run ./cmd/seo-pipeline pprof-2 demo-generate
+  exit 0
+make pprof-2 demo-generate 37
+  | run ./cmd/seo-pipeline pprof-2 demo-generate 37
+  exit 0
+make pprof-2 article
+  | run ./cmd/seo-pipeline pprof-2 article
+  exit 0
+make pprof-2 article 37
+  | run ./cmd/seo-pipeline pprof-2 article 37
+  exit 0
+make pprof-2 info
+  | run ./cmd/seo-pipeline pprof-2 info
+  exit 0
+make pprof-2 info 37
+  | run ./cmd/seo-pipeline pprof-2 info 37
+  exit 0
+make pprof-2 review
+  | run ./cmd/seo-pipeline pprof-2 review
+  exit 0
+make pprof-2 review 37
+  | run ./cmd/seo-pipeline pprof-2 review 37
+  exit 0
+make pprof-2 fix
+  | run ./cmd/seo-pipeline pprof-2 fix
+  exit 0
+make pprof-2 fix 37
+  | run ./cmd/seo-pipeline pprof-2 fix 37
+  exit 0
+make pprof-2 html
+  | run ./cmd/seo-pipeline pprof-2 html
+  exit 0
+make pprof-2 html 37
+  | run ./cmd/seo-pipeline pprof-2 html 37
+  exit 0
+make pprof-2 result
+  | run ./cmd/seo-pipeline pprof-2 result
+  exit 0
+make pprof-2 result 37
+  | run ./cmd/seo-pipeline pprof-2 result 37
+  exit 0
+make pprof-2 report
+  | run ./cmd/seo-pipeline pprof-2 report
+  exit 0
+make pprof-2 report 37
+  | run ./cmd/seo-pipeline pprof-2 report 37
+  exit 0
+make pprof-2 clear
+  | run ./cmd/seo-pipeline pprof-2 clear
+  exit 0
+make pprof-2 clear 37
+  | run ./cmd/seo-pipeline pprof-2 clear 37
+  exit 0
+make pprof-2 reset
+  | run ./cmd/seo-pipeline pprof-2 reset
+  exit 0
+make pprof-2 reset 37
+  | run ./cmd/seo-pipeline pprof-2 reset 37
+  exit 0
+make pprof-2 google-login
+  | run ./cmd/seo-pipeline pprof-2 google-login
+  exit 0
+make pprof-2 google-login 37
+  | google-login does not accept arguments.
+  | 
+  | Example:
+  | 
+  | make pprof-2 google-login
+  exit 2
+make pprof-2 google-publish
+  | run ./cmd/seo-pipeline pprof-2 google-publish
+  exit 0
+make pprof-2 google-publish 37
+  | run ./cmd/seo-pipeline pprof-2 google-publish 37
+  exit 0
+make pprof-2 deepseek-login
+  | run ./cmd/seo-pipeline pprof-2 deepseek-login
+  exit 0
+make pprof-2 deepseek-login 37
+  | deepseek-login does not accept arguments.
+  | 
+  | Example:
+  | 
+  | make pprof-2 deepseek-login
+  exit 2
+make pprof-2 wordpress-check
+  | run ./cmd/seo-pipeline pprof-2 wordpress-check
+  exit 0
+make pprof-2 wordpress-check 37
+  | run ./cmd/seo-pipeline pprof-2 wordpress-check 37
+  exit 0
+make pprof-2 publish
+  | run ./cmd/seo-pipeline pprof-2 publish
+  exit 0
+make pprof-2 publish 37
+  | run ./cmd/seo-pipeline pprof-2 publish 37
+  exit 0
+make pprof-2 republish
+  | run ./cmd/seo-pipeline pprof-2 republish
+  exit 0
+make pprof-2 republish 37
+  | run ./cmd/seo-pipeline pprof-2 republish 37
+  exit 0
+make pprof-2 mark-published
+  | run ./cmd/seo-pipeline pprof-2 mark-published
+  exit 0
+make pprof-2 mark-published 37
+  | run ./cmd/seo-pipeline pprof-2 mark-published 37
+  exit 0
+make pprof-2 catalog-sync
+  | run ./cmd/seo-pipeline pprof-2 catalog-sync
+  exit 0
+make pprof-2 catalog-sync 37
+  | run ./cmd/seo-pipeline pprof-2 catalog-sync 37
+  exit 0
+make pprof-2 catalog-show
+  | run ./cmd/seo-pipeline pprof-2 catalog-show
+  exit 0
+make pprof-2 catalog-show 37
+  | run ./cmd/seo-pipeline pprof-2 catalog-show 37
+  exit 0
+make obuch-1
+  | Operation is required.
+  | 
+  | Example:
+  | 
+  | make obuch-1 generate 37
+  | 
+  | Run make help to see all obuch-1 operations.
+  exit 2
+make obuch-1 unknown
+  | Unknown obuch-1 operation: unknown
+  | 
+  | Run make help to see all obuch-1 operations.
+  exit 2
+make obuch-1 import 0
+  | Import limit must be a positive integer.
+  | 
+  | Example:
+  | 
+  | make obuch-1 import 10
+  exit 2
+make obuch-1 prepare wrong
+  | ID must be a positive integer.
+  | 
+  | Example:
+  | 
+  | make obuch-1 prepare 37
+  exit 2
+make obuch-1 run 37 38
+  | Too many arguments.
+  | 
+  | Example:
+  | 
+  | make obuch-1 run 37
+  exit 2
+make obuch-1 run plan
+  | run ./cmd/seo-pipeline obuch-1 run --plan
+  exit 0
+make obuch-1 run plan 5
+  | run ./cmd/seo-pipeline obuch-1 run --plan 5
+  exit 0
+make obuch-1 publish plan
+  | run ./cmd/seo-pipeline obuch-1 publish --plan
+  exit 0
+make obuch-1 publish plan 5
+  | run ./cmd/seo-pipeline obuch-1 publish --plan 5
+  exit 0
+make obuch-1 mark-published 16 21593
+  | run ./cmd/seo-pipeline obuch-1 mark-published 16 21593
+  exit 0
+make obuch-1 mark-published 16 x
+  | wordpress_post_id must be a positive integer.
+  | 
+  | Example:
+  | 
+  | make obuch-1 mark-published 16 21593
+  exit 2
+make obuch-1 dry-run 1
+  | dry-run does not accept arguments.
+  | 
+  | Example:
+  | 
+  | make obuch-1 dry-run
+  exit 2
+make obuch-1 deepseek-login 1
+  | deepseek-login does not accept arguments.
+  | 
+  | Example:
+  | 
+  | make obuch-1 deepseek-login
+  exit 2
+make obuch-1 google-login 1
+  | google-login does not accept arguments.
+  | 
+  | Example:
+  | 
+  | make obuch-1 google-login
+  exit 2
+make obuch-1 import
+  | run ./cmd/seo-pipeline obuch-1 import
+  exit 0
+make obuch-1 import 37
+  | run ./cmd/seo-pipeline obuch-1 import 37
+  exit 0
+make obuch-1 import-check
+  | run ./cmd/seo-pipeline obuch-1 import-check
+  exit 0
+make obuch-1 import-check 37
+  | run ./cmd/seo-pipeline obuch-1 import-check 37
+  exit 0
+make obuch-1 errors
+  | run ./cmd/seo-pipeline obuch-1 errors
+  exit 0
+make obuch-1 errors 37
+  | run ./cmd/seo-pipeline obuch-1 errors 37
+  exit 0
+make obuch-1 keywords
+  | run ./cmd/seo-pipeline obuch-1 keywords
+  exit 0
+make obuch-1 keywords 37
+  | run ./cmd/seo-pipeline obuch-1 keywords 37
+  exit 0
+make obuch-1 retry
+  | run ./cmd/seo-pipeline obuch-1 retry
+  exit 0
+make obuch-1 retry 37
+  | run ./cmd/seo-pipeline obuch-1 retry 37
+  exit 0
+make obuch-1 run
+  | run ./cmd/seo-pipeline obuch-1 run
+  exit 0
+make obuch-1 run 37
+  | run ./cmd/seo-pipeline obuch-1 run 37
+  exit 0
+make obuch-1 regenerate
+  | run ./cmd/seo-pipeline obuch-1 regenerate
+  exit 0
+make obuch-1 regenerate 37
+  | run ./cmd/seo-pipeline obuch-1 regenerate 37
+  exit 0
+make obuch-1 dry-run
+  | up -d --wait postgres-dry-run
+  | test ./...
+  | vet ./...
+  | run ./cmd/seo-pipeline obuch-1 run --dry-run
+  exit 0
+make obuch-1 dry-run 37
+  | dry-run does not accept arguments.
+  | 
+  | Example:
+  | 
+  | make obuch-1 dry-run
+  exit 2
+make obuch-1 prepare
+  | run ./cmd/seo-pipeline obuch-1 prepare
+  exit 0
+make obuch-1 prepare 37
+  | run ./cmd/seo-pipeline obuch-1 prepare 37
+  exit 0
+make obuch-1 generate
+  | run ./cmd/seo-pipeline obuch-1 generate
+  exit 0
+make obuch-1 generate 37
+  | run ./cmd/seo-pipeline obuch-1 generate 37
+  exit 0
+make obuch-1 demo-generate
+  | run ./cmd/seo-pipeline obuch-1 demo-generate
+  exit 0
+make obuch-1 demo-generate 37
+  | run ./cmd/seo-pipeline obuch-1 demo-generate 37
+  exit 0
+make obuch-1 article
+  | run ./cmd/seo-pipeline obuch-1 article
+  exit 0
+make obuch-1 article 37
+  | run ./cmd/seo-pipeline obuch-1 article 37
+  exit 0
+make obuch-1 info
+  | run ./cmd/seo-pipeline obuch-1 info
+  exit 0
+make obuch-1 info 37
+  | run ./cmd/seo-pipeline obuch-1 info 37
+  exit 0
+make obuch-1 review
+  | run ./cmd/seo-pipeline obuch-1 review
+  exit 0
+make obuch-1 review 37
+  | run ./cmd/seo-pipeline obuch-1 review 37
+  exit 0
+make obuch-1 fix
+  | run ./cmd/seo-pipeline obuch-1 fix
+  exit 0
+make obuch-1 fix 37
+  | run ./cmd/seo-pipeline obuch-1 fix 37
+  exit 0
+make obuch-1 html
+  | run ./cmd/seo-pipeline obuch-1 html
+  exit 0
+make obuch-1 html 37
+  | run ./cmd/seo-pipeline obuch-1 html 37
+  exit 0
+make obuch-1 result
+  | run ./cmd/seo-pipeline obuch-1 result
+  exit 0
+make obuch-1 result 37
+  | run ./cmd/seo-pipeline obuch-1 result 37
+  exit 0
+make obuch-1 report
+  | run ./cmd/seo-pipeline obuch-1 report
+  exit 0
+make obuch-1 report 37
+  | run ./cmd/seo-pipeline obuch-1 report 37
+  exit 0
+make obuch-1 clear
+  | run ./cmd/seo-pipeline obuch-1 clear
+  exit 0
+make obuch-1 clear 37
+  | run ./cmd/seo-pipeline obuch-1 clear 37
+  exit 0
+make obuch-1 reset
+  | run ./cmd/seo-pipeline obuch-1 reset
+  exit 0
+make obuch-1 reset 37
+  | run ./cmd/seo-pipeline obuch-1 reset 37
+  exit 0
+make obuch-1 google-login
+  | run ./cmd/seo-pipeline obuch-1 google-login
+  exit 0
+make obuch-1 google-login 37
+  | google-login does not accept arguments.
+  | 
+  | Example:
+  | 
+  | make obuch-1 google-login
+  exit 2
+make obuch-1 google-publish
+  | run ./cmd/seo-pipeline obuch-1 google-publish
+  exit 0
+make obuch-1 google-publish 37
+  | run ./cmd/seo-pipeline obuch-1 google-publish 37
+  exit 0
+make obuch-1 deepseek-login
+  | run ./cmd/seo-pipeline obuch-1 deepseek-login
+  exit 0
+make obuch-1 deepseek-login 37
+  | deepseek-login does not accept arguments.
+  | 
+  | Example:
+  | 
+  | make obuch-1 deepseek-login
+  exit 2
+make obuch-1 wordpress-check
+  | run ./cmd/seo-pipeline obuch-1 wordpress-check
+  exit 0
+make obuch-1 wordpress-check 37
+  | run ./cmd/seo-pipeline obuch-1 wordpress-check 37
+  exit 0
+make obuch-1 publish
+  | run ./cmd/seo-pipeline obuch-1 publish
+  exit 0
+make obuch-1 publish 37
+  | run ./cmd/seo-pipeline obuch-1 publish 37
+  exit 0
+make obuch-1 republish
+  | run ./cmd/seo-pipeline obuch-1 republish
+  exit 0
+make obuch-1 republish 37
+  | run ./cmd/seo-pipeline obuch-1 republish 37
+  exit 0
+make obuch-1 mark-published
+  | run ./cmd/seo-pipeline obuch-1 mark-published
+  exit 0
+make obuch-1 mark-published 37
+  | run ./cmd/seo-pipeline obuch-1 mark-published 37
+  exit 0
+make obuch-1 catalog-sync
+  | run ./cmd/seo-pipeline obuch-1 catalog-sync
+  exit 0
+make obuch-1 catalog-sync 37
+  | run ./cmd/seo-pipeline obuch-1 catalog-sync 37
+  exit 0
+make obuch-1 catalog-show
+  | run ./cmd/seo-pipeline obuch-1 catalog-show
+  exit 0
+make obuch-1 catalog-show 37
+  | run ./cmd/seo-pipeline obuch-1 catalog-show 37
+  exit 0
+make obuch-2
+  | Operation is required.
+  | 
+  | Example:
+  | 
+  | make obuch-2 generate 37
+  | 
+  | Run make help to see all obuch-2 operations.
+  exit 2
+make obuch-2 unknown
+  | Unknown obuch-2 operation: unknown
+  | 
+  | Run make help to see all obuch-2 operations.
+  exit 2
+make obuch-2 import 0
+  | Import limit must be a positive integer.
+  | 
+  | Example:
+  | 
+  | make obuch-2 import 10
+  exit 2
+make obuch-2 prepare wrong
+  | ID must be a positive integer.
+  | 
+  | Example:
+  | 
+  | make obuch-2 prepare 37
+  exit 2
+make obuch-2 run 37 38
+  | Too many arguments.
+  | 
+  | Example:
+  | 
+  | make obuch-2 run 37
+  exit 2
+make obuch-2 run plan
+  | run ./cmd/seo-pipeline obuch-2 run --plan
+  exit 0
+make obuch-2 run plan 5
+  | run ./cmd/seo-pipeline obuch-2 run --plan 5
+  exit 0
+make obuch-2 publish plan
+  | run ./cmd/seo-pipeline obuch-2 publish --plan
+  exit 0
+make obuch-2 publish plan 5
+  | run ./cmd/seo-pipeline obuch-2 publish --plan 5
+  exit 0
+make obuch-2 mark-published 16 21593
+  | run ./cmd/seo-pipeline obuch-2 mark-published 16 21593
+  exit 0
+make obuch-2 mark-published 16 x
+  | wordpress_post_id must be a positive integer.
+  | 
+  | Example:
+  | 
+  | make obuch-2 mark-published 16 21593
+  exit 2
+make obuch-2 dry-run 1
+  | dry-run does not accept arguments.
+  | 
+  | Example:
+  | 
+  | make obuch-2 dry-run
+  exit 2
+make obuch-2 deepseek-login 1
+  | deepseek-login does not accept arguments.
+  | 
+  | Example:
+  | 
+  | make obuch-2 deepseek-login
+  exit 2
+make obuch-2 google-login 1
+  | google-login does not accept arguments.
+  | 
+  | Example:
+  | 
+  | make obuch-2 google-login
+  exit 2
+make obuch-2 import
+  | run ./cmd/seo-pipeline obuch-2 import
+  exit 0
+make obuch-2 import 37
+  | run ./cmd/seo-pipeline obuch-2 import 37
+  exit 0
+make obuch-2 import-check
+  | run ./cmd/seo-pipeline obuch-2 import-check
+  exit 0
+make obuch-2 import-check 37
+  | run ./cmd/seo-pipeline obuch-2 import-check 37
+  exit 0
+make obuch-2 errors
+  | run ./cmd/seo-pipeline obuch-2 errors
+  exit 0
+make obuch-2 errors 37
+  | run ./cmd/seo-pipeline obuch-2 errors 37
+  exit 0
+make obuch-2 keywords
+  | run ./cmd/seo-pipeline obuch-2 keywords
+  exit 0
+make obuch-2 keywords 37
+  | run ./cmd/seo-pipeline obuch-2 keywords 37
+  exit 0
+make obuch-2 retry
+  | run ./cmd/seo-pipeline obuch-2 retry
+  exit 0
+make obuch-2 retry 37
+  | run ./cmd/seo-pipeline obuch-2 retry 37
+  exit 0
+make obuch-2 run
+  | run ./cmd/seo-pipeline obuch-2 run
+  exit 0
+make obuch-2 run 37
+  | run ./cmd/seo-pipeline obuch-2 run 37
+  exit 0
+make obuch-2 regenerate
+  | run ./cmd/seo-pipeline obuch-2 regenerate
+  exit 0
+make obuch-2 regenerate 37
+  | run ./cmd/seo-pipeline obuch-2 regenerate 37
+  exit 0
+make obuch-2 dry-run
+  | up -d --wait postgres-dry-run
+  | test ./...
+  | vet ./...
+  | run ./cmd/seo-pipeline obuch-2 run --dry-run
+  exit 0
+make obuch-2 dry-run 37
+  | dry-run does not accept arguments.
+  | 
+  | Example:
+  | 
+  | make obuch-2 dry-run
+  exit 2
+make obuch-2 prepare
+  | run ./cmd/seo-pipeline obuch-2 prepare
+  exit 0
+make obuch-2 prepare 37
+  | run ./cmd/seo-pipeline obuch-2 prepare 37
+  exit 0
+make obuch-2 generate
+  | run ./cmd/seo-pipeline obuch-2 generate
+  exit 0
+make obuch-2 generate 37
+  | run ./cmd/seo-pipeline obuch-2 generate 37
+  exit 0
+make obuch-2 demo-generate
+  | run ./cmd/seo-pipeline obuch-2 demo-generate
+  exit 0
+make obuch-2 demo-generate 37
+  | run ./cmd/seo-pipeline obuch-2 demo-generate 37
+  exit 0
+make obuch-2 article
+  | run ./cmd/seo-pipeline obuch-2 article
+  exit 0
+make obuch-2 article 37
+  | run ./cmd/seo-pipeline obuch-2 article 37
+  exit 0
+make obuch-2 info
+  | run ./cmd/seo-pipeline obuch-2 info
+  exit 0
+make obuch-2 info 37
+  | run ./cmd/seo-pipeline obuch-2 info 37
+  exit 0
+make obuch-2 review
+  | run ./cmd/seo-pipeline obuch-2 review
+  exit 0
+make obuch-2 review 37
+  | run ./cmd/seo-pipeline obuch-2 review 37
+  exit 0
+make obuch-2 fix
+  | run ./cmd/seo-pipeline obuch-2 fix
+  exit 0
+make obuch-2 fix 37
+  | run ./cmd/seo-pipeline obuch-2 fix 37
+  exit 0
+make obuch-2 html
+  | run ./cmd/seo-pipeline obuch-2 html
+  exit 0
+make obuch-2 html 37
+  | run ./cmd/seo-pipeline obuch-2 html 37
+  exit 0
+make obuch-2 result
+  | run ./cmd/seo-pipeline obuch-2 result
+  exit 0
+make obuch-2 result 37
+  | run ./cmd/seo-pipeline obuch-2 result 37
+  exit 0
+make obuch-2 report
+  | run ./cmd/seo-pipeline obuch-2 report
+  exit 0
+make obuch-2 report 37
+  | run ./cmd/seo-pipeline obuch-2 report 37
+  exit 0
+make obuch-2 clear
+  | run ./cmd/seo-pipeline obuch-2 clear
+  exit 0
+make obuch-2 clear 37
+  | run ./cmd/seo-pipeline obuch-2 clear 37
+  exit 0
+make obuch-2 reset
+  | run ./cmd/seo-pipeline obuch-2 reset
+  exit 0
+make obuch-2 reset 37
+  | run ./cmd/seo-pipeline obuch-2 reset 37
+  exit 0
+make obuch-2 google-login
+  | run ./cmd/seo-pipeline obuch-2 google-login
+  exit 0
+make obuch-2 google-login 37
+  | google-login does not accept arguments.
+  | 
+  | Example:
+  | 
+  | make obuch-2 google-login
+  exit 2
+make obuch-2 google-publish
+  | run ./cmd/seo-pipeline obuch-2 google-publish
+  exit 0
+make obuch-2 google-publish 37
+  | run ./cmd/seo-pipeline obuch-2 google-publish 37
+  exit 0
+make obuch-2 deepseek-login
+  | run ./cmd/seo-pipeline obuch-2 deepseek-login
+  exit 0
+make obuch-2 deepseek-login 37
+  | deepseek-login does not accept arguments.
+  | 
+  | Example:
+  | 
+  | make obuch-2 deepseek-login
+  exit 2
+make obuch-2 wordpress-check
+  | run ./cmd/seo-pipeline obuch-2 wordpress-check
+  exit 0
+make obuch-2 wordpress-check 37
+  | run ./cmd/seo-pipeline obuch-2 wordpress-check 37
+  exit 0
+make obuch-2 publish
+  | run ./cmd/seo-pipeline obuch-2 publish
+  exit 0
+make obuch-2 publish 37
+  | run ./cmd/seo-pipeline obuch-2 publish 37
+  exit 0
+make obuch-2 republish
+  | run ./cmd/seo-pipeline obuch-2 republish
+  exit 0
+make obuch-2 republish 37
+  | run ./cmd/seo-pipeline obuch-2 republish 37
+  exit 0
+make obuch-2 mark-published
+  | run ./cmd/seo-pipeline obuch-2 mark-published
+  exit 0
+make obuch-2 mark-published 37
+  | run ./cmd/seo-pipeline obuch-2 mark-published 37
+  exit 0
+make obuch-2 catalog-sync
+  | run ./cmd/seo-pipeline obuch-2 catalog-sync
+  exit 0
+make obuch-2 catalog-sync 37
+  | run ./cmd/seo-pipeline obuch-2 catalog-sync 37
+  exit 0
+make obuch-2 catalog-show
+  | run ./cmd/seo-pipeline obuch-2 catalog-show
+  exit 0
+make obuch-2 catalog-show 37
+  | run ./cmd/seo-pipeline obuch-2 catalog-show 37
+  exit 0
+make pprof-audit-1
+  | Operation is required.
+  | 
+  | Example:
+  | 
+  | make pprof-audit-1 generate 37
+  | 
+  | Run make help to see all pprof-audit-1 operations.
+  exit 2
+make pprof-audit-1 unknown
+  | Unknown pprof-audit-1 operation: unknown
+  | 
+  | Run make help to see all pprof-audit-1 operations.
+  exit 2
+make pprof-audit-1 import 0
+  | Import limit must be a positive integer.
+  | 
+  | Example:
+  | 
+  | make pprof-audit-1 import 10
+  exit 2
+make pprof-audit-1 prepare wrong
+  | ID must be a positive integer.
+  | 
+  | Example:
+  | 
+  | make pprof-audit-1 prepare 37
+  exit 2
+make pprof-audit-1 run 37 38
+  | Too many arguments.
+  | 
+  | Example:
+  | 
+  | make pprof-audit-1 run 37
+  exit 2
+make pprof-audit-1 run plan
+  | run ./cmd/seo-pipeline pprof-audit-1 run --plan
+  exit 0
+make pprof-audit-1 run plan 5
+  | run ./cmd/seo-pipeline pprof-audit-1 run --plan 5
+  exit 0
+make pprof-audit-1 publish plan
+  | run ./cmd/seo-pipeline pprof-audit-1 publish --plan
+  exit 0
+make pprof-audit-1 publish plan 5
+  | run ./cmd/seo-pipeline pprof-audit-1 publish --plan 5
+  exit 0
+make pprof-audit-1 mark-published 16 21593
+  | run ./cmd/seo-pipeline pprof-audit-1 mark-published 16 21593
+  exit 0
+make pprof-audit-1 mark-published 16 x
+  | wordpress_post_id must be a positive integer.
+  | 
+  | Example:
+  | 
+  | make pprof-audit-1 mark-published 16 21593
+  exit 2
+make pprof-audit-1 dry-run 1
+  | dry-run does not accept arguments.
+  | 
+  | Example:
+  | 
+  | make pprof-audit-1 dry-run
+  exit 2
+make pprof-audit-1 deepseek-login 1
+  | deepseek-login does not accept arguments.
+  | 
+  | Example:
+  | 
+  | make pprof-audit-1 deepseek-login
+  exit 2
+make pprof-audit-1 google-login 1
+  | google-login does not accept arguments.
+  | 
+  | Example:
+  | 
+  | make pprof-audit-1 google-login
+  exit 2
+make pprof-audit-1 import
+  | run ./cmd/seo-pipeline pprof-audit-1 import
+  exit 0
+make pprof-audit-1 import 37
+  | run ./cmd/seo-pipeline pprof-audit-1 import 37
+  exit 0
+make pprof-audit-1 import-check
+  | run ./cmd/seo-pipeline pprof-audit-1 import-check
+  exit 0
+make pprof-audit-1 import-check 37
+  | run ./cmd/seo-pipeline pprof-audit-1 import-check 37
+  exit 0
+make pprof-audit-1 errors
+  | run ./cmd/seo-pipeline pprof-audit-1 errors
+  exit 0
+make pprof-audit-1 errors 37
+  | run ./cmd/seo-pipeline pprof-audit-1 errors 37
+  exit 0
+make pprof-audit-1 keywords
+  | run ./cmd/seo-pipeline pprof-audit-1 keywords
+  exit 0
+make pprof-audit-1 keywords 37
+  | run ./cmd/seo-pipeline pprof-audit-1 keywords 37
+  exit 0
+make pprof-audit-1 retry
+  | run ./cmd/seo-pipeline pprof-audit-1 retry
+  exit 0
+make pprof-audit-1 retry 37
+  | run ./cmd/seo-pipeline pprof-audit-1 retry 37
+  exit 0
+make pprof-audit-1 run
+  | run ./cmd/seo-pipeline pprof-audit-1 run
+  exit 0
+make pprof-audit-1 run 37
+  | run ./cmd/seo-pipeline pprof-audit-1 run 37
+  exit 0
+make pprof-audit-1 regenerate
+  | run ./cmd/seo-pipeline pprof-audit-1 regenerate
+  exit 0
+make pprof-audit-1 regenerate 37
+  | run ./cmd/seo-pipeline pprof-audit-1 regenerate 37
+  exit 0
+make pprof-audit-1 dry-run
+  | up -d --wait postgres-dry-run
+  | test ./...
+  | vet ./...
+  | run ./cmd/seo-pipeline pprof-audit-1 run --dry-run
+  exit 0
+make pprof-audit-1 dry-run 37
+  | dry-run does not accept arguments.
+  | 
+  | Example:
+  | 
+  | make pprof-audit-1 dry-run
+  exit 2
+make pprof-audit-1 prepare
+  | run ./cmd/seo-pipeline pprof-audit-1 prepare
+  exit 0
+make pprof-audit-1 prepare 37
+  | run ./cmd/seo-pipeline pprof-audit-1 prepare 37
+  exit 0
+make pprof-audit-1 generate
+  | run ./cmd/seo-pipeline pprof-audit-1 generate
+  exit 0
+make pprof-audit-1 generate 37
+  | run ./cmd/seo-pipeline pprof-audit-1 generate 37
+  exit 0
+make pprof-audit-1 demo-generate
+  | run ./cmd/seo-pipeline pprof-audit-1 demo-generate
+  exit 0
+make pprof-audit-1 demo-generate 37
+  | run ./cmd/seo-pipeline pprof-audit-1 demo-generate 37
+  exit 0
+make pprof-audit-1 article
+  | run ./cmd/seo-pipeline pprof-audit-1 article
+  exit 0
+make pprof-audit-1 article 37
+  | run ./cmd/seo-pipeline pprof-audit-1 article 37
+  exit 0
+make pprof-audit-1 info
+  | run ./cmd/seo-pipeline pprof-audit-1 info
+  exit 0
+make pprof-audit-1 info 37
+  | run ./cmd/seo-pipeline pprof-audit-1 info 37
+  exit 0
+make pprof-audit-1 review
+  | run ./cmd/seo-pipeline pprof-audit-1 review
+  exit 0
+make pprof-audit-1 review 37
+  | run ./cmd/seo-pipeline pprof-audit-1 review 37
+  exit 0
+make pprof-audit-1 fix
+  | run ./cmd/seo-pipeline pprof-audit-1 fix
+  exit 0
+make pprof-audit-1 fix 37
+  | run ./cmd/seo-pipeline pprof-audit-1 fix 37
+  exit 0
+make pprof-audit-1 html
+  | run ./cmd/seo-pipeline pprof-audit-1 html
+  exit 0
+make pprof-audit-1 html 37
+  | run ./cmd/seo-pipeline pprof-audit-1 html 37
+  exit 0
+make pprof-audit-1 result
+  | run ./cmd/seo-pipeline pprof-audit-1 result
+  exit 0
+make pprof-audit-1 result 37
+  | run ./cmd/seo-pipeline pprof-audit-1 result 37
+  exit 0
+make pprof-audit-1 report
+  | run ./cmd/seo-pipeline pprof-audit-1 report
+  exit 0
+make pprof-audit-1 report 37
+  | run ./cmd/seo-pipeline pprof-audit-1 report 37
+  exit 0
+make pprof-audit-1 clear
+  | run ./cmd/seo-pipeline pprof-audit-1 clear
+  exit 0
+make pprof-audit-1 clear 37
+  | run ./cmd/seo-pipeline pprof-audit-1 clear 37
+  exit 0
+make pprof-audit-1 reset
+  | run ./cmd/seo-pipeline pprof-audit-1 reset
+  exit 0
+make pprof-audit-1 reset 37
+  | run ./cmd/seo-pipeline pprof-audit-1 reset 37
+  exit 0
+make pprof-audit-1 google-login
+  | run ./cmd/seo-pipeline pprof-audit-1 google-login
+  exit 0
+make pprof-audit-1 google-login 37
+  | google-login does not accept arguments.
+  | 
+  | Example:
+  | 
+  | make pprof-audit-1 google-login
+  exit 2
+make pprof-audit-1 google-publish
+  | run ./cmd/seo-pipeline pprof-audit-1 google-publish
+  exit 0
+make pprof-audit-1 google-publish 37
+  | run ./cmd/seo-pipeline pprof-audit-1 google-publish 37
+  exit 0
+make pprof-audit-1 deepseek-login
+  | run ./cmd/seo-pipeline pprof-audit-1 deepseek-login
+  exit 0
+make pprof-audit-1 deepseek-login 37
+  | deepseek-login does not accept arguments.
+  | 
+  | Example:
+  | 
+  | make pprof-audit-1 deepseek-login
+  exit 2
+make pprof-audit-1 wordpress-check
+  | run ./cmd/seo-pipeline pprof-audit-1 wordpress-check
+  exit 0
+make pprof-audit-1 wordpress-check 37
+  | run ./cmd/seo-pipeline pprof-audit-1 wordpress-check 37
+  exit 0
+make pprof-audit-1 publish
+  | run ./cmd/seo-pipeline pprof-audit-1 publish
+  exit 0
+make pprof-audit-1 publish 37
+  | run ./cmd/seo-pipeline pprof-audit-1 publish 37
+  exit 0
+make pprof-audit-1 republish
+  | run ./cmd/seo-pipeline pprof-audit-1 republish
+  exit 0
+make pprof-audit-1 republish 37
+  | run ./cmd/seo-pipeline pprof-audit-1 republish 37
+  exit 0
+make pprof-audit-1 mark-published
+  | run ./cmd/seo-pipeline pprof-audit-1 mark-published
+  exit 0
+make pprof-audit-1 mark-published 37
+  | run ./cmd/seo-pipeline pprof-audit-1 mark-published 37
+  exit 0
+make pprof-audit-1 catalog-sync
+  | run ./cmd/seo-pipeline pprof-audit-1 catalog-sync
+  exit 0
+make pprof-audit-1 catalog-sync 37
+  | run ./cmd/seo-pipeline pprof-audit-1 catalog-sync 37
+  exit 0
+make pprof-audit-1 catalog-show
+  | run ./cmd/seo-pipeline pprof-audit-1 catalog-show
+  exit 0
+make pprof-audit-1 catalog-show 37
+  | run ./cmd/seo-pipeline pprof-audit-1 catalog-show 37
+  exit 0
+make pprof-audit-2
+  | Operation is required.
+  | 
+  | Example:
+  | 
+  | make pprof-audit-2 generate 37
+  | 
+  | Run make help to see all pprof-audit-2 operations.
+  exit 2
+make pprof-audit-2 unknown
+  | Unknown pprof-audit-2 operation: unknown
+  | 
+  | Run make help to see all pprof-audit-2 operations.
+  exit 2
+make pprof-audit-2 import 0
+  | Import limit must be a positive integer.
+  | 
+  | Example:
+  | 
+  | make pprof-audit-2 import 10
+  exit 2
+make pprof-audit-2 prepare wrong
+  | ID must be a positive integer.
+  | 
+  | Example:
+  | 
+  | make pprof-audit-2 prepare 37
+  exit 2
+make pprof-audit-2 run 37 38
+  | Too many arguments.
+  | 
+  | Example:
+  | 
+  | make pprof-audit-2 run 37
+  exit 2
+make pprof-audit-2 run plan
+  | run ./cmd/seo-pipeline pprof-audit-2 run --plan
+  exit 0
+make pprof-audit-2 run plan 5
+  | run ./cmd/seo-pipeline pprof-audit-2 run --plan 5
+  exit 0
+make pprof-audit-2 publish plan
+  | run ./cmd/seo-pipeline pprof-audit-2 publish --plan
+  exit 0
+make pprof-audit-2 publish plan 5
+  | run ./cmd/seo-pipeline pprof-audit-2 publish --plan 5
+  exit 0
+make pprof-audit-2 mark-published 16 21593
+  | run ./cmd/seo-pipeline pprof-audit-2 mark-published 16 21593
+  exit 0
+make pprof-audit-2 mark-published 16 x
+  | wordpress_post_id must be a positive integer.
+  | 
+  | Example:
+  | 
+  | make pprof-audit-2 mark-published 16 21593
+  exit 2
+make pprof-audit-2 dry-run 1
+  | dry-run does not accept arguments.
+  | 
+  | Example:
+  | 
+  | make pprof-audit-2 dry-run
+  exit 2
+make pprof-audit-2 deepseek-login 1
+  | deepseek-login does not accept arguments.
+  | 
+  | Example:
+  | 
+  | make pprof-audit-2 deepseek-login
+  exit 2
+make pprof-audit-2 google-login 1
+  | google-login does not accept arguments.
+  | 
+  | Example:
+  | 
+  | make pprof-audit-2 google-login
+  exit 2
+make pprof-audit-2 import
+  | run ./cmd/seo-pipeline pprof-audit-2 import
+  exit 0
+make pprof-audit-2 import 37
+  | run ./cmd/seo-pipeline pprof-audit-2 import 37
+  exit 0
+make pprof-audit-2 import-check
+  | run ./cmd/seo-pipeline pprof-audit-2 import-check
+  exit 0
+make pprof-audit-2 import-check 37
+  | run ./cmd/seo-pipeline pprof-audit-2 import-check 37
+  exit 0
+make pprof-audit-2 errors
+  | run ./cmd/seo-pipeline pprof-audit-2 errors
+  exit 0
+make pprof-audit-2 errors 37
+  | run ./cmd/seo-pipeline pprof-audit-2 errors 37
+  exit 0
+make pprof-audit-2 keywords
+  | run ./cmd/seo-pipeline pprof-audit-2 keywords
+  exit 0
+make pprof-audit-2 keywords 37
+  | run ./cmd/seo-pipeline pprof-audit-2 keywords 37
+  exit 0
+make pprof-audit-2 retry
+  | run ./cmd/seo-pipeline pprof-audit-2 retry
+  exit 0
+make pprof-audit-2 retry 37
+  | run ./cmd/seo-pipeline pprof-audit-2 retry 37
+  exit 0
+make pprof-audit-2 run
+  | run ./cmd/seo-pipeline pprof-audit-2 run
+  exit 0
+make pprof-audit-2 run 37
+  | run ./cmd/seo-pipeline pprof-audit-2 run 37
+  exit 0
+make pprof-audit-2 regenerate
+  | run ./cmd/seo-pipeline pprof-audit-2 regenerate
+  exit 0
+make pprof-audit-2 regenerate 37
+  | run ./cmd/seo-pipeline pprof-audit-2 regenerate 37
+  exit 0
+make pprof-audit-2 dry-run
+  | up -d --wait postgres-dry-run
+  | test ./...
+  | vet ./...
+  | run ./cmd/seo-pipeline pprof-audit-2 run --dry-run
+  exit 0
+make pprof-audit-2 dry-run 37
+  | dry-run does not accept arguments.
+  | 
+  | Example:
+  | 
+  | make pprof-audit-2 dry-run
+  exit 2
+make pprof-audit-2 prepare
+  | run ./cmd/seo-pipeline pprof-audit-2 prepare
+  exit 0
+make pprof-audit-2 prepare 37
+  | run ./cmd/seo-pipeline pprof-audit-2 prepare 37
+  exit 0
+make pprof-audit-2 generate
+  | run ./cmd/seo-pipeline pprof-audit-2 generate
+  exit 0
+make pprof-audit-2 generate 37
+  | run ./cmd/seo-pipeline pprof-audit-2 generate 37
+  exit 0
+make pprof-audit-2 demo-generate
+  | run ./cmd/seo-pipeline pprof-audit-2 demo-generate
+  exit 0
+make pprof-audit-2 demo-generate 37
+  | run ./cmd/seo-pipeline pprof-audit-2 demo-generate 37
+  exit 0
+make pprof-audit-2 article
+  | run ./cmd/seo-pipeline pprof-audit-2 article
+  exit 0
+make pprof-audit-2 article 37
+  | run ./cmd/seo-pipeline pprof-audit-2 article 37
+  exit 0
+make pprof-audit-2 info
+  | run ./cmd/seo-pipeline pprof-audit-2 info
+  exit 0
+make pprof-audit-2 info 37
+  | run ./cmd/seo-pipeline pprof-audit-2 info 37
+  exit 0
+make pprof-audit-2 review
+  | run ./cmd/seo-pipeline pprof-audit-2 review
+  exit 0
+make pprof-audit-2 review 37
+  | run ./cmd/seo-pipeline pprof-audit-2 review 37
+  exit 0
+make pprof-audit-2 fix
+  | run ./cmd/seo-pipeline pprof-audit-2 fix
+  exit 0
+make pprof-audit-2 fix 37
+  | run ./cmd/seo-pipeline pprof-audit-2 fix 37
+  exit 0
+make pprof-audit-2 html
+  | run ./cmd/seo-pipeline pprof-audit-2 html
+  exit 0
+make pprof-audit-2 html 37
+  | run ./cmd/seo-pipeline pprof-audit-2 html 37
+  exit 0
+make pprof-audit-2 result
+  | run ./cmd/seo-pipeline pprof-audit-2 result
+  exit 0
+make pprof-audit-2 result 37
+  | run ./cmd/seo-pipeline pprof-audit-2 result 37
+  exit 0
+make pprof-audit-2 report
+  | run ./cmd/seo-pipeline pprof-audit-2 report
+  exit 0
+make pprof-audit-2 report 37
+  | run ./cmd/seo-pipeline pprof-audit-2 report 37
+  exit 0
+make pprof-audit-2 clear
+  | run ./cmd/seo-pipeline pprof-audit-2 clear
+  exit 0
+make pprof-audit-2 clear 37
+  | run ./cmd/seo-pipeline pprof-audit-2 clear 37
+  exit 0
+make pprof-audit-2 reset
+  | run ./cmd/seo-pipeline pprof-audit-2 reset
+  exit 0
+make pprof-audit-2 reset 37
+  | run ./cmd/seo-pipeline pprof-audit-2 reset 37
+  exit 0
+make pprof-audit-2 google-login
+  | run ./cmd/seo-pipeline pprof-audit-2 google-login
+  exit 0
+make pprof-audit-2 google-login 37
+  | google-login does not accept arguments.
+  | 
+  | Example:
+  | 
+  | make pprof-audit-2 google-login
+  exit 2
+make pprof-audit-2 google-publish
+  | run ./cmd/seo-pipeline pprof-audit-2 google-publish
+  exit 0
+make pprof-audit-2 google-publish 37
+  | run ./cmd/seo-pipeline pprof-audit-2 google-publish 37
+  exit 0
+make pprof-audit-2 deepseek-login
+  | run ./cmd/seo-pipeline pprof-audit-2 deepseek-login
+  exit 0
+make pprof-audit-2 deepseek-login 37
+  | deepseek-login does not accept arguments.
+  | 
+  | Example:
+  | 
+  | make pprof-audit-2 deepseek-login
+  exit 2
+make pprof-audit-2 wordpress-check
+  | run ./cmd/seo-pipeline pprof-audit-2 wordpress-check
+  exit 0
+make pprof-audit-2 wordpress-check 37
+  | run ./cmd/seo-pipeline pprof-audit-2 wordpress-check 37
+  exit 0
+make pprof-audit-2 publish
+  | run ./cmd/seo-pipeline pprof-audit-2 publish
+  exit 0
+make pprof-audit-2 publish 37
+  | run ./cmd/seo-pipeline pprof-audit-2 publish 37
+  exit 0
+make pprof-audit-2 republish
+  | run ./cmd/seo-pipeline pprof-audit-2 republish
+  exit 0
+make pprof-audit-2 republish 37
+  | run ./cmd/seo-pipeline pprof-audit-2 republish 37
+  exit 0
+make pprof-audit-2 mark-published
+  | run ./cmd/seo-pipeline pprof-audit-2 mark-published
+  exit 0
+make pprof-audit-2 mark-published 37
+  | run ./cmd/seo-pipeline pprof-audit-2 mark-published 37
+  exit 0
+make pprof-audit-2 catalog-sync
+  | run ./cmd/seo-pipeline pprof-audit-2 catalog-sync
+  exit 0
+make pprof-audit-2 catalog-sync 37
+  | run ./cmd/seo-pipeline pprof-audit-2 catalog-sync 37
+  exit 0
+make pprof-audit-2 catalog-show
+  | run ./cmd/seo-pipeline pprof-audit-2 catalog-show
+  exit 0
+make pprof-audit-2 catalog-show 37
+  | run ./cmd/seo-pipeline pprof-audit-2 catalog-show 37
+  exit 0
