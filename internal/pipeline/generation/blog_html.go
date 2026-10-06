@@ -239,8 +239,34 @@ const (
 	// не берёт свой класс.
 	noticeStyle = `<div style="border-left:4px solid #1a3d6d;background:#f5f7fa;padding:14px 18px;margin:22px 0;border-radius:0 8px 8px 0;">`
 	// scrollStyle — обёртка таблицы: широкая таблица обязана прокручиваться внутри себя.
-	scrollStyle = `<div style="overflow-x:auto;">`
+	// Without max-width the service-page grid column grows to the table width and the
+	// whole page scrolls sideways on a phone.
+	scrollStyle = `<div style="overflow-x:auto;max-width:calc(100vw - 40px);">`
 )
+
+var tableBlockRE = regexp.MustCompile(`(?is)<table\b.*?</table>`)
+
+// ScrollTables puts every table into a scroll wrapper: the model's ds-scroll-area becomes
+// scrollStyle, and a bare table gets one.
+func ScrollTables(markup string) string {
+	markup = dsScrollAreaRE.ReplaceAllString(markup, scrollStyle)
+	var b strings.Builder
+	last := 0
+	for _, m := range tableBlockRE.FindAllStringIndex(markup, -1) {
+		b.WriteString(markup[last:m[0]])
+		table := markup[m[0]:m[1]]
+		if strings.HasSuffix(strings.TrimSpace(markup[:m[0]]), scrollStyle) {
+			b.WriteString(table)
+		} else {
+			b.WriteString(scrollStyle)
+			b.WriteString(table)
+			b.WriteString("</div>")
+		}
+		last = m[1]
+	}
+	b.WriteString(markup[last:])
+	return b.String()
+}
 
 // emptyTagPatterns собирает выражение «тег без содержимого» для каждого имени.
 func emptyTagPatterns(tags ...string) []*regexp.Regexp {
@@ -282,7 +308,7 @@ func dropEmptyTags(markup string) string {
 func CleanBlogMarkup(markup string) string {
 	markup = htmlCommentRE.ReplaceAllString(markup, "")
 	markup = dsNoticeRE.ReplaceAllString(markup, noticeStyle)
-	markup = dsScrollAreaRE.ReplaceAllString(markup, scrollStyle)
+	markup = ScrollTables(markup)
 	markup = cleanSpans(markup)
 	markup = dsClassAttrRE.ReplaceAllString(markup, "")
 	markup = emptyClassRE.ReplaceAllString(markup, "")

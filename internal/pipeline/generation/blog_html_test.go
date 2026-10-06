@@ -473,3 +473,17 @@ func TestSpreadInternalLinksDropsRepeatedLink(t *testing.T) {
 		t.Fatalf("текст второго предложения потерян: %q", got)
 	}
 }
+
+func TestScrollTablesWrapsEveryTableOnce(t *testing.T) {
+	ds := `<div class="ds-scroll-area _1210dd7"><table><tr><td>1</td></tr></table></div>`
+	bare := `<p>x</p><table><tr><td>2</td></tr></table>`
+	got := ScrollTables(ds + bare)
+	want := scrollStyle + `<table><tr><td>1</td></tr></table></div><p>x</p>` +
+		scrollStyle + `<table><tr><td>2</td></tr></table></div>`
+	if got != want {
+		t.Fatalf("got\n%s\nwant\n%s", got, want)
+	}
+	if again := ScrollTables(got); again != got {
+		t.Fatalf("second pass changed markup:\n%s", again)
+	}
+}
