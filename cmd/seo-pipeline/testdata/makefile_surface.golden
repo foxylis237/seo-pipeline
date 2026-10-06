@@ -149,6 +149,14 @@ make test
 make lint
   | run ./...
   exit 0
+make snapshot-save
+  | build -o bin/seo-pipeline ./cmd/seo-pipeline
+  | test ./cmd/seo-pipeline -run ^TestLive -count=1
+  exit 0
+make snapshot-check
+  | build -o bin/seo-pipeline ./cmd/seo-pipeline
+  | test ./cmd/seo-pipeline -run ^TestLive -count=1
+  exit 0
 make task-1
   | Operation is required.
   | 

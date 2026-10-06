@@ -26,7 +26,7 @@ TASK_OPERATIONS := import import-check errors keywords retry run regenerate dry-
 OPTIONAL_ARGUMENT_OPERATIONS := import-check errors keywords retry run regenerate clear reset google-publish prepare generate demo-generate article info review fix html result publish mark-published
 
 .PHONY: help task-1 pprof-1 pprof-2 obuch-1 obuch-2 pprof-audit-1 pprof-audit-2 login docker-up docker-start docker-stop docker-down docker-restart docker-logs docker-ps
-.PHONY: test test-race fmt vet lint lint-fix build
+.PHONY: test test-race fmt vet lint lint-fix build snapshot-save snapshot-check
 
 # ----------------------------------------------------
 # Help
@@ -306,6 +306,19 @@ lint-fix: ## golangci-lint с автоправками
 build: ## бинарник в bin/seo-pipeline
 	mkdir -p bin
 	$(GO) build -o $(BINARY) ./cmd/seo-pipeline
+
+# Снимки команд на живой базе и книгах импорта. Эталон — вне git, в $(SNAPSHOT_DIR);
+# из worktree: make snapshot-check SNAPSHOT_WORKDIR=../seo-pipeline.
+SNAPSHOT_WORKDIR ?= $(CURDIR)
+SNAPSHOT_DIR ?= $(SNAPSHOT_WORKDIR)/.snapshots
+SNAPSHOT_TEST = SNAPSHOT_DIR='$(abspath $(SNAPSHOT_DIR))' SNAPSHOT_WORKDIR='$(abspath $(SNAPSHOT_WORKDIR))' SNAPSHOT_BIN='$(CURDIR)/$(BINARY)' \
+	DRY_RUN_DATABASE_URL='$(DRY_RUN_DATABASE_URL)' $(GO) test ./cmd/seo-pipeline -run '^TestLive' -count=1
+
+snapshot-save: build ## записать эталон снимков живой базы
+	UPDATE_SNAPSHOTS=1 $(SNAPSHOT_TEST)
+
+snapshot-check: build ## сверить команды с эталоном снимков
+	$(SNAPSHOT_TEST)
 
 # Слова операции и аргумента — параметры задачи, а не отдельные цели. То же для сервиса у
 # глобальной команды входа и для четвёртого слова там, где оно осмысленно: `run plan <id>`,

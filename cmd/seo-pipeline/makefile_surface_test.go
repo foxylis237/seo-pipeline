@@ -26,6 +26,8 @@ func TestMakefileSurfaceSnapshot(t *testing.T) {
 		{"build"},
 		{"test"},
 		{"lint"},
+		{"snapshot-save"},
+		{"snapshot-check"},
 	}
 	for _, task := range makefileSurfaceTasks {
 		cases = append(cases,

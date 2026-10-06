@@ -61,3 +61,6 @@ CLAUDE.local.md
 .mcp.json
 need_msp.md
 docs/
+
+# Эталоны make snapshot-save: живые данные статей
+.snapshots/

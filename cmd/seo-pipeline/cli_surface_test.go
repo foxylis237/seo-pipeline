@@ -90,9 +90,14 @@ func describeParsedCommand(args []string) string {
 
 func compareSnapshot(t *testing.T, name, got string) {
 	t.Helper()
-	path := filepath.Join("testdata", name)
+	compareSnapshotIn(t, "testdata", name, got)
+}
+
+func compareSnapshotIn(t *testing.T, dir, name, got string) {
+	t.Helper()
+	path := filepath.Join(dir, name)
 	if os.Getenv(updateSnapshotsEnv) == "1" {
-		if err := os.MkdirAll("testdata", 0o755); err != nil {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
 		if err := os.WriteFile(path, []byte(got), 0o644); err != nil {
