@@ -9,12 +9,7 @@ import (
 	"strings"
 )
 
-// Summary — сводка по всей пачке.
-//
-// Отдельный от отчётов статей взгляд: те отвечают на вопрос «что не так с этой страницей», а
-// сводка — на вопросы «за какую браться первой», «где чего не хватает» и «что у нас ломается
-// чаще всего». Последнее по одному отчёту не увидеть вовсе: одна и та же ошибка на сорока
-// страницах и одна на одной выглядят в отчёте одинаково.
+// Summary — сводка по всей пачке: за какую страницу браться первой, где чего не хватает, что ломается чаще всего.
 type Summary struct {
 	// Pages — страницы пачки, худшие первыми.
 	Pages []SummaryPage
@@ -23,15 +18,10 @@ type Summary struct {
 	// CommonIssues — самые частые находки, чаще первыми.
 	CommonIssues []IssueCount
 	// Criteria — баллы разбора, сложенные по всей пачке, слабое первым.
-	//
-	// По одному отчёту этого не увидеть: «Контент 3/5» на одной странице — замечание к ней,
-	// «Контент 3/5» на сорока — вопрос к тому, кто эти сорок писал. Это и есть ответ на
-	// «что у нас проседает системно»: экспертность, оформление или конверсия.
 	Criteria []CriterionAverage
 	// Failed — страницы, которые проверить не удалось: прогон дошёл до них и упал.
 	Failed []SummaryPage
-	// Pending — страницы, до которых прогон ещё не дошёл. Это не отказ, и путать их нельзя:
-	// «не удалось проверить сто семь» и «сто семь в очереди» — разные новости.
+	// Pending — страницы, до которых прогон ещё не дошёл; это не отказ.
 	Pending []SummaryPage
 }
 
@@ -47,25 +37,16 @@ type SummaryPage struct {
 	FAQ        FAQCheck
 	// Links — перелинковка страницы, пересчитанная по сохранённой копии тела.
 	Links LinkCheck
-	// Advice — строки «Как исправить» из критических ошибок отчёта.
-	//
-	// Берутся как есть, без переписывания: это единственное место, где сказано, что делать
-	// с конкретной страницей, а всякое «приведение к виду» портит готовую фразу.
+	// Advice — строки «Как исправить» из критических ошибок отчёта, как есть.
 	Advice []string
-	// RecordGaps — сколько не хватало из того, что сводка пересчитать не может: рубрики,
-	// названия записи, обложки. Считал их прогон, и число взято из его отметки в базе.
+	// RecordGaps — недостача по графам самой записи (рубрика, метки, название, обложка) по счёту прогона в базе.
 	RecordGaps int
-	// Criteria — разбор страницы по критериям, как его написала модель. Разбирается из
-	// сохранённого ответа, а не берётся из базы: колонок под него нет, и заводить их незачем —
-	// артефакт лежит рядом, и сводка пересобирается по нему сколько угодно.
+	// Criteria — разбор страницы по критериям из сохранённого ответа модели.
 	Criteria []CriterionScore
 	Error    string
 }
 
-// CriterionAverage — один критерий, сложенный по всей пачке.
-//
-// Хранятся суммы, а не среднее: страниц с разобранным разбором меньше, чем страниц в пачке,
-// и делить надо на своё число, а не на общее.
+// CriterionAverage — один критерий, сложенный по всей пачке; хранятся суммы, а не среднее.
 type CriterionAverage struct {
 	Name  string
 	Score int
@@ -73,8 +54,7 @@ type CriterionAverage struct {
 	Pages int
 }
 
-// Share — доля набранного по пачке. По ней критерии и сравниваются: веса у них разные, и
-// «2 из 3» сильнее, чем «3 из 5».
+// Share — доля набранного по пачке: веса критериев разные, сравнивать их по баллу нельзя.
 func (a CriterionAverage) Share() float64 {
 	if a.Max <= 0 {
 		return 0
@@ -94,12 +74,7 @@ type IssueCount struct {
 	Pages []string
 }
 
-// BuildSummary собирает сводку из уже сохранённых артефактов.
-//
-// Ни сети, ни модели: всё, что нужно, лежит на диске после прогона — поля записи в
-// original/fields.json, ответ модели в generated/audit.txt. Поэтому сводку можно пересобирать
-// сколько угодно раз, в том числе после того, как список обязательного изменили: она
-// пересчитает его по сохранённым полям, а не по тому, что было на момент прогона.
+// BuildSummary собирает сводку из сохранённых артефактов, без сети и модели; обязательное пересчитывается по сохранённым полям.
 func BuildSummary(articles []Article, artifacts Artifacts, options Options) Summary {
 	var summary Summary
 	issues := map[string]*IssueCount{}
@@ -143,7 +118,6 @@ func BuildSummary(articles []Article, artifacts Artifacts, options Options) Summ
 		summary.Pages = append(summary.Pages, page)
 	}
 
-	// Худшие первыми: сводку читают, чтобы решить, за какую страницу браться.
 	sort.SliceStable(summary.Pages, func(i, j int) bool {
 		return scoreOf(summary.Pages[i]) < scoreOf(summary.Pages[j])
 	})
@@ -158,8 +132,7 @@ func BuildSummary(articles []Article, artifacts Artifacts, options Options) Summ
 	})
 	for _, issue := range issues {
 		if len(issue.Pages) < 2 {
-			// Находка на одной странице — не «частая ошибка», а обычное замечание: оно уже
-			// лежит в отчёте этой страницы, и повторять его в сводке незачем.
+			// Находка на одной странице уже лежит в её отчёте.
 			continue
 		}
 		summary.CommonIssues = append(summary.CommonIssues, *issue)
@@ -173,18 +146,13 @@ func BuildSummary(articles []Article, artifacts Artifacts, options Options) Summ
 	for _, name := range order {
 		summary.Criteria = append(summary.Criteria, *criteria[name])
 	}
-	// Слабое первым: сводку читают, чтобы решить, что чинить во всей пачке.
 	sort.SliceStable(summary.Criteria, func(i, j int) bool {
 		return summary.Criteria[i].Share() < summary.Criteria[j].Share()
 	})
 	return summary
 }
 
-// countCriteria складывает разбор страницы в общий счёт по пачке.
-//
-// Порядок первого появления запоминается отдельно: имена критериев приходят из промпта задачи,
-// движок их не знает, а обход map выдал бы их каждый раз в новом порядке — сводка, собранная
-// дважды по одним артефактам, выглядела бы разной.
+// countCriteria складывает разбор страницы в общий счёт; порядок первого появления хранится отдельно от map.
 func countCriteria(counted map[string]*CriterionAverage, order *[]string, parsed Answer) {
 	for _, criterion := range parsed.Criteria {
 		key := strings.ToLower(criterion.Name)
@@ -200,19 +168,14 @@ func countCriteria(counted map[string]*CriterionAverage, order *[]string, parsed
 	}
 }
 
-// fillFromArtifacts дополняет страницу тем, что лежит на диске после прогона: поля записи,
-// блок вопросов и перелинковка.
-//
-// Читается с диска, а не из блога: за прогон уже заплачено, копия страницы и её полей
-// сохранена рядом, и сводку можно пересобирать сколько угодно. Нечитаемый артефакт —
-// не отказ: страница останется без этой части, а остальное у неё есть.
+// fillFromArtifacts дополняет страницу полями, блоком вопросов и перелинковкой с диска;
+// нечитаемый артефакт оставляет её без этой части.
 func fillFromArtifacts(page *SummaryPage, artifacts Artifacts, article Article, options Options) {
 	if fields, err := readFields(artifacts, article.FieldsPath); err == nil {
 		check := CheckRequired(Post{Fields: fields}, fieldNames(options.Required))
 		page.Missing = append(append([]string{}, check.Missing...), check.Empty...)
 		page.FAQ = CountFAQ(fields, options.FAQ)
-		// Прогон считал и графы самой записи, которых в артефактах нет. Расхождение означает,
-		// что не хватало как раз их, — и промолчать об этом нельзя.
+		// Прогон считал и графы самой записи, которых в артефактах нет.
 		if article.MissingFields > len(page.Missing) {
 			page.RecordGaps = article.MissingFields - len(page.Missing)
 		}
@@ -222,7 +185,7 @@ func fillFromArtifacts(page *SummaryPage, artifacts Artifacts, article Article, 
 	}
 }
 
-// titleOf — как назвать страницу в сводке. Тема из книги точнее слага, но её может не быть.
+// titleOf называет страницу темой из книги, а без неё — слагом.
 func titleOf(article Article) string {
 	if topic := strings.TrimSpace(article.Topic); topic != "" {
 		return topic
@@ -230,11 +193,7 @@ func titleOf(article Article) string {
 	return article.Slug
 }
 
-// fieldNames отбирает из списка обязательного то, что лежит полями записи.
-//
-// Рубрику, метки, название и обложку сводка пересчитать не может: в артефактах сохранены поля,
-// а эти четыре живут в самой записи, и после прогона их на диске нет. Их проверил сам прогон, и
-// его счёт лежит в базе — если он больше пересчитанного, значит не хватало чего-то из них.
+// fieldNames отбирает из списка обязательного то, что лежит полями записи: графы самой записи на диске не сохранены.
 func fieldNames(required []string) []string {
 	names := make([]string, 0, len(required))
 	for _, name := range required {
@@ -247,7 +206,7 @@ func fieldNames(required []string) []string {
 	return names
 }
 
-// scoreOf — оценка для сортировки. Неразобранная считается худшей: её надо посмотреть глазами.
+// scoreOf — оценка для сортировки; неразобранная считается худшей.
 func scoreOf(page SummaryPage) int {
 	if page.Score == nil {
 		return -1
@@ -270,7 +229,6 @@ func readFields(artifacts Artifacts, path string) (map[string]string, error) {
 	return fields, nil
 }
 
-// countIssues складывает находки страницы в общий счёт.
 func countIssues(counted map[string]*IssueCount, parsed Answer, article Article) {
 	seen := map[string]struct{}{}
 	for _, section := range []string{SectionIssues, SectionCritical} {
@@ -293,8 +251,7 @@ func countIssues(counted map[string]*IssueCount, parsed Answer, article Article)
 	}
 }
 
-// readAnswer читает сохранённый ответ модели и разбирает его. Отказ — не беда сводки:
-// страница просто не даст ни частых ошибок, ни советов, а остальное у неё есть.
+// readAnswer читает и разбирает сохранённый ответ модели; отказ оставляет страницу без ошибок и советов.
 func readAnswer(artifacts Artifacts, article Article) (Answer, bool) {
 	answer, err := artifacts.Read(article.AuditPath)
 	if err != nil {
@@ -307,10 +264,7 @@ func readAnswer(artifacts Artifacts, article Article) (Answer, bool) {
 	return parsed, true
 }
 
-// adviceOf вынимает из критических ошибок строки «Как исправить».
-//
-// Только они: «Ошибка» и «Почему это проблема» объясняют находку, а человеку, который сел
-// править страницу, нужно действие. Больше трёх их не бывает — столько просит промпт.
+// adviceOf вынимает из критических ошибок только строки «Как исправить».
 func adviceOf(parsed Answer) []string {
 	var advice []string
 	for _, line := range strings.Split(parsed.Section(SectionCritical), "\n") {
@@ -327,22 +281,14 @@ func adviceOf(parsed Answer) []string {
 
 var issueBullet = regexp.MustCompile(`^\s*(?:[-—•*]|\d+[.)])\s*`)
 
-// issueTheme — тема находки и слова, по которым она узнаётся.
-//
-// Тем ровно столько, сколько их называет сам промпт в разделе типовых ошибок: сводка отвечает
-// на вопрос «что у нас ломается чаще всего», а ломается ровно то, что промпт велел искать.
-//
-// Это группировка, а не классификация: решений по теме никто не принимает, она нужна, чтобы
-// сорок одинаковых по сути замечаний не выглядели сорока разными. Группировать по словам
-// самой находки нельзя — формулировку модель каждый раз строит заново, и по первым словам не
-// совпадает почти ничего (проверено на шести страницах: из 154 строк совпали две).
+// issueTheme — тема находки и слова, по которым она узнаётся; темы взяты из типовых ошибок промпта.
+// Группировать по формулировке нельзя: модель строит её каждый раз заново.
 type issueTheme struct {
 	label string
 	words []string
 }
 
-// issueThemes перечислены от частного к общему: находка попадает в первую подошедшую тему,
-// поэтому «противоречие по часам» не должно стоять после общего «часы».
+// issueThemes идут от частного к общему: находка попадает в первую подошедшую тему.
 var issueThemes = []issueTheme{
 	{"противоречие в параметрах программы (часы, сроки, цена, документ)", []string{"противореч", " vs ", "не соответствует заявленн"}},
 	{"выдуманные цифры: зарплаты, сроки, число выпускников", []string{"выдуман", "зарплат", "без источник", "без подтвержден"}},
@@ -363,7 +309,7 @@ var issueThemes = []issueTheme{
 	{"программа обучения без детализации по модулям", []string{"модул", "программа обучения"}},
 }
 
-// issueKey сводит строку находки к теме, по которой две находки считаются одной и той же.
+// issueKey сводит строку находки к теме.
 func issueKey(line string) (string, string) {
 	label := strings.TrimSpace(issueBullet.ReplaceAllString(line, ""))
 	if len([]rune(label)) < 15 || strings.HasSuffix(label, ":") {
@@ -389,9 +335,6 @@ func issueKey(line string) (string, string) {
 }
 
 // Render печатает сводку в Markdown.
-//
-// Порядок разделов — порядок вопросов, с которыми к сводке приходят: за какую страницу
-// браться, где чего не хватает, что ломается чаще всего.
 func (s Summary) Render(task string) string {
 	var out strings.Builder
 	fmt.Fprintf(&out, "# Сводка аудита: %s\n\n", task)
@@ -466,13 +409,7 @@ func scoreText(page SummaryPage) string {
 	return fmt.Sprintf("%d/%d", *page.Score, *page.ScoreMax)
 }
 
-// weakestText — колонка «Слабое»: критерий, где страница потеряла больше всего.
-//
-// Один критерий, а не все пять: колонок в таблице и так шесть, а решение по строке принимают
-// одно — чинить эту страницу или следующую. Полный разбор лежит в отчёте самой страницы.
-//
-// Страница с полным баллом по всем критериям слабого места не имеет, и придумывать его нельзя:
-// «Структура 4/4» в этой колонке читалось бы как находка.
+// weakestText — колонка «Слабое»: критерий, где страница потеряла больше всего; у полного балла — прочерк.
 func weakestText(page SummaryPage) string {
 	var worst CriterionScore
 	found := false
@@ -501,10 +438,7 @@ func gapsText(page SummaryPage) string {
 	return strings.Join(parts, ", ")
 }
 
-// faqText — колонка блока вопросов в сводке.
-//
-// Норма печатается рядом с числом, а нехватка помечается: по этой колонке человек решает,
-// дособирать ли блок, и «4» без «из 6» ему об этом не говорит.
+// faqText — колонка блока вопросов: число, а при норме — норма и пометка нехватки.
 func faqText(page SummaryPage) string {
 	if !page.FAQ.Enabled() {
 		return strconv.Itoa(page.FAQ.Count)

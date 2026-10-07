@@ -8,12 +8,8 @@ import (
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/output"
 )
 
-// Раскладка артефактов одной проверки. По форме та же, что у остальных задач: каталог
-// <индекс>-<слаг>, внутри исходник, промпт и результат.
-//
-// Сырой ответ модели хранится обязательно и отдельно от отчёта: по нему видно, что модель на
-// самом деле сказала, когда разбор дал «Не разобрано». Поля записи хранятся по той же
-// причине — по ним видно, что она вообще видела.
+// Раскладка артефактов одной проверки: каталог <индекс>-<слаг>, внутри исходник, промпт и результат.
+// Сырой ответ модели хранится отдельно от отчёта — по нему видно, что она сказала, когда разбор дал «Не разобрано».
 const (
 	OriginalFolder     = "original"
 	PromptsFolder      = "prompts"
@@ -26,9 +22,6 @@ const (
 )
 
 // Paths — пути артефактов проверки относительно OUTPUT_DIR.
-//
-// Относительные, а не абсолютные: в базе задачи они лежат так же, как у остальных задач,
-// иначе перенос каталога артефактов сделал бы записи в базе бессмысленными.
 type Paths struct {
 	OriginalPath string
 	FieldsPath   string
@@ -37,9 +30,7 @@ type Paths struct {
 	ResultPath   string
 }
 
-// Artifacts пишет файлы проверки в OUTPUT_DIR.
-//
-// Поверх output.Writer, а не os.WriteFile: отчёт публикуется вместе с записью в базу.
+// Artifacts пишет файлы проверки в OUTPUT_DIR через output.Writer: отчёт публикуется вместе с записью в базу.
 type Artifacts struct{ writer *output.Writer }
 
 func NewArtifacts(root string) Artifacts { return Artifacts{writer: output.NewWriter(root)} }
@@ -48,8 +39,6 @@ func NewArtifacts(root string) Artifacts { return Artifacts{writer: output.NewWr
 func DirectoryName(externalID, slug string) string { return externalID + "-" + slug }
 
 // StageOriginal готовит копию прочитанной записи: текст страницы и её поля.
-//
-// Ложится на диск до обращения к модели.
 func (a Artifacts) StageOriginal(externalID, slug, html string, fields map[string]string) (
 	*output.PendingArtifact, Paths, error) {
 	encoded, err := json.MarshalIndent(fields, "", "  ")
@@ -100,8 +89,7 @@ func (a Artifacts) StageReport(externalID, slug, report string) (*output.Pending
 // Read читает сохранённый артефакт по пути из базы.
 func (a Artifacts) Read(relative string) (string, error) { return a.writer.Read(relative) }
 
-// artifactPath собирает путь артефакта. Слэши, а не разделитель платформы: в базе пути лежат
-// в одной форме независимо от того, где шёл прогон.
+// artifactPath собирает путь через path, а не filepath: в базе пути лежат в одной форме на любой ОС.
 func artifactPath(externalID, slug, folder, name string) string {
 	if folder == "." {
 		return path.Join(DirectoryName(externalID, slug), name)

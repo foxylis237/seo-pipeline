@@ -1,8 +1,6 @@
 // Package articleaudit проверяет уже опубликованные страницы и складывает находки в отчёт.
 //
-// Поток общий у всех задач аудита; различают их промпт, список обязательных полей и каталоги —
-// всё это приходит профилем задачи, а не именем в switch. В блог поток не пишет ничего, и
-// держит это не обещание, а интерфейс Blog — метода записи у него нет вовсе.
+// Поток общий у задач аудита; различает их профиль. В блог поток не пишет: у интерфейса Blog нет метода записи.
 package articleaudit
 
 import (
@@ -23,34 +21,23 @@ import (
 // StageAudit — единственная стадия задачи.
 const StageAudit = "audit"
 
-// Post — запись блога в том объёме, который нужен проверке.
-//
-// Свой тип, а не тип интеграции: задача не должна знать ни про XML-RPC, ни про REST, ни про
-// то, что площадка — WordPress. Переходник живёт в composition root.
+// Post — запись блога в том объёме, который нужен проверке; переходник из интеграции — в composition root.
 type Post struct {
 	ID    int64
 	Title string
-	// Slug и PostType сверяются с входным файлом, когда запись найдена по идентификатору:
-	// чужая страница внешне неотличима от своей, а проверять чужую хуже, чем не проверить.
+	// Slug сверяется с входным файлом, когда запись найдена по идентификатору.
 	Slug        string
 	PostType    string
 	ContentHTML string
 	Link        string
-	// Fields — поля записи. Их проверяет код: модели они не показываются вовсе, она оценивает
-	// саму статью.
+	// Fields — поля записи; их проверяет код, модели они не показываются.
 	Fields map[string]string
-	// ThumbnailID и TermIDs — обложка и рубрики записи. Полями они не являются, но человек
-	// ждёт их в том же списке обязательного: для него это такие же графы, которые бывают не
-	// заполнены.
+	// ThumbnailID и TermIDs — обложка и рубрики; проверяются в одном списке с обязательными полями.
 	ThumbnailID int64
 	TermIDs     map[string][]int64
 }
 
-// Blog — то, что поток требует от площадки. Два действия, оба читающие.
-//
-// Метода записи здесь нет и быть не должно: «аудит в блог не пишет» — это главное требование
-// задачи, и держать его обещанием нельзя. Интерфейс без Write превращает требование в ошибку
-// компиляции.
+// Blog — то, что поток требует от площадки; метода записи нет, чтобы запись в блог не компилировалась.
 type Blog interface {
 	// Find находит запись по слагу из её адреса.
 	Find(ctx context.Context, slug string) (Post, error)
@@ -59,10 +46,6 @@ type Blog interface {
 }
 
 // Articles — то, что поток требует от хранилища страниц.
-//
-// Интерфейс объявлен здесь, у потребителя: поток проверяем на подделках, без PostgreSQL, и
-// порядок его шагов — «копия страницы на диск раньше запроса к модели» — иначе проверить было
-// бы нечем.
 type Articles interface {
 	Get(ctx context.Context, externalID string) (Article, error)
 	MarkProcessing(ctx context.Context, externalID string) error
@@ -72,15 +55,11 @@ type Articles interface {
 	MarkFailed(ctx context.Context, externalID string, cause error) error
 }
 
-// Options — чем одна задача аудита отличается от другой на прогоне.
-//
-// Всё здесь приходит из профиля задачи: что обязано быть заполнено, сколько нужно ссылок и
-// вопросов, как площадка называет поля блока вопросов. Нулевое значение любого поля —
-// прежнее поведение, поэтому задача, которая о нём не знает, работает как раньше.
+// Options — чем одна задача аудита отличается от другой на прогоне; приходит из профиля задачи.
 type Options struct {
 	// Required — поля записи, которые обязаны быть заполнены.
 	Required []string
-	// MinInternalLinks — сколько внутренних ссылок обязано быть в теле. Ноль выключает.
+	// MinInternalLinks — минимум внутренних ссылок в теле; ноль выключает проверку.
 	MinInternalLinks int
 	// FAQ — имена полей блока частых вопросов и их минимальное число.
 	FAQ FAQScheme
@@ -98,11 +77,7 @@ type Flow struct {
 	logger     *slog.Logger
 }
 
-// NewFlow собирает поток.
-//
-// Оба шаблона читаются и разбираются здесь, до денег: ошибка в шаблоне отчёта обязана ронять
-// команду на старте, а не после оплаченного ответа модели, когда сохранить его будет уже
-// некуда.
+// NewFlow собирает поток; шаблоны разбираются здесь, чтобы ошибка в них роняла команду до оплаты модели.
 func NewFlow(repository Articles, blog Blog, chats taskflow.ChatFactory, artifacts Artifacts,
 	promptPath, resultTemplatePath string, options Options, logger *slog.Logger) (*Flow, error) {
 	if logger == nil {
@@ -129,10 +104,7 @@ func NewFlow(repository Articles, blog Blog, chats taskflow.ChatFactory, artifac
 const PromptPlaceholder = "<!-- ЗАПОЛНИТЬ -->"
 
 // EnsurePromptFilled отвечает, готов ли промпт задачи к прогону.
-//
-// Спрашивается перед первым запросом к модели, а не при сборке потока: `run plan` промпт не
-// отправляет и обязан работать на незаполненной задаче — он затем и нужен, чтобы посмотреть
-// пачку и пустые обязательные поля, пока регламент проверки ещё согласуют.
+// Не зовётся при сборке потока: `run plan` работает и с незаполненным промптом.
 func EnsurePromptFilled(path string) error {
 	content, err := os.ReadFile(path)
 	if err != nil {
@@ -161,30 +133,17 @@ func parseFile(name, path string) (*template.Template, error) {
 	return parsed, nil
 }
 
-// PromptData — поля промпта аудита.
-//
-// Статья уходит модели текстом промпта, а не вложением: вложение — свойство стадии
-// (attachments_dir) и работает только при mode: default, а тут и подставлять нечего, кроме
-// того, что уже прочитано из блога.
-//
-// Оценивается сама статья, а не страница целиком: OriginalHTML — это тело записи, без меню,
-// подвала и карточек соседних услуг. Судить о том, чего в теле нет, модель не должна — иначе
-// находки уезжают туда, где их никто не подтвердит.
+// PromptData — поля промпта аудита. Статья уходит текстом промпта, а не вложением:
+// вложения работают только при mode: default. OriginalHTML — тело записи, без меню и подвала.
 type PromptData struct {
-	// Title — название статьи.
 	Title        string
 	OriginalHTML string
-	// FAQ — блок частых вопросов страницы. Отдельным полем потому, что в теле записи его нет
-	// вовсе: вопросы живут полями записи, а на странице их рисует тема. Для читателя это часть
-	// статьи, и проверяются они вместе с ней.
+	// FAQ — блок частых вопросов из полей записи: в теле его нет, на странице его рисует тема.
 	FAQ string
 }
 
 // Run проводит одну страницу весь путь: из блога в модель и в отчёт.
-//
-// Порядок шагов — не деталь реализации, а требование: сначала на диск ложится копия страницы
-// и её полей, и только потом за проверку платят. Иначе отчёт не с чем было бы сверить, а
-// запись в блоге к тому времени может уже измениться.
+// Копия страницы и полей ложится на диск до запроса к модели: запись в блоге может измениться.
 func (f *Flow) Run(ctx context.Context, externalID string) error {
 	article, err := f.repository.Get(ctx, externalID)
 	if err != nil {
@@ -256,9 +215,7 @@ func (f *Flow) run(ctx context.Context, article Article) error {
 	}, pending)
 }
 
-// scorePointers переводит оценку в то, что ложится в базу. Ненайденная оценка обязана лечь
-// как NULL, а не как ноль: по оценке сортируют пачку, и «не разобрано» встало бы впереди
-// худшей страницы.
+// scorePointers отдаёт nil для ненайденной оценки: в базе это NULL, а не ноль.
 func scorePointers(parsed Answer) (*int, *int) {
 	if !parsed.ScoreFound {
 		return nil, nil
@@ -280,34 +237,24 @@ func (f *Flow) saveOriginal(ctx context.Context, article Article, current Post) 
 	}, pending)
 }
 
-// checkFields — всё, что код находит в полях записи сам, не спрашивая модель.
-//
-// Две независимые проверки в одном месте: обязательные поля заполнены и поля выдачи в неё
-// помещаются. Обе про факт, а не про суждение, и обе бесплатны — поэтому их результат виден
-// и в отчёте, и в плане, который к модели не ходит вовсе.
+// checkFields — всё, что код находит в записи сам, не спрашивая модель; результат виден и в отчёте, и в плане.
 func (f *Flow) checkFields(current Post, pageURL string) FieldCheck {
 	check := CheckRequired(current, f.options.Required)
 	check.Measured = MeasureSEO(current.Fields)
 	check.TooLong = CheckLength(current.Fields)
 	check.FAQ = CountFAQ(current.Fields, f.options.FAQ)
-	// Перелинковка живёт в теле, а не в полях, но проверяет её тот же код и по той же
-	// причине: число ссылок — факт, и платить за него модели незачем.
 	check.Links = CollectInternalLinks(current.ContentHTML, pageURL, f.options.MinInternalLinks)
 	return check
 }
 
-// Как запись нашлась. Идёт в лог и в план: по одной статье это секунда против минуты, и
-// человек должен видеть, какой путь сработал.
+// Как запись нашлась; идёт в лог и в план.
 const (
 	foundByID   = "id"
 	foundBySlug = "slug"
 )
 
-// fetch читает страницу из блога.
-//
-// Известный идентификатор записи отменяет поиск по слагу: FindPostBySlug перебирает до
-// тридцати страниц по сотне записей, а чтение по идентификатору — один запрос. Но найденную
-// по нему запись всё равно сверяют со ссылкой: разошёлся слаг — это отказ страницы.
+// fetch читает страницу из блога: по известному идентификатору одним запросом вместо перебора
+// по слагу, но со сверкой слага со ссылкой.
 func (f *Flow) fetch(ctx context.Context, article Article) (Post, string, error) {
 	foundBy := foundByID
 	postID := article.PostID
@@ -340,11 +287,7 @@ func (f *Flow) fetch(ctx context.Context, article Article) (Post, string, error)
 	return current, foundBy, nil
 }
 
-// matchesSource сверяет запись, найденную по идентификатору, со ссылкой из входного файла.
-//
-// Идентификатор человек переносит руками, и опечатка в нём даёт совершенно правдоподобную
-// чужую страницу: она прочитается, проверится и ляжет в отчёт под чужим индексом. Слаг — то
-// единственное, чем это ловится.
+// matchesSource сверяет слаг записи, найденной по идентификатору, со ссылкой: опечатка в ID даёт правдоподобную чужую страницу.
 func matchesSource(current Post, article Article) error {
 	if !strings.EqualFold(strings.TrimSpace(current.Slug), strings.TrimSpace(article.Slug)) {
 		return fmt.Errorf("запись %d — это %q, а во входном файле у индекса %s ссылка на %q: "+
@@ -384,11 +327,8 @@ func (f *Flow) answer(ctx context.Context, article Article, current Post, logger
 	return paths, answer, nil
 }
 
-// audit отдаёт страницу модели и возвращает отрендеренный промпт и сырой ответ.
-//
-// Одно сообщение и один чат: ответ аудита — десяток строк, он помещается всегда. Дописывания
-// оборванного ответа здесь нет намеренно, и заводить его заранее не нужно — оно существует у
-// генерации потому, что переписанная статья в одно сообщение не влезает.
+// audit отдаёт страницу модели одним сообщением и возвращает промпт и сырой ответ.
+// Дописывания оборванного ответа нет: отчёт — десяток строк и помещается всегда.
 func (f *Flow) audit(ctx context.Context, article Article, current Post, logger *slog.Logger) (string, string, error) {
 	prompt, err := render(f.prompt, PromptData{
 		Title:        current.Title,
@@ -430,10 +370,7 @@ type PlannedCheck struct {
 	Audited   bool
 }
 
-// Plan показывает, что будет проверено, ничего не меняя и не спрашивая модель.
-//
-// Проверка полей кодом попадает сюда целиком: она ничего не стоит, а половину пользы отчёта
-// даёт до первого рубля за модель.
+// Plan показывает, что будет проверено, ничего не меняя и не спрашивая модель; проверка полей кодом входит целиком.
 func (f *Flow) Plan(ctx context.Context, article Article) (PlannedCheck, error) {
 	current, foundBy, err := f.fetch(ctx, article)
 	if err != nil {
@@ -456,11 +393,8 @@ func (f *Flow) Plan(ctx context.Context, article Article) (PlannedCheck, error) 
 
 var headingRE = regexp.MustCompile(`(?i)<h[1-6][^>]*>`)
 
-// countHeadings считает заголовки разметки. Нужен плану: по числу разделов и длине текста
-// видно, что за страница пришла, ещё до того, как её кто-то читал.
 func countHeadings(markup string) int { return len(headingRE.FindAllString(markup, -1)) }
 
-// render собирает текст отчёта по шаблону задачи.
 func (f *Flow) render(article Article, current Post, check FieldCheck, parsed Answer) (string, error) {
 	report, err := render(f.result, BuildReport(article, current, check, parsed, f.options.Required))
 	if err != nil {
@@ -481,7 +415,6 @@ func render(tpl *template.Template, data any) (string, error) {
 	return text, nil
 }
 
-// scoreLine — как оценка печатается в шапке отчёта.
 func scoreLine(parsed Answer) string {
 	if !parsed.ScoreFound {
 		return "оценка не разобрана"
