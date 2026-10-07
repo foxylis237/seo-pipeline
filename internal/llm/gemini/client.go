@@ -62,7 +62,11 @@ func NewClient(ctx context.Context, apiKey, model string) (*Client, error) {
 	if strings.TrimSpace(model) == "" {
 		return nil, fmt.Errorf("GEMINI_MODEL is empty")
 	}
-	transport := http.DefaultTransport.(*http.Transport).Clone()
+	defaultTransport, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		return nil, fmt.Errorf("http.DefaultTransport is %T, not *http.Transport", http.DefaultTransport)
+	}
+	transport := defaultTransport.Clone()
 	httpClient := &http.Client{Transport: transport}
 	client, err := genai.NewClient(ctx, &genai.ClientConfig{
 		APIKey:     apiKey,

@@ -646,7 +646,8 @@ func (s *Service) submitCompetitorSearch(ctx context.Context, referenceURL strin
 	if err := searchInput.Fill(referenceURL); err != nil {
 		return fmt.Errorf("fill competitor URL: %w", err)
 	}
-	response, err := s.page.ExpectNavigation(func() error { return searchButton.Click() }, playwright.PageExpectNavigationOptions{
+	// WaitForURL не замена: на повторе страница уже на keysbypage, и он вернётся сразу.
+	response, err := s.page.ExpectNavigation(func() error { return searchButton.Click() }, playwright.PageExpectNavigationOptions{ //nolint:staticcheck // SA1019
 		URL: "**/ru/keysbypage**", WaitUntil: playwright.WaitUntilStateDomcontentloaded,
 		Timeout: playwright.Float(longOperationTimeoutMilliseconds),
 	})

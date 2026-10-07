@@ -490,7 +490,7 @@ func waitForChatReady(page playwright.Page, timeout float64) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer handle.Dispose()
+	defer func() { _ = handle.Dispose() }()
 	value, err := handle.JSONValue()
 	if err != nil {
 		return "", err

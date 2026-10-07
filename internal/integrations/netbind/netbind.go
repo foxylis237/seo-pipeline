@@ -46,7 +46,11 @@ func Transport(name string) (http.RoundTripper, error) {
 		return nil, err
 	}
 	dialer := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}
-	transport := http.DefaultTransport.(*http.Transport).Clone()
+	defaultTransport, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		return nil, fmt.Errorf("http.DefaultTransport is %T, not *http.Transport", http.DefaultTransport)
+	}
+	transport := defaultTransport.Clone()
 	transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
 		local, err := address(name)
 		if err != nil {
