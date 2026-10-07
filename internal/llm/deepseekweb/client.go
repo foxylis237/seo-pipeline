@@ -25,13 +25,10 @@ type Client struct {
 	// requestsSinceBreak считает запросы после последнего длинного перерыва.
 	requestsSinceBreak int
 
-	// openArticleID — статья, диалог которой сейчас открыт в браузере. Ноль означает, что
-	// открытой беседы нет и следующий запрос должен начать новую.
+	// openArticleID — статья открытой беседы; ноль — беседы нет.
 	openArticleID int64
 
-	// sent — тексты, отправленные в открытую беседу. Нужны распознаванию состояния
-	// страницы: наши же слова не должны приниматься за плашку площадки (см. noticeTextJS).
-	// Живут ровно столько, сколько живёт беседа, и обнуляются вместе с ней.
+	// sent — тексты, отправленные в открытую беседу: свои слова не принимаются за плашку (см. noticeTextJS).
 	sent []string
 }
 
@@ -82,9 +79,7 @@ func (c *Client) generate(ctx context.Context, request llm.Request) (llm.Respons
 	}
 	page := session.page
 	timeout := operationTimeout(ctx, defaultOperationTimeout)
-	// Переход на chat_url всегда открывает новую беседу. В режиме одного диалога на статью
-	// он выполняется только для первой стадии: дальше промпт уходит в уже открытый чат,
-	// и модель видит все предыдущие стадии как историю.
+	// Переход на chat_url всегда открывает новую беседу.
 	newChat := c.shouldOpenNewChat(request)
 	if newChat {
 		if _, err := page.Goto(c.cfg.ChatURL, playwright.PageGotoOptions{
@@ -103,8 +98,7 @@ func (c *Client) generate(ctx context.Context, request llm.Request) (llm.Respons
 	}
 	state, err := waitForChatReady(page, timeout)
 	if err != nil {
-		// Неизвестная страница — самый частый вид блокировки: ни поля ввода, ни формы входа.
-		// Проверяем ещё раз, прежде чем считать ошибку временной и уходить в повтор.
+		// Страница без поля ввода и формы входа — чаще всего блокировка.
 		if reason, blocked := c.detectBlocked(page); blocked {
 			return llm.Response{}, c.handleUnavailable(ctx, reason)
 		}
@@ -121,8 +115,7 @@ func (c *Client) generate(ctx context.Context, request llm.Request) (llm.Respons
 	}
 	c.stage("input_found")
 
-	// Режим и документы задаются до снимка треда: и то, и другое меняет страницу, но
-	// сообщением не является, а сообщение должно уйти уже в готовый чат.
+	// Режим, поиск и документы — до снимка треда: они меняют страницу, но сообщением не являются.
 	c.applyMode(page, request, newChat)
 	c.applySearch(page, request, newChat)
 	if err := c.attachDocuments(ctx, page, request); err != nil {
@@ -164,8 +157,7 @@ func (c *Client) generate(ctx context.Context, request llm.Request) (llm.Respons
 }
 
 // waitForAnswer waits for the generation to finish, reporting progress every heartbeat.
-// Ожидание разбито на короткие интервалы вместо одного длинного, чтобы состояние попадало
-// в лог без второй горутины возле страницы Playwright.
+// Короткие интервалы — чтобы писать состояние в лог без второй горутины возле страницы.
 func (c *Client) waitForAnswer(ctx context.Context, page playwright.Page, mark answerMark, articleID int64) error {
 	started := time.Now()
 	deadline := started.Add(time.Duration(operationTimeout(ctx, defaultResponseTimeout)) * time.Millisecond)
@@ -179,11 +171,9 @@ func (c *Client) waitForAnswer(ctx context.Context, page playwright.Page, mark a
 			if expired, checkErr := isSessionExpired(page); checkErr == nil && expired {
 				return sessionExpiredError()
 			}
-			// Диагностика и проверка на челлендж — здесь, пока страница жива: browserError ниже
-			// закрывает её вместе с сессией.
+			// Снимок и проверка на челлендж — до browserError: он закрывает страницу.
+			// Проверка Cloudflare приходит и вместо ответа на уже отправленное сообщение.
 			c.saveDiagnostics(page, "wait_answer", articleID)
-			// Проверка Cloudflare приходит и в ответ на уже отправленное сообщение: оно
-			// уходит, а вместо ответа появляется заглушка. Статья 47 стояла так по пять минут.
 			if reason, blocked := c.detectBlocked(page); blocked {
 				return c.handleUnavailable(ctx, reason)
 			}
@@ -197,9 +187,7 @@ func (c *Client) waitForAnswer(ctx context.Context, page playwright.Page, mark a
 		if err == nil {
 			return nil
 		}
-		// Отказ сервера приходит вместо ответа и сам не исчезнет: ждать дальше нечего, а
-		// ждать было чем — до этой проверки ожидание висело до конца бюджета стадии и
-		// забирало его целиком, не оставляя времени ни на один повтор.
+		// Отказ сервера сам не исчезнет: без проверки ожидание съело бы весь бюджет стадии.
 		if c.detectServerBusy(page, mark) {
 			return serverBusyError()
 		}
@@ -212,10 +200,7 @@ func (c *Client) waitForAnswer(ctx context.Context, page playwright.Page, mark a
 }
 
 // waitForAnswerActions waits for the action panel under the last answer before it is read.
-//
-// Без панели нет кнопки «Копировать», и ответ читался бы из блока кода, который ещё
-// печатается. Не дождавшись панели, чтение идёт как прежде — разметку страницы могли
-// поменять, — но это пишется предупреждением: такой ответ может оказаться оборванным.
+// Без панели нет кнопки «Копировать»; не дождавшись её, чтение идёт дальше с предупреждением.
 func (c *Client) waitForAnswerActions(ctx context.Context, page playwright.Page) {
 	ready, err := page.Evaluate(answerActionsReadyJS, map[string]any{"answerSelector": answerSelector})
 	if err == nil {
@@ -242,10 +227,7 @@ func (c *Client) waitForAnswerActions(ctx context.Context, page playwright.Page)
 }
 
 // readAnswerSources собирает все доступные представления последнего ответа.
-//
-// Разметку модели сохраняет только кнопка «Копировать»: innerText отдаёт отрисованный текст,
-// в котором «## Заголовок» превращается в «Заголовок», а Markdown-таблица — в строки с
-// табуляцией. Поэтому сначала пробуем буфер обмена и лишь потом читаем DOM.
+// innerText теряет Markdown (заголовки, таблицы), поэтому нужен и буфер обмена.
 func (c *Client) readAnswerSources(page playwright.Page) (answerSources, error) {
 	sources := answerSources{}
 	raw, err := page.Evaluate(answerSourcesJS, map[string]any{"answerSelector": answerSelector})
@@ -263,8 +245,6 @@ func (c *Client) readAnswerSources(page playwright.Page) (answerSources, error) 
 
 	clipboard, err := c.copyAnswerToClipboard(page)
 	if err != nil {
-		// Буфер — предпочтительный, но не обязательный источник: разметку страницы могли
-		// поменять. Остальные источники ниже по точности, но рабочие.
 		c.stage("clipboard_unavailable", "error", err.Error())
 		return sources, nil
 	}
@@ -317,11 +297,8 @@ func formatLostError(model, source string, lost []string) error {
 	}
 }
 
-// responseState reports whether the answer has started arriving.
 // answerMark фиксирует состояние треда до отправки промпта.
-//
 // Ключ — основной ориентир: тред виртуализирован, и число смонтированных ответов не растёт.
-// Количество остаётся запасным признаком на случай, если разметка списка изменится.
 type answerMark struct {
 	count int
 	key   int
@@ -333,8 +310,7 @@ func takeAnswerMark(page playwright.Page) (answerMark, error) {
 	if err != nil {
 		return answerMark{}, err
 	}
-	// Ключ читается «по возможности»: если список не виртуализирован или разметка изменилась,
-	// ключ остаётся -1 и скрипты ожидания уходят на запасной путь по количеству ответов.
+	// Ключ -1 — скрипты ожидания сравнивают по количеству ответов.
 	mark := answerMark{count: count, key: -1}
 	if value, evaluateErr := page.Evaluate(lastItemKeyJS, map[string]any{
 		"itemSelector": itemSelector, "itemKeyAttribute": itemKeyAttribute,
@@ -349,8 +325,7 @@ func takeAnswerMark(page playwright.Page) (answerMark, error) {
 	return mark, nil
 }
 
-// completedAnswerOptions собирает параметры скриптов ожидания в одном месте: имена ключей
-// должны совпадать с options.* внутри скрипта, иначе сравнение молча пойдёт с undefined.
+// completedAnswerOptions: ключи совпадают с options.* в скриптах ожидания.
 func completedAnswerOptions(mark answerMark) map[string]any {
 	options := responseStateOptions(mark)
 	options["settledForMs"] = responseSettledFor.Milliseconds()
@@ -385,11 +360,8 @@ func (c *Client) stage(name string, fields ...any) {
 	c.logger.Info("[deepseek]", append([]any{"stage", name}, fields...)...)
 }
 
-// shouldOpenNewChat решает, начинать ли новую беседу.
-//
-// Без режима одного диалога поведение прежнее: новая беседа на каждый запрос. В режиме
-// одного диалога беседа переоткрывается только при смене статьи, по явному требованию
-// запроса или после потери сессии.
+// shouldOpenNewChat решает, начинать ли новую беседу: в режиме одного диалога — только при
+// смене статьи, по требованию запроса или после потери сессии.
 func (c *Client) shouldOpenNewChat(request llm.Request) bool {
 	if request.NewChat {
 		return true
@@ -406,19 +378,16 @@ func (c *Client) markChatOpened(articleID int64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.openArticleID = articleID
-	// Новая беседа — новая страница: прежние сообщения на ней не отрисованы, и помнить их
-	// значило бы вырезать из текста куски, которых там нет.
 	c.sent = nil
 }
 
-// rememberSentText запоминает отправленное в открытую беседу сообщение.
 func (c *Client) rememberSentText(prompt string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.sent = append(c.sent, prompt)
 }
 
-// sentTexts отдаёт копию отправленного: срез уходит в браузер и не должен меняться под ним.
+// sentTexts отдаёт копию: срез уходит в браузер.
 func (c *Client) sentTexts() []string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -453,7 +422,6 @@ func (c *Client) resetSession() error {
 	defer c.mu.Unlock()
 	err := c.session.close()
 	c.session = nil
-	// Вместе с сессией теряется и открытая беседа: следующий запрос начнёт новую.
 	c.openArticleID = 0
 	return err
 }

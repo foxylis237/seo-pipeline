@@ -7,14 +7,12 @@ import (
 
 // answerSources — то, что удалось прочитать со страницы для одного ответа.
 type answerSources struct {
-	// Clipboard — исходный текст из кнопки «Копировать»: единственный источник, который
-	// отдаёт разметку модели как есть.
+	// Clipboard — текст из кнопки «Копировать»: единственный источник с разметкой модели как есть.
 	Clipboard string
-	// CodeBlock — содержимое блока кода, если ответ обёрнут в него.
 	CodeBlock string
-	// Rendered — видимый текст узла ответа. Markdown в нём уже потерян.
+	// Rendered — видимый текст узла ответа; Markdown в нём уже потерян.
 	Rendered string
-	// DOMHasTable и DOMHasHeadings описывают то, что реально отрисовано на странице.
+	// DOMHasTable и DOMHasHeadings — что реально отрисовано на странице.
 	DOMHasTable    bool
 	DOMHasHeadings bool
 }
@@ -32,19 +30,13 @@ var (
 	htmlTagRE         = regexp.MustCompile(`(?is)<(?:h[1-6]|p|table|ul|ol|li|div|span|strong|em)\b[^>]*>`)
 )
 
-// containsMarkdownHeading reports a Markdown heading line in the text.
 func containsMarkdownHeading(text string) bool { return markdownHeadingRE.MatchString(text) }
 
-// containsMarkdownTable reports a Markdown table row in the text.
 func containsMarkdownTable(text string) bool { return markdownTableRE.MatchString(text) }
 
-// containsHTMLTags reports HTML markup in the text.
 func containsHTMLTags(text string) bool { return htmlTagRE.MatchString(text) }
 
 // selectAnswer picks the most faithful available source of the answer.
-//
-// Порядок один и тот же для всех стадий: буфер обмена сохраняет разметку модели дословно,
-// блок кода — почти дословно, видимый текст теряет заголовки и таблицы, поэтому он последний.
 func selectAnswer(sources answerSources) (string, string) {
 	if text := strings.TrimSpace(sources.Clipboard); text != "" {
 		return text, sourceClipboard
@@ -55,10 +47,7 @@ func selectAnswer(sources answerSources) (string, string) {
 	return strings.TrimSpace(sources.Rendered), sourceRendered
 }
 
-// detectFormatLoss returns the formatting the page shows but the extracted text lost.
-//
-// Проверяется только видимый текст: у буфера обмена и блока кода разметка сохраняется по
-// построению. Пустой результат означает, что терять было нечего.
+// detectFormatLoss returns the formatting the page shows but the visible text lost.
 func detectFormatLoss(sources answerSources, text, source string) []string {
 	if source != sourceRendered {
 		return nil

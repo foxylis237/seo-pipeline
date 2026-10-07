@@ -11,12 +11,9 @@ import (
 	"github.com/mxschmitt/playwright-go"
 )
 
-// defaultDiagnosticsDir — куда складывать состояние страницы при неудаче, если каталог не
-// задан вызывающим. Имени задачи здесь нет намеренно: провайдер не знает, что задач больше
-// одной, — корень ему передают.
+// defaultDiagnosticsDir — каталог снимков страницы, если вызывающий его не задал.
 const defaultDiagnosticsDir = "output/debug/deepseek"
 
-// diagnosticsDir возвращает каталог диагностики этого прогона.
 func (c *Client) diagnosticsDir() string {
 	if root := strings.TrimSpace(c.cfg.DiagnosticsDir); root != "" {
 		return root
@@ -24,15 +21,11 @@ func (c *Client) diagnosticsDir() string {
 	return defaultDiagnosticsDir
 }
 
-// emailRE вычищает адреса из сохранённой разметки: на странице чата виден адрес аккаунта,
-// а дампы лежат на диске без ротации.
+// emailRE вычищает из дампов адрес аккаунта, видимый на странице чата.
 var emailRE = regexp.MustCompile(`[\w.+-]+@[\w-]+\.[\w.-]+`)
 
-// saveDiagnostics сохраняет скриншот и разметку страницы.
-//
-// Без этого неудача ожидания ответа неотличима от любой другой: в логе видно только, что
-// новых ответов не появилось, а что при этом было на странице — неизвестно. Ошибки записи
-// намеренно не поднимаются наверх: диагностика не должна подменять исходную ошибку.
+// saveDiagnostics сохраняет скриншот и разметку страницы; ошибки записи не поднимаются,
+// чтобы не подменить исходную.
 func (c *Client) saveDiagnostics(page playwright.Page, stage string, articleID int64) {
 	directory := filepath.Join(c.diagnosticsDir(), fmt.Sprintf("article-%d", articleID))
 	if err := os.MkdirAll(directory, 0o755); err != nil {

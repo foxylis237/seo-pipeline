@@ -12,11 +12,7 @@ import (
 	"github.com/mxschmitt/playwright-go"
 )
 
-// Login выполняет ручной вход в DeepSeek всегда с чистого состояния.
-//
-// Сохранённая сессия удаляется до запуска браузера: команда существует ровно для того, чтобы
-// завести новую сессию, и переиспользование прежних cookies здесь только маскирует проблему.
-// Обычные прогоны эту функцию не вызывают — они идут через Client.ensureSession.
+// Login выполняет ручной вход в DeepSeek, предварительно удалив сохранённый профиль.
 func Login(ctx context.Context, cfg Config, logger *slog.Logger) error {
 	if err := validateConfig(cfg, logger); err != nil {
 		return err
@@ -32,7 +28,6 @@ func Login(ctx context.Context, cfg Config, logger *slog.Logger) error {
 	}
 	defer session.close()
 
-	// Профиль пуст, поэтому активной сессии быть не может: идём сразу на страницу входа.
 	logger.Info("opening DeepSeek login page in a clean browser profile", "profile_dir", cfg.ProfileDir)
 	if _, err := session.page.Goto(cfg.LoginURL, playwright.PageGotoOptions{
 		WaitUntil: playwright.WaitUntilStateDomcontentloaded,
@@ -53,11 +48,8 @@ func Login(ctx context.Context, cfg Config, logger *slog.Logger) error {
 	return nil
 }
 
-// resetProfile удаляет сохранённое состояние браузера перед ручным входом.
-//
-// Каталог сначала проверяется на занятость: launchBrowser держит flock на файле внутри
-// профиля, и удаление каталога под работающим процессом сняло бы эту защиту — его блокировка
-// осталась бы на удалённом inode, а профиль испортился бы у обоих.
+// resetProfile удаляет сохранённое состояние браузера перед ручным входом. Сначала проверка
+// занятости: удалённый под flock каталог оставил бы блокировку на мёртвом inode.
 func resetProfile(profileDir string, logger *slog.Logger) error {
 	if _, err := os.Stat(profileDir); errors.Is(err, os.ErrNotExist) {
 		return nil
@@ -73,17 +65,13 @@ func resetProfile(profileDir string, logger *slog.Logger) error {
 	}
 	logger.Info("DeepSeek browser profile removed before manual login", "profile_dir", profileDir)
 	if cooldown {
-		// Маркер лежит внутри профиля и удаляется вместе с ним. Это осознанно: ручной вход —
-		// и есть то вмешательство, после которого пауза больше не нужна.
 		logger.Warn("DeepSeek block cooldown was cleared together with the profile", "profile_dir", profileDir)
 	}
 	return nil
 }
 
-// ensureProfileIsFree проверяет, что профилем не пользуется другой процесс.
-//
-// Блокировка сразу отпускается: её возьмёт launchBrowser, а два flock на один файл конфликтуют
-// между собой даже внутри одного процесса.
+// ensureProfileIsFree проверяет, что профилем не пользуется другой процесс. Блокировка сразу
+// отпускается: два flock на один файл конфликтуют даже внутри процесса.
 func ensureProfileIsFree(profileDir string) error {
 	lock, err := os.OpenFile(profileLockPath(profileDir), os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {

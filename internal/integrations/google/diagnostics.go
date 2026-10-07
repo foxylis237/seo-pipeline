@@ -14,11 +14,9 @@ import (
 	"github.com/mxschmitt/playwright-go"
 )
 
-// defaultDiagnosticsDir используется, когда каталог не задан вызывающим. Имени задачи здесь
-// нет намеренно: интеграция не знает, что задач больше одной, — корень ей передают.
+// defaultDiagnosticsDir используется, когда каталог не задан вызывающим.
 const defaultDiagnosticsDir = "output/debug/google"
 
-// diagnosticsDir возвращает каталог диагностики этого прогона.
 func (s *playwrightSession) diagnosticsDir() string {
 	if root := strings.TrimSpace(s.cfg.DiagnosticsDir); root != "" {
 		return root
@@ -26,18 +24,13 @@ func (s *playwrightSession) diagnosticsDir() string {
 	return defaultDiagnosticsDir
 }
 
-// emailRE вычищает адреса из сохранённой разметки: в интерфейсе Google виден адрес аккаунта,
-// а дампы лежат на диске без ротации.
+// emailRE вычищает адрес аккаунта, видный в интерфейсе Google, из сохранённой разметки.
 var emailRE = regexp.MustCompile(`[\w.+-]+@[\w-]+\.[\w.-]+`)
 
 func isDarwin() bool { return runtime.GOOS == "darwin" }
 
-// saveDiagnostics сохраняет состояние страницы при неудаче.
-//
-// Без этого отказ на чужой вёрстке неотличим от любого другого: в логе видно только, что
-// ожидание не дождалось, а что было на странице — неизвестно. Селекторы Google не проверены
-// на живом аккаунте, поэтому диагностика здесь особенно нужна. Ошибки записи наверх не
-// поднимаются: диагностика не должна подменять исходную ошибку.
+// saveDiagnostics сохраняет скриншот, разметку и сведения о странице при неудаче.
+// Ошибки записи только логируются, чтобы не подменять исходную ошибку.
 func (s *playwrightSession) saveDiagnostics(ctx context.Context, stage string) {
 	directory := filepath.Join(s.diagnosticsDir(), fmt.Sprintf("article-%d", s.articleID))
 	if err := os.MkdirAll(directory, 0o755); err != nil {
@@ -57,7 +50,7 @@ func (s *playwrightSession) saveDiagnostics(ctx context.Context, stage string) {
 		s.logger.Warn("разметка страницы Google не сохранена", "error", err)
 	}
 
-	// info.json намеренно без cookies и заголовков авторизации: в каталоге debug им не место.
+	// Без cookies и заголовков авторизации.
 	info := struct {
 		Stage     string `json:"stage"`
 		ArticleID int64  `json:"article_id"`

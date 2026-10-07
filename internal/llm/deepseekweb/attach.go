@@ -14,32 +14,19 @@ import (
 )
 
 const (
-	// attachmentUploadTimeout — сколько ждать карточку документа над полем ввода. Загрузка
-	// PDF идёт дольше обычного действия страницы, поэтому у неё свой срок, а не общий
-	// operationTimeout.
+	// attachmentUploadTimeout — ожидание карточки документа над полем ввода; загрузка PDF дольше обычного действия.
 	attachmentUploadTimeout = 2 * time.Minute
-	// attachmentMarkerRunes — сколько первых символов имени файла искать на странице.
-	// Целиком имя не годится: длинное интерфейс обрезает многоточием.
+	// attachmentMarkerRunes — сколько первых символов имени файла искать на странице:
+	// длинное имя интерфейс обрезает многоточием.
 	attachmentMarkerRunes = 8
 )
 
-// SupportsAttachments сообщает роутеру, что провайдер умеет отправить документ вместе с
-// промптом. Стадия с документами к провайдеру без этого метода не попадёт.
+// SupportsAttachments сообщает роутеру, что провайдер умеет отправить документ вместе с промптом.
 func (c *Client) SupportsAttachments() bool { return true }
 
-// applyMode переключает интерфейс в режим, заданный стадией.
-//
-// Переключатель живёт на экране нового чата, поэтому продолжение беседы его не ищет:
-// режим — свойство чата, выбранное при его создании, и «не найден» в середине диалога был
-// бы не сигналом, а шумом.
-//
-// Отсутствие переключателя стадию не роняет: промпт уйдёт в текущем режиме, ответ будет
-// получен, и терять оплаченный прогон из-за переехавшей кнопки нельзя. Но событие это не
-// рядовое — в лог уходит предупреждение, а на диск состояние страницы.
-//
-// Переключение двустороннее, в отличие от поиска: сегодня режим ответа выражается тумблером
-// DeepThink (см. selectModeJS), профиль браузера переживает прогон, и оставленное с прошлой
-// стадии рассуждение молча увело бы в него разметку — стадию, которой оно не нужно.
+// applyMode переключает интерфейс в режим стадии; переключатель есть только на экране нового чата.
+// Ненайденный переключатель стадию не роняет — предупреждение и снимок страницы.
+// Переключение двустороннее: профиль браузера хранит DeepThink с прошлой стадии.
 func (c *Client) applyMode(page playwright.Page, request llm.Request, newChat bool) {
 	mode := strings.TrimSpace(request.Mode)
 	if mode == "" || !newChat {
@@ -65,12 +52,8 @@ func (c *Client) applyMode(page playwright.Page, request llm.Request, newChat bo
 	}
 }
 
-// applySearch включает поиск в интернете, если стадия его просит.
-//
-// Переключатель, как и режим, относится к чату целиком, поэтому трогается только на новом
-// чате. Ненайденная кнопка стадию не роняет по той же причине, что и ненайденный режим: за
-// прогон уже заплачено, а ответ без поиска лучше отказа. Но в лог это идёт предупреждением —
-// промпт в таком прогоне просит источники, которых модель не открывала.
+// applySearch включает поиск в интернете на новом чате, если стадия его просит;
+// ненайденный тумблер стадию не роняет.
 func (c *Client) applySearch(page playwright.Page, request llm.Request, newChat bool) {
 	if !request.Search || !newChat {
 		return
@@ -93,18 +76,13 @@ func (c *Client) applySearch(page playwright.Page, request llm.Request, newChat 
 	}
 }
 
-// attachDocuments прикрепляет документы стадии к сообщению, которое сейчас будет отправлено.
-//
-// Отсутствие документа — отказ, а не предупреждение: промпт написан в расчёте на регламент,
-// и ответ без него внешне неотличим от правильного.
+// attachDocuments прикрепляет документы стадии к отправляемому сообщению; недоступный документ — отказ.
 func (c *Client) attachDocuments(ctx context.Context, page playwright.Page, request llm.Request) error {
 	if len(request.Attachments) == 0 {
 		return nil
 	}
 	paths, markers, err := attachmentPaths(request.Attachments)
 	if err != nil {
-		// Пропавший файл повтором не лечится: путь разрешён при загрузке конфигурации,
-		// и если документа нет сейчас, его не будет и на третьей попытке.
 		return missingAttachmentError(err)
 	}
 	timeout := operationTimeout(ctx, defaultOperationTimeout)
@@ -126,10 +104,8 @@ func (c *Client) attachDocuments(ctx context.Context, page playwright.Page, requ
 	return c.waitForAttachments(ctx, page, request, markers)
 }
 
-// waitForAttachments ждёт, пока карточки документов появятся над полем ввода.
-//
-// Без этого промпт уходит во время загрузки: DeepSeek держит отправку заблокированной, и
-// стадия упирается в таймаут ответа вместо понятной ошибки.
+// waitForAttachments ждёт карточки документов над полем ввода: во время загрузки DeepSeek
+// держит отправку заблокированной.
 func (c *Client) waitForAttachments(ctx context.Context, page playwright.Page, request llm.Request, markers []string) error {
 	started := time.Now()
 	_, err := page.WaitForFunction(attachmentsReadyJS, map[string]any{"markers": markers},
@@ -142,8 +118,7 @@ func (c *Client) waitForAttachments(ctx context.Context, page playwright.Page, r
 	return nil
 }
 
-// attachmentPaths приводит пути к абсолютным и готовит признаки, по которым документ
-// опознаётся на странице.
+// attachmentPaths приводит пути к абсолютным и готовит признаки документов на странице.
 func attachmentPaths(attachments []string) (paths, markers []string, err error) {
 	paths = make([]string, 0, len(attachments))
 	markers = make([]string, 0, len(attachments))
@@ -175,8 +150,7 @@ func attachmentMarker(name string) string {
 	return name
 }
 
-// missingAttachmentError — документ стадии недоступен. Ошибка окончательная: повтор у того
-// же провайдера и переход к следующему одинаково бесполезны.
+// missingAttachmentError — окончательная ошибка: повтор и смена провайдера не помогут.
 func missingAttachmentError(err error) error {
 	return &llm.StatusError{
 		Code: 400, Type: llm.ErrorTypeProvider,

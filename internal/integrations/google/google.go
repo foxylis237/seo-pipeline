@@ -1,9 +1,5 @@
 // Package google публикует готовый промпт статьи в Google Docs через веб-интерфейс и
-// persistent-профиль Playwright.
-//
-// Пакет ничего не генерирует и не обращается к LLM: он получает уже собранный промпт, который
-// пайплайн отправил модели и сохранил в prompts/article_prompt.txt, и кладёт его в документ.
-// Это единственный контракт — публикация не имеет права влиять на содержимое промпта.
+// persistent-профиль Playwright. К LLM он не обращается и промпт не меняет.
 package google
 
 import (
@@ -14,8 +10,7 @@ import (
 	"time"
 )
 
-// TitlePrefix — начало имени документа. Имя целиком служит ключом поиска: документ с таким же
-// именем перезаписывается, нового не создаётся.
+// TitlePrefix — начало имени документа; имя целиком — ключ поиска для перезаписи.
 const TitlePrefix = "Промт: "
 
 // DocumentTitle возвращает имя документа для статьи.
@@ -23,8 +18,7 @@ func DocumentTitle(articleTitle string) string {
 	return TitlePrefix + strings.TrimSpace(articleTitle)
 }
 
-// Job — всё, что нужно для одной публикации. Промпт передаётся значением, а не путём к файлу:
-// читает его вызывающий, и пакет не может случайно взять с диска не ту версию.
+// Job — всё, что нужно для одной публикации; промпт передаётся текстом, а не путём к файлу.
 type Job struct {
 	ArticleID  int64
 	ExternalID string
@@ -34,8 +28,7 @@ type Job struct {
 	Prompt string
 }
 
-// Validate проверяет задание до открытия браузера: запускать Chromium ради заведомо
-// непригодных данных бессмысленно.
+// Validate проверяет задание до открытия браузера.
 func (j Job) Validate() error {
 	if strings.TrimSpace(j.ExternalID) == "" {
 		return fmt.Errorf("external_id пуст")
@@ -51,16 +44,14 @@ func (j Job) Validate() error {
 
 // Result описывает, чем закончилась публикация.
 type Result struct {
-	// Created отличает созданный документ от перезаписанного. Нужен логу и отчёту команды.
+	// Created отличает созданный документ от перезаписанного.
 	Created bool
 	// DocumentURL — адрес документа после публикации.
 	DocumentURL string
 	Attempts    int
 }
 
-// Session — то, что публикация требует от браузера. Интерфейс объявлен здесь, у потребителя,
-// а реализуется браузерным слоем: благодаря этому решение «создать или перезаписать», разбор
-// ошибок и повторы проверяются тестами без настоящего Google.
+// Session — то, что публикация требует от браузера.
 type Session interface {
 	// FindDocument ищет документ по точному имени в папке. Отсутствие документа — не ошибка.
 	FindDocument(ctx context.Context, title string) (documentURL string, found bool, err error)
@@ -71,13 +62,11 @@ type Session interface {
 	Close() error
 }
 
-// SessionFactory открывает браузерную сессию. Отдельный тип нужен, чтобы повтор после
-// временной ошибки поднимал браузер заново: половина отказов Playwright лечится только
-// новым контекстом.
+// SessionFactory открывает браузерную сессию; каждая попытка поднимает браузер заново,
+// потому что часть отказов Playwright лечится только новым контекстом.
 type SessionFactory func(ctx context.Context) (Session, error)
 
-// Publisher публикует промпты. Один экземпляр на процесс: за persistent-профиль держится
-// flock, и две одновременные сессии его портят.
+// Publisher публикует промпты; один экземпляр на процесс, потому что профиль держит flock.
 type Publisher struct {
 	newSession SessionFactory
 	retry      RetryPolicy
@@ -85,8 +74,7 @@ type Publisher struct {
 	sleep      func(ctx context.Context, d time.Duration) error
 }
 
-// NewPublisher собирает публикатор. now и sleep подменяются в тестах, чтобы повторы
-// проверялись без реального ожидания.
+// NewPublisher собирает публикатор.
 func NewPublisher(newSession SessionFactory, retry RetryPolicy) *Publisher {
 	return &Publisher{
 		newSession: newSession,
@@ -96,11 +84,7 @@ func NewPublisher(newSession SessionFactory, retry RetryPolicy) *Publisher {
 	}
 }
 
-// Publish создаёт или перезаписывает документ статьи.
-//
-// Порядок повторов: каждая попытка открывает свою сессию и закрывает её за собой. Ошибка,
-// которую повтор не лечит — истёкшая сессия, требование CAPTCHA или 2FA, — прекращает работу
-// сразу: браузер в этих случаях ждёт человека, а не следующей попытки.
+// Publish создаёт или перезаписывает документ статьи, повторяя временные отказы.
 func (p *Publisher) Publish(ctx context.Context, job Job, observer Observer) (Result, error) {
 	if err := job.Validate(); err != nil {
 		return Result{}, &StageError{
@@ -144,7 +128,6 @@ func (p *Publisher) Publish(ctx context.Context, job Job, observer Observer) (Re
 	return Result{}, lastErr
 }
 
-// publishOnce — одна попытка целиком, вместе с открытием и закрытием сессии.
 func (p *Publisher) publishOnce(ctx context.Context, job Job) (result Result, returnErr error) {
 	session, err := p.newSession(ctx)
 	if err != nil {
@@ -161,8 +144,7 @@ func (p *Publisher) publishOnce(ctx context.Context, job Job) (result Result, re
 	if err != nil {
 		return Result{}, wrapStage(job, "find_document", err)
 	}
-	// Создание и перезапись — единственная развилка команды. Копий с суффиксом (1) не
-	// появляется именно потому, что поиск идёт раньше создания.
+	// Поиск до создания: иначе Drive заводит копию с суффиксом (1).
 	if found {
 		if err := session.ReplaceDocument(ctx, documentURL, job.Prompt); err != nil {
 			return Result{}, wrapStage(job, "replace_document", err)
@@ -176,8 +158,7 @@ func (p *Publisher) publishOnce(ctx context.Context, job Job) (result Result, re
 	return Result{Created: true, DocumentURL: created}, nil
 }
 
-// wrapStage сохраняет уже классифицированную ошибку и заворачивает остальные как временные:
-// неизвестный отказ браузера чаще лечится повтором, чем нет.
+// wrapStage сохраняет уже классифицированную ошибку, а остальные считает временными.
 func wrapStage(job Job, stage string, err error) error {
 	var stageErr *StageError
 	if errors.As(err, &stageErr) {

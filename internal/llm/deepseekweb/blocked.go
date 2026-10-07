@@ -12,14 +12,10 @@ import (
 	"github.com/foxylis237/seo-pipeline/internal/llm"
 )
 
-// blockedStateFileName лежит рядом с профилем, а не в БД: провайдер должен уметь отказать
-// до подключения к чему-либо ещё, включая PostgreSQL.
+// blockedStateFileName лежит рядом с профилем, а не в БД: провайдер отказывает до подключения к PostgreSQL.
 const blockedStateFileName = ".seo-pipeline.blocked"
 
-// accountUnavailableError — терминальный отказ провайдера.
-//
-// Тип Unauthorized выбран намеренно: isTemporary для него возвращает false, поэтому повторов
-// внутри таргета не будет без правки общей политики повторов.
+// accountUnavailableError — терминальный отказ провайдера; Unauthorized не повторяется.
 func accountUnavailableError(reason string) error {
 	return &llm.StatusError{
 		Code:    403,
@@ -29,9 +25,6 @@ func accountUnavailableError(reason string) error {
 }
 
 // BlockedUntil сообщает, действует ли cooldown аккаунта, не запуская браузер.
-//
-// Нужен проверке перед дорогим прогоном: она обязана назвать причину недоступности провайдера,
-// не открывая профиль и не трогая cookies.
 func BlockedUntil(profileDir string, now time.Time) (until time.Time, reason string, blocked bool) {
 	return readBlockedUntil(profileDir, now)
 }
@@ -40,8 +33,7 @@ func blockedStatePath(profileDir string) string {
 	return filepath.Join(profileDir, blockedStateFileName)
 }
 
-// readBlockedUntil сообщает, действует ли ещё cooldown. Нечитаемый или битый файл трактуется
-// как отсутствие блокировки: сломанный маркер не должен навсегда выключить провайдера.
+// readBlockedUntil: нечитаемый или битый файл — нет блокировки, иначе маркер выключил бы провайдера навсегда.
 func readBlockedUntil(profileDir string, now time.Time) (time.Time, string, bool) {
 	raw, err := os.ReadFile(blockedStatePath(profileDir))
 	if err != nil {
@@ -73,10 +65,8 @@ func writeBlockedUntil(profileDir string, until time.Time, reason string) error 
 	return nil
 }
 
-// blockAccount фиксирует cooldown и возвращает терминальную ошибку.
-//
-// Сессия намеренно не сбрасывается: перезапускать Chromium против заблокированного аккаунта
-// бессмысленно и увеличивает нагрузку, за которую блокировка и выдана.
+// blockAccount фиксирует cooldown и возвращает терминальную ошибку; сессию не сбрасывает —
+// перезапуск Chromium против заблокированного аккаунта только добавляет нагрузки.
 func (c *Client) blockAccount(reason string) error {
 	until := c.pace.now().Add(blockCooldown)
 	if err := writeBlockedUntil(c.cfg.ProfileDir, until, reason); err != nil {
@@ -87,22 +77,18 @@ func (c *Client) blockAccount(reason string) error {
 	return accountUnavailableError(reason)
 }
 
-// blockedStateOptions собирает параметры blockedStateJS в одном месте: имена ключей должны
-// совпадать с options.* внутри скрипта, иначе сравнение молча пойдёт с undefined.
+// blockedStateOptions: ключи совпадают с options.* в blockedStateJS.
 func blockedStateOptions(sentTexts []string) map[string]any {
 	return map[string]any{
 		"blockedSelector": blockedSelector,
 		"answerSelector":  answerSelector,
 		"itemSelector":    itemSelector,
-		// Отправленное в этой беседе: его текст на странице наш, и состоянием площадки не
-		// является. Без него промпт стадии html объявлял блокировкой любую статью, где
-		// встретилась фраза-маркер, — см. noticeTextJS.
+		// Свои отправленные тексты: фраза-маркер в промпте не блокировка (см. noticeTextJS).
 		"sentTexts": sentTexts,
 	}
 }
 
 // detectBlocked ищет на открытой странице признаки блокировки, проверки Cloudflare или капчи.
-// Это только распознавание состояния: ничего не обходит и не подменяет.
 func (c *Client) detectBlocked(page playwright.Page) (string, bool) {
 	value, err := page.Evaluate(blockedStateJS, blockedStateOptions(c.sentTexts()))
 	if err != nil {
@@ -112,8 +98,7 @@ func (c *Client) detectBlocked(page playwright.Page) (string, bool) {
 	if !ok || strings.TrimSpace(reason) == "" {
 		return "", false
 	}
-	// Снимок обязателен: ложная блокировка выключает провайдера на час, и без страницы
-	// её не отличить от настоящей (27.09.2026 разбирать ложный terms_violation было нечем).
+	// Снимок: без него ложную блокировку (провайдер выключен на час) не отличить от настоящей.
 	c.mu.Lock()
 	articleID := c.openArticleID
 	c.mu.Unlock()

@@ -11,12 +11,8 @@ import (
 	"github.com/mxschmitt/playwright-go"
 )
 
-// Login открывает видимый Chromium для ручного входа в Google и сохраняет persistent-профиль.
-//
-// Логин, пароль, CAPTCHA и 2FA проходит человек: автоматизировать их нельзя, и обходить
-// защиты Google эта команда не пытается. Как и у DeepSeek, вход всегда начинается с чистого
-// состояния — переиспользование прежних cookies маскирует ровно ту проблему, ради которой
-// команду и запускают.
+// Login открывает видимый браузер для ручного входа в Google и сохраняет persistent-профиль.
+// Вход начинается с чистого профиля: прежние cookies маскировали бы проблему, ради которой его запускают.
 func Login(ctx context.Context, cfg Config, logger *slog.Logger) error {
 	if strings.TrimSpace(cfg.ProfileDir) == "" {
 		return fmt.Errorf("каталог профиля Google пуст")
@@ -34,8 +30,7 @@ func Login(ctx context.Context, cfg Config, logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	// Ошибка закрытия не превращает удавшийся вход в неудачу: профиль к этому моменту уже
-	// записан Chrome на диск, и отказ команды сбил бы с толку — вход-то состоялся.
+	// Ошибка закрытия только логируется: профиль к этому моменту уже записан на диск.
 	defer func() {
 		if closeErr := session.close(); closeErr != nil {
 			logger.Warn("браузер закрылся не полностью, профиль при этом сохранён",
@@ -53,8 +48,7 @@ func Login(ctx context.Context, cfg Config, logger *slog.Logger) error {
 	logger.Info("войдите в Google вручную в открывшемся Chromium; CAPTCHA и 2FA не автоматизируются",
 		"timeout", defaultLoginTimeout, "folder_url", cfg.FolderURL)
 
-	// Признак успеха — та самая папка, в которую потом публикуются промпты: вход, после
-	// которого до неё нет доступа, для этой команды бесполезен.
+	// Успех — открылась папка публикации, а не просто состоялся вход.
 	if err := waitForDriveFolder(loginCtx, session.page); err != nil {
 		return err
 	}
@@ -80,11 +74,8 @@ func waitForDriveFolder(ctx context.Context, page playwright.Page) error {
 	return nil
 }
 
-// resetProfile удаляет сохранённое состояние браузера перед ручным входом.
-//
-// Каталог сначала проверяется на занятость: launchBrowser держит flock на файле внутри
-// профиля, и удаление каталога под работающим процессом сняло бы эту защиту — блокировка
-// осталась бы на удалённом inode, а профиль испортился бы у обоих.
+// resetProfile удаляет профиль перед ручным входом. Сначала проверяется flock: удаление под
+// работающим процессом оставило бы блокировку на удалённом inode.
 func resetProfile(profileDir string, logger *slog.Logger) error {
 	if _, err := os.Stat(profileDir); errors.Is(err, os.ErrNotExist) {
 		return nil

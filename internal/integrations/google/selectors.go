@@ -1,23 +1,13 @@
 package google
 
-// Селекторы и адреса Google собраны здесь, а не размазаны по коду: вёрстка чужого сайта
-// меняется без предупреждения, и чинить её нужно в одном месте.
-//
-// ВНИМАНИЕ. Эти селекторы написаны по публично известной разметке Drive и Docs, но **не
-// проверены на живом аккаунте** — у сборки не было сессии Google. Первый прогон
-// google-publish может упасть именно здесь. Диагностика каждой неудачи (screenshot.png,
-// page.html, info.json) ложится в каталог диагностики задачи (DiagnosticsDir/google), но
-// кандидатов надёжнее проверять на живой странице, а не угадывать по сохранённому дампу.
+// Селекторы и адреса Google собраны в одном месте: вёрстка чужого сайта меняется без предупреждения.
 const (
-	// createDocumentURLTemplate создаёт документ сразу в нужной папке. Переход по этому
-	// адресу открывает новый пустой документ, уже лежащий в folder.
+	// createDocumentURLTemplate открывает новый пустой документ, уже лежащий в папке.
 	createDocumentURLTemplate = "https://docs.google.com/document/create?folder=%s"
-	// searchInFolderURLTemplate ищет по точному имени внутри папки. Поиск идёт запросом в
-	// адресе, а не набором в поле: так не нужно ждать подсказки и бороться с автодополнением.
+	// searchInFolderURLTemplate ищет по имени внутри папки запросом в адресе, без автодополнения поля.
 	searchInFolderURLTemplate = "https://drive.google.com/drive/search?q=%s%%20parent:%s"
 
-	// signInURLMarker и challengeURLMarkers опознают состояния, из которых автоматика выйти
-	// не может. Проверяются по адресу страницы, а не по тексту: текст локализуется.
+	// signInURLMarker — признак страницы входа в адресе.
 	signInURLMarker = "accounts.google.com"
 )
 
@@ -32,20 +22,17 @@ var challengeURLMarkers = []string{
 const (
 	// documentTitleInput — поле имени документа в шапке Docs.
 	documentTitleInput = `input.docs-title-input, input[aria-label="Rename"]`
-	// documentCanvas — область текста документа. Клик по ней ставит курсор.
+	// documentCanvas — область текста документа; клик по ней ставит курсор.
 	documentCanvas = `.kix-appview-editor, .kix-canvas-tile-content`
 	// documentSavedMarker — индикатор «все изменения сохранены на Диске».
 	documentSavedMarker = `[aria-label*="Сохранено на Диске"], [aria-label*="Saved to Drive"], .docs-save-indicator-saved`
-	// driveSearchResultRow — строка результата поиска в Drive.
-	// С сентября 2026 Drive рисует результаты таблицей: строка — tr[role="row"], и прежние
-	// div-селекторы не находили ни одного документа — публикация заводила бы дубли.
+	// driveSearchResultRow — строка результата поиска в Drive; в табличной вёрстке это tr[role="row"].
 	driveSearchResultRow = `tr[role="row"][data-id], div[role="row"][data-id], div[role="listitem"][data-id]`
 	// driveSearchResultName — имя файла внутри строки результата.
 	driveSearchResultName = `[data-tooltip], [aria-label]`
 )
 
-// visibleElementJS повторяет приём deepseekweb: ожидание пишется как условие на DOM, а не как
-// sleep, поэтому оно завершается ровно тогда, когда состояние наступило.
+// visibleElementJS — условие видимости элемента для ожидания на DOM вместо sleep.
 const visibleElementJS = `selector => {
 	const node = document.querySelector(selector);
 	if (!node) { return false; }
@@ -55,12 +42,10 @@ const visibleElementJS = `selector => {
 	return box.width > 0 && box.height > 0;
 }`
 
-// writeClipboardJS кладёт текст в буфер обмена. Промпт вставляется, а не набирается: набор
-// текста на десятки тысяч символов занимает минуты и рвётся на автозамене Docs.
+// writeClipboardJS кладёт текст в буфер обмена.
 const writeClipboardJS = `text => navigator.clipboard.writeText(text)`
 
-// writeRichClipboardJS кладёт в буфер текст и HTML одним элементом: Docs при вставке берёт
-// оформление из HTML, а текст остаётся запасным вариантом для получателя без HTML.
+// writeRichClipboardJS кладёт в буфер текст и HTML одним элементом; Docs берёт оформление из HTML.
 const writeRichClipboardJS = `([text, html]) => navigator.clipboard.write([new ClipboardItem({
 	'text/plain': new Blob([text], {type: 'text/plain'}),
 	'text/html': new Blob([html], {type: 'text/html'}),

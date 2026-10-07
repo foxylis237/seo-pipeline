@@ -14,8 +14,7 @@ import (
 	"github.com/mxschmitt/playwright-go"
 )
 
-// profileLockName защищает persistent-профиль от двух одновременных процессов — тот же приём,
-// что у Arsenkin и DeepSeek. Без него параллельные публикации портят LevelDB профиля.
+// profileLockName — файл flock persistent-профиля: два процесса на одном профиле портят его LevelDB.
 const profileLockName = ".seo-pipeline.lock"
 
 func profileLockPath(profileDir string) string {
@@ -30,22 +29,14 @@ type browserSession struct {
 	profile *os.File
 }
 
-// automationArgs снимают метку автоматизации у браузера.
-//
-// Google отказывает во входе, когда видит `navigator.webdriver`: страница показывает
-// «Возможно, этот браузер или приложение небезопасны». Флаг убирает именно этот признак —
-// это стандартная настройка Playwright для работы со своим же аккаунтом, а не обход защиты:
-// логин, пароль, CAPTCHA и 2FA по-прежнему проходит человек, и ничего за него здесь не
-// решается.
+// automationArgs снимают `navigator.webdriver`: с ним Google отказывает во входе
+// («Возможно, этот браузер или приложение небезопасны»). Вход по-прежнему проходит человек.
 var automationArgs = []string{
 	"--disable-blink-features=AutomationControlled",
 }
 
-// launchBrowser поднимает браузер на persistent-профиле под flock.
-//
-// Сначала пробуется установленный Chrome: связанный с Playwright Chromium Google отклоняет на
-// входе заметно чаще. Если Chrome не установлен, запуск молча откатывается на Chromium —
-// команда не должна падать из-за отсутствия необязательного браузера.
+// launchBrowser поднимает браузер на persistent-профиле под flock. Сначала пробуется
+// установленный Chrome (связанный Chromium Google отклоняет чаще), при отказе — Chromium.
 func launchBrowser(profileDir string, headless bool, channel string) (*browserSession, error) {
 	if err := os.MkdirAll(profileDir, 0o755); err != nil {
 		return nil, fmt.Errorf("создать каталог профиля Google: %w", err)
@@ -67,8 +58,7 @@ func launchBrowser(profileDir string, headless bool, channel string) (*browserSe
 	options := playwright.BrowserTypeLaunchPersistentContextOptions{
 		Headless: playwright.Bool(headless),
 		Args:     automationArgs,
-		// Разрешение на буфер обмена выдаётся только этому профилю: промпт вставляется
-		// через clipboard, набор текста на десятки тысяч символов слишком медленный.
+		// Промпт вставляется через буфер обмена: набор десятков тысяч символов слишком медленный.
 		Permissions: []string{"clipboard-read", "clipboard-write"},
 	}
 	if strings.TrimSpace(channel) != "" {
@@ -76,8 +66,6 @@ func launchBrowser(profileDir string, headless bool, channel string) (*browserSe
 	}
 	browserContext, err := pw.Chromium.LaunchPersistentContext(profileDir, options)
 	if err != nil && options.Channel != nil {
-		// Chrome не установлен или не запустился — идём на связанном Chromium. Вход в Google
-		// из него проходит хуже, но это лучше, чем отказ команды целиком.
 		options.Channel = nil
 		browserContext, err = pw.Chromium.LaunchPersistentContext(profileDir, options)
 	}
@@ -107,20 +95,11 @@ func firstPage(browserContext playwright.BrowserContext) (playwright.Page, error
 	return page, nil
 }
 
-// closeTimeout ограничивает ожидание закрытия браузера.
-//
-// Close персистентного контекста ждёт, пока браузер отпустит профиль, а установленный Chrome
-// с открытым окном может не отпустить его никогда: команда ручного входа из-за этого висела
-// после успешного логина. Профиль к моменту закрытия уже записан на диск самим Chrome, так
-// что ограниченное ожидание ничего не теряет.
+// closeTimeout ограничивает ожидание закрытия: установленный Chrome с открытым окном может не
+// отпустить профиль никогда, а профиль к этому моменту Chrome уже записал на диск.
 const closeTimeout = 10 * time.Second
 
-// close закрывает браузер и отпускает профиль.
-//
-// Ошибки собираются вместе: незакрытый Playwright оставляет процесс после завершения команды.
-// Зависшее закрытие не должно останавливать команду — оно превращается в предупреждение, а
-// блокировка профиля снимается в любом случае, иначе следующий запуск упрётся в занятый
-// профиль из-за уже мёртвого процесса.
+// close закрывает браузер и отпускает профиль; блокировка снимается даже при зависшем закрытии.
 func (s *browserSession) close() error {
 	if s == nil {
 		return nil
@@ -139,15 +118,11 @@ func (s *browserSession) close() error {
 	return errors.Join(result, releaseProfile(s.profile))
 }
 
-// errCloseTimedOut отличает зависшее закрытие от настоящей ошибки: первое — повод предупредить
-// и идти дальше, второе — повод показать причину.
+// errCloseTimedOut отличает зависшее закрытие от настоящей ошибки.
 var errCloseTimedOut = errors.New("браузер не закрылся за отведённое время, процесс мог остаться")
 
-// withTimeout выполняет закрытие в отдельной goroutine и не ждёт его дольше срока.
-//
-// Повисшая goroutine намеренно не убивается: у Playwright нет способа прервать Close, а
-// удерживать команду до конца рабочего дня хуже, чем оставить её дожидаться в фоне до выхода
-// процесса.
+// withTimeout выполняет action в отдельной goroutine и не ждёт её дольше срока.
+// Повисшая goroutine остаётся: прервать Close у Playwright нечем.
 func withTimeout(limit time.Duration, action func() error) error {
 	done := make(chan error, 1)
 	go func() { done <- action() }()
@@ -175,9 +150,8 @@ func releaseProfile(profile *os.File) error {
 	return result
 }
 
-// ensureProfileIsFree проверяет, что профилем не пользуется другой процесс, и сразу отпускает
-// блокировку: её возьмёт launchBrowser, а два flock на один файл конфликтуют между собой даже
-// внутри одного процесса.
+// ensureProfileIsFree проверяет, что профиль не занят, и сразу отпускает блокировку: два flock
+// на один файл конфликтуют даже внутри одного процесса, а её возьмёт launchBrowser.
 func ensureProfileIsFree(profileDir string) error {
 	if _, err := os.Stat(profileDir); errors.Is(err, os.ErrNotExist) {
 		return nil
@@ -196,8 +170,7 @@ func ensureProfileIsFree(profileDir string) error {
 	return nil
 }
 
-// ProfileExists отвечает, был ли вход хоть раз. Пустой каталог профиля означает, что
-// google-login ещё не запускали, и это отдельная причина отказа: повторять её бессмысленно.
+// ProfileExists отвечает, есть ли в каталоге профиля что-то кроме блокировки, то есть был ли вход.
 func ProfileExists(profileDir string) bool {
 	entries, err := os.ReadDir(profileDir)
 	if err != nil {
@@ -211,8 +184,7 @@ func ProfileExists(profileDir string) bool {
 	return false
 }
 
-// operationTimeout переводит дедлайн контекста в миллисекунды Playwright. Своего дедлайна у
-// контекста может не быть — тогда берётся переданный запас.
+// operationTimeout переводит дедлайн контекста в миллисекунды Playwright; без дедлайна — fallback.
 func operationTimeout(ctx context.Context, fallback time.Duration) float64 {
 	deadline, ok := ctx.Deadline()
 	if !ok {
@@ -238,8 +210,7 @@ func pause(ctx context.Context) error {
 	}
 }
 
-// classifyPage опознаёт состояния, из которых автоматика выйти не может, по адресу страницы.
-// Адрес, а не текст: интерфейс Google локализован, и подстроки в нём меняются.
+// classifyPage опознаёт тупиковые состояния по адресу страницы, а не по локализованному тексту.
 func classifyPage(currentURL string) error {
 	lowered := strings.ToLower(currentURL)
 	for _, marker := range challengeURLMarkers {

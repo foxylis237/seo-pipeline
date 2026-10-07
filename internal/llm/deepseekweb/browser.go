@@ -10,8 +10,7 @@ import (
 	"github.com/mxschmitt/playwright-go"
 )
 
-// profileLockName защищает persistent-профиль от двух одновременных процессов.
-// Имя используется и при запуске браузера, и при очистке профиля перед ручным входом.
+// profileLockName защищает persistent-профиль от двух одновременных процессов (запуск и очистка перед входом).
 const profileLockName = ".seo-pipeline.lock"
 
 func profileLockPath(profileDir string) string {
@@ -48,20 +47,15 @@ func launchBrowser(profileDir string, headless bool) (*browserSession, error) {
 	}
 	browserContext, err := pw.Chromium.LaunchPersistentContext(profileDir, playwright.BrowserTypeLaunchPersistentContextOptions{
 		Headless: playwright.Bool(headless),
-		// Playwright по умолчанию помечает браузер как управляемый: navigator.webdriver=true
-		// и плашка автоматизации. Это первое, что проверяет антибот, а DeepSeek уже
-		// блокировал аккаунт за автоматизацию (24.09.2026). Метка снимается, больше ничего
-		// не подменяется: остальной отпечаток у обычного окна и так настоящий.
+		// Снимает метку автоматизации Playwright (navigator.webdriver): DeepSeek блокирует за автоматизацию.
 		IgnoreDefaultArgs: []string{"--enable-automation"},
 		Args: []string{
 			"--disable-blink-features=AutomationControlled",
-			// Окно за другими окнами macOS притормаживает, и ответ модели дописывается
-			// рывками; прогон идёт в фоне, поэтому окно почти всегда заслонено.
+			// Заслонённое окно macOS притормаживает, а прогон идёт в фоне.
 			"--disable-backgrounding-occluded-windows",
 			"--disable-renderer-backgrounding",
 		},
-		// Разрешение выдаётся только этому профилю: исходную разметку ответа отдаёт
-		// кнопка «Копировать», а прочитать её можно лишь из буфера обмена.
+		// Исходную разметку ответа отдаёт только кнопка «Копировать» через буфер обмена.
 		Permissions: []string{"clipboard-read", "clipboard-write"},
 	})
 	if err != nil {

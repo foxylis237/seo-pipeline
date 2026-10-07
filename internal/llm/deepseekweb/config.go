@@ -1,5 +1,5 @@
-// Package deepseekweb implements the shared LLM client boundary through the
-// public DeepSeek Chat web interface and a persistent Playwright profile.
+// Package deepseekweb implements the LLM client through the DeepSeek Chat web interface
+// and a persistent Playwright profile.
 package deepseekweb
 
 import (
@@ -12,46 +12,36 @@ import (
 const (
 	defaultOperationTimeout = 30 * time.Second
 	defaultLoginTimeout     = 30 * time.Minute
-	// responseSettledFor — сколько текст должен не меняться, когда под ответом уже
-	// отрисована панель действий. Панель появляется только после конца генерации, поэтому
-	// длинного ожидания здесь не нужно.
+	// responseSettledFor — сколько текст не меняется при уже отрисованной панели действий;
+	// панель появляется только после конца генерации.
 	responseSettledFor = 2 * time.Second
-	// responseStableFor — запасной признак на случай, если панель действий не опознана.
-	// Прежние 4 s принимали за конец ответа обычную паузу стрима: статья сохранялась
-	// обрезанной на полуслове, а следующий промпт уходил в поле во время генерации.
+	// responseStableFor — запасной признак конца без панели действий; меньший срок принимает
+	// за конец обычную паузу стрима.
 	responseStableFor = 25 * time.Second
-	// defaultResponseTimeout ограничивает ожидание ответа, когда у контекста нет своего
-	// дедлайна: прямой вызов Generate с context.Background() иначе получал 1 мс.
+	// defaultResponseTimeout ограничивает ожидание ответа, когда у контекста нет дедлайна.
 	defaultResponseTimeout = 5 * time.Minute
 	// responseHeartbeat — как часто писать в лог, что ответ ещё генерируется.
 	responseHeartbeat = 30 * time.Second
-	// clipboardMarker кладётся в буфер перед нажатием «Копировать», чтобы прежнее значение
-	// нельзя было принять за новый ответ.
+	// clipboardMarker кладётся в буфер перед «Копировать», чтобы прежнее значение не сошло за ответ.
 	clipboardMarker = "__seo_pipeline_clipboard__"
-	// answerActionsGrace — сколько после «ответ дописан» ждать панель действий под ответом,
-	// если признаком конца сработала стабилизация текста, а не сама панель. Без панели нет
-	// кнопки «Копировать», и ответ читался бы из недописанного блока кода.
+	// answerActionsGrace — сколько ждать панель действий, если конец ответа определён
+	// стабилизацией текста.
 	answerActionsGrace    = 3 * time.Minute
 	clipboardTimeout      = 5 * time.Second
 	clipboardPollInterval = 200 * time.Millisecond
 
-	// minRequestInterval и requestJitter задают паузу между двумя запросами к веб-интерфейсу:
-	// 20 s плюс случайные 0–40 s. Случайность здесь не маскирует автоматизацию, а убирает
-	// ровный машинный ритм, по которому нагрузка выглядит агрессивной.
+	// minRequestInterval и requestJitter — пауза между запросами; случайность убирает ровный машинный ритм.
 	minRequestInterval = 20 * time.Second
 	requestJitter      = 40 * time.Second
 
-	// sessionBreakEvery, sessionBreakMin и sessionBreakJitter — длинный перерыв после
-	// каждых 30 запросов: 15 минут плюс случайные 0–15. Пауза между запросами убирает
-	// ровный ритм, но не длительность: 25.09.2026 прогоны шли без перерыва почти 13 часов,
-	// а так с веб-интерфейсом человек не работает. 30 запросов — это 4–5 статей.
+	// sessionBreakEvery, sessionBreakMin и sessionBreakJitter — длинный перерыв после серии
+	// запросов: многочасовая работа без перерыва не похожа на человека.
 	sessionBreakEvery  = 30
 	sessionBreakMin    = 15 * time.Minute
 	sessionBreakJitter = 15 * time.Minute
 
-	// blockCooldown — на сколько клиент перестаёт открывать браузер после того, как увидел
-	// страницу блокировки. Реальные блокировки длятся дольше, но ложное срабатывание на
-	// проверке Cloudflare не должно выключать провайдера на сутки.
+	// blockCooldown — пауза после страницы блокировки; короткая, чтобы ложное срабатывание
+	// не выключало провайдера надолго.
 	blockCooldown = time.Hour
 )
 
@@ -60,8 +50,7 @@ type Config struct {
 	LoginURL   string
 	ProfileDir string
 	Headless   bool
-	// DiagnosticsDir — корень диагностики этого провайдера. Задаётся вызывающим, чтобы дампы
-	// разных пайплайнов не смешивались; пустое значение включает общий каталог по умолчанию.
+	// DiagnosticsDir — корень диагностики провайдера; пустое — defaultDiagnosticsDir.
 	DiagnosticsDir string
 }
 

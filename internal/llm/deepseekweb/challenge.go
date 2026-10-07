@@ -11,20 +11,15 @@ import (
 )
 
 const (
-	// reasonChallenge — единственная причина недоступности, которая лечится руками и не
-	// означает проблем с аккаунтом.
+	// reasonChallenge — причина, которая лечится руками и не означает проблем с аккаунтом.
 	reasonChallenge = "challenge_or_captcha"
 
-	// captchaWaitTimeout ограничивает ожидание человека. Окно браузера остаётся открытым всё
-	// это время; если его закрыть, ожидание прекращается сразу.
+	// captchaWaitTimeout ограничивает ожидание человека; закрытое окно прекращает его сразу.
 	captchaWaitTimeout  = 5 * time.Minute
 	captchaPollInterval = 2 * time.Second
 )
 
-// captchaError — понятный отказ, когда проверку так и не прошли.
-//
-// Тип Unauthorized выбран, чтобы isTemporary вернул false: автоматических повторов против
-// капчи быть не должно.
+// captchaError — отказ, когда проверку не прошли; Unauthorized не повторяется.
 func captchaError() error {
 	return &llm.StatusError{
 		Code:    403,
@@ -33,12 +28,8 @@ func captchaError() error {
 	}
 }
 
-// handleUnavailable разделяет два разных случая, которые до этого лечились одинаково.
-//
-// Блокировка аккаунта — состояние надолго: пишется cooldown, браузер к аккаунту больше не
-// ходит. Проверка Cloudflare или капча — наоборот, разовая помеха: аккаунт исправен,
-// авторизация цела, нужен только человек. Профиль в этом случае не трогаем и cooldown не
-// включаем.
+// handleUnavailable: блокировка аккаунта пишет cooldown, а проверка Cloudflare или капча —
+// разовая помеха, её проходит человек без cooldown и без сброса профиля.
 func (c *Client) handleUnavailable(ctx context.Context, reason string) error {
 	if reason != reasonChallenge {
 		return c.blockAccount(reason)
@@ -46,14 +37,12 @@ func (c *Client) handleUnavailable(ctx context.Context, reason string) error {
 	return c.resolveChallenge(ctx)
 }
 
-// resolveChallenge открывает видимое окно с тем же профилем и ждёт, пока человек пройдёт
-// проверку. Профиль не удаляется, сессия не сбрасывается — меняется только режим окна.
+// resolveChallenge открывает видимое окно с тем же профилем и ждёт, пока человек пройдёт проверку.
 func (c *Client) resolveChallenge(ctx context.Context) error {
 	c.logger.Warn("DeepSeek requires manual captcha verification",
 		"profile_dir", c.cfg.ProfileDir, "wait", captchaWaitTimeout.String())
 
-	// Headless-сессию приходится закрыть: профиль защищён flock, и видимое окно иначе его
-	// не получит. Это закрытие браузера, а не сброс авторизации — cookies остаются в профиле.
+	// Профиль под flock: headless-сессию закрываем, cookies остаются.
 	if err := c.resetSession(); err != nil {
 		c.logger.Warn("DeepSeek headless session was not closed cleanly", "error", err)
 	}
@@ -64,16 +53,12 @@ func (c *Client) resolveChallenge(ctx context.Context) error {
 	}
 	c.logger.Info("DeepSeek captcha passed; continuing with the same profile and session",
 		"profile_dir", c.cfg.ProfileDir)
-	// Временная ошибка, а не отказ: роутер повторит стадию, и она пойдёт уже по проверенному
-	// профилю. Так автоматизация продолжается сама, без перезапуска команды.
+	// Временная ошибка: роутер повторит стадию по проверенному профилю.
 	return temporaryError("DeepSeek captcha passed, retrying the stage", nil)
 }
 
 // waitForManualVerification держит видимое окно, пока страница не станет рабочей.
-//
-// Ожидание намеренно не подчиняется таймауту стадии: человек не обязан укладываться в
-// бюджет генерации. Прервать его можно, закрыв окно браузера — тогда опрос страницы вернёт
-// ошибку и ожидание закончится.
+// Таймаут стадии на ожидание не действует; прервать — закрыть окно.
 func (c *Client) waitForManualVerification(ctx context.Context) error {
 	session, err := launchBrowser(c.cfg.ProfileDir, false)
 	if err != nil {

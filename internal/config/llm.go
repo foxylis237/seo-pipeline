@@ -18,9 +18,7 @@ const (
 	DefaultLLMTimeout     = 2 * time.Minute
 )
 
-// requiredLLMStages — стадии схемы task_1: шесть стадий генерации плюс keywords, резервный
-// источник запросов для prepare. Список остаётся значением по умолчанию для вызовов без явного
-// набора; у задачи со своим потоком генерации набор свой и приходит из её профиля.
+// requiredLLMStages — стадии task_1, набор по умолчанию для вызовов без явного набора.
 var requiredLLMStages = []string{"structure", "article", "info", "review", "fix", "html", "keywords"}
 
 type LLMFileConfig struct {
@@ -40,41 +38,26 @@ type LLMProviderConfig struct {
 	LoginURL   string `yaml:"login_url"`
 	ProfileDir string `yaml:"profile_dir"`
 	Headless   *bool  `yaml:"headless"`
-	// SingleChatPerArticle держит один диалог провайдера на статью вместо новой беседы на
-	// каждую стадию. Поддерживается только браузерными провайдерами.
+	// SingleChatPerArticle — один диалог на статью вместо беседы на стадию; только браузерные провайдеры.
 	SingleChatPerArticle bool `yaml:"single_chat_per_article"`
 }
 
-// LLMStageConfig описывает одну стадию. Маршрутизация существует здесь ровно в одном виде —
-// Targets. Исторические ключи provider/model на уровне стадии по-прежнему разбираются, но
-// полями структуры не становятся: пока они ими были, их значение расходилось с Targets и код
-// читал то одно, то другое.
+// LLMStageConfig описывает одну стадию. Маршрут — только Targets: ключи provider/model стадии
+// разбираются в него и полями не становятся.
 type LLMStageConfig struct {
 	Targets     []LLMTargetConfig `yaml:"targets"`
 	Prompt      string            `yaml:"prompt"`
 	Temperature *float64          `yaml:"temperature"`
 	MaxTokens   int               `yaml:"max_tokens"`
 	TimeoutText string            `yaml:"timeout"`
-	// AttemptTimeoutText ограничивает одну попытку, тогда как TimeoutText остаётся общим
-	// бюджетом стадии на все попытки. Без него первая же зависшая попытка съедала бюджет
-	// целиком: повтор не начинался, и стадия падала с «deadline exceeded before retry», ни
-	// разу не повторившись. Пустое значение сохраняет прежнее поведение — попытке доступен
-	// весь остаток бюджета.
+	// AttemptTimeoutText ограничивает одну попытку; TimeoutText — бюджет стадии на все попытки.
+	// Пустое — попытке доступен весь остаток бюджета.
 	AttemptTimeoutText string `yaml:"attempt_timeout"`
-	// AttachmentsDir — каталог с документом, который уходит в модель вместе с промптом
-	// стадии. Имя файла не фиксируется: значим каталог, а не то, как назвали регламент.
-	// Пустое значение означает стадию без вложений — так живут все стадии task_1.
+	// AttachmentsDir — каталог документа, который уходит в модель с промптом; пустой — без вложений.
 	AttachmentsDir string `yaml:"attachments_dir"`
-	// Mode — подпись переключателя режима в интерфейсе провайдера («Быстрый»). Подпись, а
-	// не собственное имя режима: переключатель у браузерного провайдера опознаётся по
-	// тексту, и держать здесь второе имя значило бы заводить таблицу соответствий,
-	// которая устареет вместе с интерфейсом.
+	// Mode — подпись переключателя режима в интерфейсе провайдера («Быстрый»): опознаётся по тексту.
 	Mode string `yaml:"mode"`
-	// Search включает у стадии поиск в интернете. У браузерного провайдера это отдельный
-	// переключатель рядом с полем ввода, независимый от Mode: режим отвечает за то, как
-	// модель думает, поиск — за то, откуда она берёт данные. Стадия, которой нужны
-	// проверяемые цифры и источники, включает его сама; умолчание — выключен, потому что
-	// поиск замедляет ответ и уводит модель на посторонние сайты.
+	// Search включает поиск в интернете — отдельный от Mode переключатель у поля ввода.
 	Search bool `yaml:"search"`
 
 	Timeout        time.Duration `yaml:"-"`
@@ -82,9 +65,8 @@ type LLMStageConfig struct {
 	PromptTemplate string        `yaml:"-"`
 }
 
-// UnmarshalYAML принимает обе формы записи стадии и схлопывает историческую в Targets прямо
-// при разборе. Дальше по коду вторая форма уже не существует — в том числе в mergeLLMConfig,
-// который иначе молча пропускал бы overlay, написанный одиночной формой.
+// UnmarshalYAML принимает обе формы записи стадии и сводит provider/model в Targets при разборе,
+// чтобы mergeLLMConfig видел overlay одиночной формы.
 func (s *LLMStageConfig) UnmarshalYAML(node *yaml.Node) error {
 	// stageFields не наследует этот метод, поэтому рекурсии при разборе не возникает.
 	type stageFields LLMStageConfig
@@ -108,17 +90,12 @@ type LLMTargetConfig struct {
 	Model    string `yaml:"model"`
 }
 
-// LoadLLMConfigForStages проверяет схему по набору стадий самой задачи.
-//
-// Набор приходит снаружи, потому что он у задач разный: task_1 генерирует статью шестью
-// стадиями, задача со своим потоком — своими. Пустой набор означает набор task_1.
+// LoadLLMConfigForStages загружает схему и проверяет её по набору стадий задачи; пустой набор — набор task_1.
 func LoadLLMConfigForStages(path string, stages []string, requireCredentials bool) (LLMConfig, error) {
 	return loadLLMConfig(path, stages, requireCredentials)
 }
 
-// LoadLLMProviderConfig loads one provider without validating stages, prompt
-// templates, model environment variables, or credentials of other providers.
-// It is intended for provider-specific maintenance commands such as browser login.
+// LoadLLMProviderConfig loads one provider without validating stages or other providers.
 func LoadLLMProviderConfig(path, name string) (LLMProviderConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -136,10 +113,7 @@ func LoadLLMProviderConfig(path, name string) (LLMProviderConfig, error) {
 }
 
 // LoadLLMConfigWithOverlayForStages накладывает файл отличий на базовую конфигурацию и
-// проверяет схему по набору стадий задачи. Пустой набор означает набор task_1.
-//
-// Overlay перечисляет только то, что меняется: путь к промпту, targets, флаг провайдера.
-// Всё остальное остаётся в базовом файле.
+// проверяет схему по набору стадий задачи; пустой набор — набор task_1.
 func LoadLLMConfigWithOverlayForStages(basePath, overlayPath string, stages []string, requireCredentials bool) (LLMConfig, error) {
 	base, err := readLLMFile(basePath)
 	if err != nil {
@@ -233,9 +207,7 @@ func loadLLMConfig(path string, stages []string, requireCredentials bool) (LLMCo
 	return fileConfig.LLM, nil
 }
 
-// resolveStageTimeouts разбирает оба бюджета стадии: общий на все попытки и на одну попытку.
-//
-// Второй по умолчанию равен первому — так стадия ведёт себя ровно как до его появления.
+// resolveStageTimeouts разбирает бюджет стадии и бюджет попытки (по умолчанию равен первому).
 func resolveStageTimeouts(stageName string, stage *LLMStageConfig) error {
 	stage.Timeout = DefaultLLMTimeout
 	if text := strings.TrimSpace(stage.TimeoutText); text != "" {
@@ -254,8 +226,7 @@ func resolveStageTimeouts(stageName string, stage *LLMStageConfig) error {
 	if err != nil || attemptTimeout <= 0 {
 		return fmt.Errorf("LLM stage %q has invalid attempt_timeout %q", stageName, stage.AttemptTimeoutText)
 	}
-	// Попытка длиннее бюджета — не ограничение, а его молчаливая отмена: повтору снова не
-	// останется времени. Такую конфигурацию честнее не принимать.
+	// Попытка длиннее бюджета не оставила бы времени на повтор.
 	if attemptTimeout > stage.Timeout {
 		return fmt.Errorf("LLM stage %q has attempt_timeout %s longer than timeout %s",
 			stageName, attemptTimeout, stage.Timeout)
@@ -321,8 +292,7 @@ func validateLLMConfig(cfg *LLMConfig, stages []string, requireCredentials bool)
 	return nil
 }
 
-// validateStageTargets приводит targets стадии к рабочему виду и отмечает задействованных
-// провайдеров. Пустой список — ошибка: после разбора YAML маршрут обязан существовать.
+// validateStageTargets нормализует targets стадии и отмечает задействованных провайдеров.
 func validateStageTargets(cfg *LLMConfig, stageName string, targets []LLMTargetConfig, usedProviders map[string]struct{}, requireCredentials bool) error {
 	if len(targets) == 0 {
 		return fmt.Errorf("LLM stage %q has no targets", stageName)
@@ -334,10 +304,8 @@ func validateStageTargets(cfg *LLMConfig, stageName string, targets []LLMTargetC
 			return fmt.Errorf("LLM stage %q target %d references unknown provider %q; available providers: %s",
 				stageName, index, target.Provider, strings.Join(providerNames(cfg.Providers), ", "))
 		}
-		// Модель из переменной окружения — такое же требование окружения, как API-ключ,
-		// поэтому пустое значение после подстановки проверяется тем же флагом. Иначе
-		// dry-run падал бы на незаданном GEMINI_MODEL, так и не дойдя до вывода о том,
-		// что Gemini в этом прогоне вообще не нужен.
+		// Пустая модель после подстановки — требование окружения, как API-ключ: проверяется
+		// тем же флагом, чтобы dry-run не падал на незаданном GEMINI_MODEL.
 		raw := strings.TrimSpace(target.Model)
 		if raw == "" {
 			return fmt.Errorf("LLM stage %q target %d has empty model", stageName, index)
@@ -351,18 +319,12 @@ func validateStageTargets(cfg *LLMConfig, stageName string, targets []LLMTargetC
 	return nil
 }
 
-// AttachmentExtensions — расширения документа, прикрепляемого к стадии. Имя файла смысла не
-// несёт, значимо только расширение: регламент переименовывают, а стадия обязана работать.
-//
-// Форматов несколько потому, что документ живёт у человека, а не в репозитории: тот же
-// регламент вёрстки лежит то PDF-ом, то простым текстом, и замена формата не повод ронять
-// стадию на пороге. Все перечисленные веб-интерфейс модели принимает вложением.
+// AttachmentExtensions — расширения документа стадии; имя файла не значимо.
+// Все перечисленные веб-интерфейс модели принимает вложением.
 var AttachmentExtensions = []string{".pdf", ".txt", ".md", ".docx"}
 
-// attachmentExtensionList перечисляет расширения для сообщения человеку.
 func attachmentExtensionList() string { return strings.Join(AttachmentExtensions, ", ") }
 
-// isAttachmentFile сообщает, годится ли файл документом стадии.
 func isAttachmentFile(name string) bool {
 	extension := filepath.Ext(name)
 	for _, allowed := range AttachmentExtensions {
@@ -373,16 +335,8 @@ func isAttachmentFile(name string) bool {
 	return false
 }
 
-// ResolveStageAttachments возвращает документы стадии из её каталога.
-//
-// Правило то же, что у книги импорта (importer.ResolveWorkbook): каталог задан — в нём
-// ровно один подходящий файл. Пустой каталог и несколько файлов — не выбор по умолчанию,
-// а вопрос к человеку, и ошибка обязана назвать, что именно поправить.
-//
-// Разбор конфигурации сюда не заходит намеренно: регламент — рабочий документ на диске, а
-// не часть репозитория, и требовать его на каждом чтении config значило бы ломать команды
-// задачи и её тесты там, где до модели дело не дойдёт. Проверить документ заранее — работа
-// dry-run, который печатает разрешённую маршрутизацию перед дорогим прогоном.
+// ResolveStageAttachments возвращает единственный документ стадии из её каталога.
+// Разбор конфигурации его не вызывает: документ лежит вне репозитория и нужен только перед моделью.
 func ResolveStageAttachments(stageName, directory string) ([]string, error) {
 	directory = strings.TrimSpace(directory)
 	if directory == "" {

@@ -16,19 +16,17 @@ import (
 type Config struct {
 	AppEnv      string
 	DatabaseURL string
-	// InputFilePath — явно заданный INPUT_FILE_PATH. Пустой означает «искать книгу в InputDir»:
-	// имя файла импорта значения не имеет, и подставлять сюда догадку нельзя — иначе отличить
-	// выбор человека от умолчания станет невозможно.
+	// InputFilePath — явно заданный INPUT_FILE_PATH; пустой — искать книгу в InputDir.
+	// Догадку сюда не подставлять: выбор человека должен отличаться от умолчания.
 	InputFilePath string
-	// InputDir — каталог импорта задачи. Книгу в нём выбирает importer.ResolveWorkbook.
+	// InputDir — каталог импорта задачи; книгу в нём выбирает importer.ResolveWorkbook.
 	InputDir     string
 	OutputDir    string
 	LogLevel     string
 	LogFormat    string
 	GeminiAPIKey string
 	GeminiModel  string
-	// KeysSODisabled — Keys.so выключен секцией pipeline конфига задачи (pipeline.keysso: false).
-	// Отрицание намеренно: нулевое значение обязано означать прежнее поведение — сбор идёт.
+	// KeysSODisabled — Keys.so выключен (pipeline.keysso: false); нулевое значение — сбор идёт.
 	KeysSODisabled bool
 
 	KeysSOEmail      string
@@ -40,52 +38,34 @@ type Config struct {
 	// WordPress — площадка публикации этой задачи.
 	WordPress WordPressConfig
 
-	// envPrefix — префикс переменных задачи, из которой собран этот Config.
-	//
-	// Хранится только ради сообщений об ошибках. Площадок у проекта несколько, у каждой задачи
-	// свои переменные, и назвать человеку WORDPRESS_URL там, где он правит
-	// PPROF_1_WORDPRESS_URL, — значит отправить его искать опечатку не в той строке.
+	// envPrefix — префикс переменных задачи; нужен сообщениям об ошибках.
 	envPrefix string
 }
 
-// WordPressConfig — доступ к площадке одной задачи.
-//
-// Отдельный тип, а не три поля в Config: задачи публикуются на разные сайты, и набор из трёх
-// значений всегда берётся и передаётся целиком. Раздельные поля рано или поздно разъехались бы
-// — логин от одной площадки с адресом другой.
+// WordPressConfig — доступ к площадке одной задачи; три значения всегда идут вместе.
 type WordPressConfig struct {
 	// BaseURL — корень сайта из <префикс>WORDPRESS_URL.
 	BaseURL string
 	// Username — логин из <префикс>WORDPRESS_USERNAME.
 	Username string
-	// AppPassword — Application Password из <префикс>WORDPRESS_APP_PASSWORD. Не обычный
-	// пароль администратора: этот отзывается отдельно и не даёт входа в админку.
+	// AppPassword — Application Password из <префикс>WORDPRESS_APP_PASSWORD, не пароль администратора.
 	AppPassword string
 }
 
 // EnvName возвращает имя переменной окружения с префиксом задачи.
-//
-// Нужно сообщениям, которые называют переменную человеку: у задачи без префикса это
-// историческое имя, у pprof_1 — PPROF_1_<имя>.
 func (c Config) EnvName(name string) string {
 	return c.envPrefix + name
 }
 
 // TaskDefaults — то, чем задача подменяет общие настройки.
-//
-// Пакет намеренно не знает, какие задачи существуют: он получает готовые значения из
-// composition root. EnvPrefix задаёт имена переменных, которыми задачу можно переопределить
-// точечно; пустой префикс означает исторические имена без префикса, и переопределяют они
-// только ту задачу, у которой префикса нет.
+// Пустой EnvPrefix — имена без префикса, и они действуют только на задачу без префикса.
 type TaskDefaults struct {
 	InputDir  string
 	OutputDir string
 	EnvPrefix string
 }
 
-// Load загружает настройки из .env и переменных окружения.
-//
-// Переменные окружения имеют приоритет над значениями из файла .env.
+// Load загружает настройки из .env и переменных окружения; окружение важнее файла.
 func Load(defaults TaskDefaults) (Config, error) {
 	return load(true, defaults)
 }
@@ -95,9 +75,8 @@ func LoadDryRun(defaults TaskDefaults) (Config, error) {
 	return load(false, defaults)
 }
 
-// taskEnv читает переменную задачи: сначала с префиксом, затем — только для задачи без
-// префикса — историческое имя. Переменная без префикса не должна протекать в другую задачу:
-// иначе один OUTPUT_DIR в .env увёл бы артефакты обеих задач в один каталог.
+// taskEnv читает переменную задачи. Имя без префикса читается только задачей без префикса,
+// чтобы оно не протекало в другие задачи.
 func (d TaskDefaults) taskEnv(name string) string {
 	if d.EnvPrefix != "" {
 		return os.Getenv(d.EnvPrefix + name)
@@ -131,9 +110,7 @@ func load(requireEnvFile bool, defaults TaskDefaults) (Config, error) {
 		}
 	}
 
-	// DATABASE_URL — исключение из правила о префиксах: сервер PostgreSQL у задач общий, а
-	// разводит их search_path из профиля. Префикс здесь лишь позволяет увести задачу на
-	// другой сервер, не трогая остальные.
+	// Сервер PostgreSQL у задач общий; префиксная переменная лишь уводит задачу на другой.
 	databaseURL := os.Getenv("DATABASE_URL")
 	if prefixed := defaults.taskEnv("DATABASE_URL"); prefixed != "" {
 		databaseURL = prefixed
@@ -156,9 +133,6 @@ func load(requireEnvFile bool, defaults TaskDefaults) (Config, error) {
 		ArsenkinPassword: os.Getenv("ARSENKIN_PASSWORD"),
 		ArsenkinHeadless: arsenkinHeadless,
 
-		// Площадка читается через taskEnv, а не напрямую: сайтов у проекта несколько, и
-		// адрес одной задачи не должен протекать в другую. Задача с префиксом видит только
-		// PPROF_1_WORDPRESS_*, задача без префикса — исторические имена без него.
 		WordPress: WordPressConfig{
 			BaseURL:     defaults.taskEnv("WORDPRESS_URL"),
 			Username:    defaults.taskEnv("WORDPRESS_USERNAME"),
@@ -174,10 +148,7 @@ func load(requireEnvFile bool, defaults TaskDefaults) (Config, error) {
 	if cfg.LogLevel == "" {
 		cfg.LogLevel = "info"
 	}
-	// auto, а не text: незаданный LOG_FORMAT означает «решай по месту» — в терминале это
-	// человекочитаемый вывод, при перенаправлении в файл или пайп прежний text. Явный
-	// LOG_FORMAT=text обязан остаться text и в терминале, поэтому пустое значение и
-	// выставленное вручную нужно различать.
+	// auto, а не text: явный LOG_FORMAT=text должен остаться text и в терминале.
 	if cfg.LogFormat == "" {
 		cfg.LogFormat = "auto"
 	}
@@ -196,8 +167,6 @@ func load(requireEnvFile bool, defaults TaskDefaults) (Config, error) {
 }
 
 // LoadEnvFile loads the project .env into the process environment without building a Config.
-// The manual Keys.so login needs two secrets from it and nothing else, while Load validates the
-// whole task configuration, database included.
 func LoadEnvFile() error {
 	envPath, err := envFilePath()
 	if err != nil {
@@ -215,7 +184,6 @@ func envFilePath() (string, error) {
 		return absoluteEnvPath("ENV_FILE", configuredPath)
 	}
 
-	// Сохраняем совместимость с прежним именем переменной.
 	if configuredPath, found := os.LookupEnv("SEO_PIPELINE_ENV"); found && configuredPath != "" {
 		return absoluteEnvPath("SEO_PIPELINE_ENV", configuredPath)
 	}
@@ -258,9 +226,8 @@ func (c Config) ValidateImport() error {
 	return c.validateImportSource()
 }
 
-// validateImportSource требует хотя бы один источник книги импорта: явный путь или каталог
-// задачи. Существует ли там книга — решает importer.ResolveWorkbook: config не ходит в
-// файловую систему за данными задачи.
+// validateImportSource требует явный путь книги или каталог задачи; наличие книги проверяет
+// importer.ResolveWorkbook.
 func (c Config) validateImportSource() error {
 	if c.InputFilePath == "" && c.InputDir == "" {
 		return fmt.Errorf("INPUT_FILE_PATH or a task input directory is required")
@@ -276,10 +243,7 @@ func (c Config) ValidateReset() error {
 	return nil
 }
 
-// ValidateWordPress проверяет настройки площадки задачи.
-//
-// DATABASE_URL здесь намеренно не требуется: проверка подключения к WordPress не трогает базу,
-// и потушенный докер не повод отказать в ответе на вопрос «живы ли credentials».
+// ValidateWordPress проверяет настройки площадки задачи; DATABASE_URL не требуется.
 func (c Config) ValidateWordPress() error {
 	if c.WordPress.BaseURL == "" {
 		return fmt.Errorf("%s is required", c.EnvName("WORDPRESS_URL"))

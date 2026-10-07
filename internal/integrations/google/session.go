@@ -16,14 +16,11 @@ type playwrightSession struct {
 	folderID string
 	session  *browserSession
 	logger   *slog.Logger
-	// articleID нужен только диагностике, чтобы дампы ложились по каталогам статей.
+	// articleID раскладывает дампы диагностики по каталогам статей.
 	articleID int64
 }
 
-// NewSessionFactory возвращает фабрику сессий для публикатора.
-//
-// Профиль проверяется до запуска браузера: отсутствие входа — отдельная причина отказа,
-// которую повтор не лечит, и поднимать ради неё Chromium незачем.
+// NewSessionFactory возвращает фабрику сессий для публикатора; профиль проверяется до запуска браузера.
 func NewSessionFactory(cfg Config, logger *slog.Logger, articleID int64) SessionFactory {
 	return func(ctx context.Context) (Session, error) {
 		if err := cfg.Validate(); err != nil {
@@ -53,11 +50,7 @@ func isProfileBusy(err error) bool {
 
 func (s *playwrightSession) Close() error { return s.session.close() }
 
-// FindDocument ищет документ по точному имени внутри папки.
-//
-// Поиск идёт запросом в адресе, а не набором в поле: так не нужно ждать выпадающую подсказку
-// и бороться с автодополнением. Совпадение проверяется по точному имени — Drive возвращает и
-// частичные, а перезаписать чужой документ хуже, чем создать новый.
+// FindDocument ищет документ по точному имени внутри папки: поиск Drive возвращает и частичные совпадения.
 func (s *playwrightSession) FindDocument(ctx context.Context, title string) (string, bool, error) {
 	address := fmt.Sprintf(searchInFolderURLTemplate, url.QueryEscape(title), s.folderID)
 	if err := s.goTo(ctx, address, "find_document"); err != nil {
@@ -66,9 +59,7 @@ func (s *playwrightSession) FindDocument(ctx context.Context, title string) (str
 	if err := pause(ctx); err != nil {
 		return "", false, err
 	}
-	// Результаты приходят отдельным запросом уже после загрузки страницы: прочитанные сразу,
-	// они пусты почти всегда (27.09.2026 так «не нашлись» 48 документов из 50). Ненайденная
-	// строка — законный исход (документа ещё нет), поэтому ожидание ошибкой не считается.
+	// Результаты приходят после загрузки страницы, поэтому их ждём; отсутствие строки — не ошибка.
 	_ = s.session.page.Locator(driveSearchResultRow).First().WaitFor(playwright.LocatorWaitForOptions{
 		Timeout: playwright.Float(float64(searchResultsWait.Milliseconds())),
 	})
@@ -90,11 +81,7 @@ func (s *playwrightSession) FindDocument(ctx context.Context, title string) (str
 	return "", false, nil
 }
 
-// rowHasTitle сверяет имя файла в строке результата с искомым.
-//
-// Имя в строке лежит в разных местах в зависимости от вёрстки: в aria-label строки, в
-// подсказке имени или первой строкой текста (табличная вёрстка 2026 года, где у строки нет
-// ни того, ни другого). Сверяется точное совпадение с любым из них.
+// rowHasTitle сверяет имя файла в строке результата с искомым по точному совпадению.
 func rowHasTitle(row playwright.Locator, title string) bool {
 	want := strings.TrimSpace(title)
 	for _, name := range rowTitles(row) {
@@ -105,7 +92,7 @@ func rowHasTitle(row playwright.Locator, title string) bool {
 	return false
 }
 
-// rowTitles перечисляет, что в строке результата может быть именем файла.
+// rowTitles перечисляет, что в строке может быть именем файла: место зависит от вёрстки Drive.
 func rowTitles(row playwright.Locator) []string {
 	var names []string
 	if value, err := row.GetAttribute("aria-label"); err == nil && strings.TrimSpace(value) != "" {
@@ -166,11 +153,8 @@ func (s *playwrightSession) renameDocument(ctx context.Context, title string) er
 	return pause(ctx)
 }
 
-// writeBody заменяет весь текст документа промптом.
-//
-// Текст вставляется из буфера обмена, а не набирается: промпт статьи — это десятки тысяч
-// символов, набор занял бы минуты и попал бы под автозамену Docs. Select-all перед вставкой
-// и даёт полную перезапись без версий и копий.
+// writeBody заменяет весь текст документа промптом через select-all и вставку из буфера:
+// набор десятков тысяч символов занял бы минуты и попал бы под автозамену Docs.
 func (s *playwrightSession) writeBody(ctx context.Context, body, stage string) error {
 	script, arg := writeClipboardJS, any(body)
 	if rich, ok := promptHTML(body); ok {
@@ -199,8 +183,7 @@ func (s *playwrightSession) writeBody(ctx context.Context, body, stage string) e
 	if err := pause(ctx); err != nil {
 		return err
 	}
-	// Docs сохраняет сам, но выходить из браузера до появления отметки нельзя: закрытая
-	// вкладка обрывает автосохранение и оставляет документ пустым.
+	// Закрытая до отметки «сохранено» вкладка обрывает автосохранение Docs.
 	if err := s.waitFor(ctx, documentSavedMarker, stage); err != nil {
 		return err
 	}
@@ -221,7 +204,7 @@ func (s *playwrightSession) goTo(ctx context.Context, address, stage string) err
 	return nil
 }
 
-// waitFor ждёт наблюдаемое состояние страницы. Никаких sleep: условие проверяется на DOM.
+// waitFor ждёт видимости элемента, проверяя условие на DOM.
 func (s *playwrightSession) waitFor(ctx context.Context, selector, stage string) error {
 	if _, err := s.session.page.WaitForFunction(visibleElementJS, selector, playwright.PageWaitForFunctionOptions{
 		Polling: "raf",
