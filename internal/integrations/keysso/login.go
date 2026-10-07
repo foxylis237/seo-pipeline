@@ -36,8 +36,8 @@ func Login(ctx context.Context, email, password string, logger *slog.Logger) err
 	}); err != nil {
 		return fmt.Errorf("open Keys.so login page: %w", err)
 	}
-	service.prefill(emailSelector, email, "email")
-	service.prefill(passwordSelector, password, "password")
+	service.prefill(loginCtx, emailSelector, email, "email")
+	service.prefill(loginCtx, passwordSelector, password, "password")
 
 	logger.Info("Keys.so: войдите в открытом окне браузера — введите капчу и нажмите «Войти»",
 		"timeout", manualLoginTimeout, "profile_dir", profilePath)
@@ -55,13 +55,13 @@ func Login(ctx context.Context, email, password string, logger *slog.Logger) err
 }
 
 // prefill types a credential into the login form; a missing field is not an error.
-func (s *Service) prefill(selector, value, field string) {
+func (s *Service) prefill(ctx context.Context, selector, value, field string) {
 	if value == "" {
 		return
 	}
 	if err := s.page.Locator(selector).Fill(value, playwright.LocatorFillOptions{
 		Timeout: playwright.Float(operationTimeoutMilliseconds),
 	}); err != nil {
-		s.log(slog.LevelWarn, "Keys.so: поле формы входа не заполнено, введите вручную", "manual_login", "field", field)
+		s.log(ctx, slog.LevelWarn, "Keys.so: поле формы входа не заполнено, введите вручную", "manual_login", "field", field)
 	}
 }

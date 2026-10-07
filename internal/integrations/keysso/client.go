@@ -200,13 +200,13 @@ func (s *Service) CollectCleanKeywords(ctx context.Context, referenceURL string)
 	}
 	queries, err := s.collectCompetitorQueries(ctx, referenceURL)
 	if err != nil {
-		return CollectResult{}, s.stageError("collect_competitor_queries", s.captureError("collect_competitor_queries", 1, 1, err))
+		return CollectResult{}, s.stageError("collect_competitor_queries", s.captureError(ctx, "collect_competitor_queries", 1, 1, err))
 	}
 	s.collectedCount = len(queries)
 
 	cleaned, err := s.cleanDuplicates(ctx, queries)
 	if err != nil {
-		return CollectResult{}, s.stageError("clean_duplicates", s.captureError("clean_duplicates", 1, 1, err))
+		return CollectResult{}, s.stageError("clean_duplicates", s.captureError(ctx, "clean_duplicates", 1, 1, err))
 	}
 	s.cleanedCount = len(cleaned)
 	return CollectResult{
@@ -238,7 +238,7 @@ func (s *Service) CleanKeywords(ctx context.Context, queries []string) (CollectR
 	}
 	cleaned, err := s.cleanDuplicates(ctx, queries)
 	if err != nil {
-		return CollectResult{}, s.stageError("clean_duplicates", s.captureErrorContext(ctx, "clean_duplicates", 1, 1, err))
+		return CollectResult{}, s.stageError("clean_duplicates", s.captureError(ctx, "clean_duplicates", 1, 1, err))
 	}
 	s.cleanedCount = len(cleaned)
 	return CollectResult{
@@ -309,9 +309,9 @@ func (s *Service) authenticateWithRetries(ctx context.Context) error {
 		}
 		var classified *resultError
 		if !errors.As(authenticationErr, &classified) || !classified.Retryable {
-			return s.stageError("check_authorization", s.captureError("check_authorization", attempt, keywordsTableMaxAttempts, authenticationErr))
+			return s.stageError("check_authorization", s.captureError(ctx, "check_authorization", attempt, keywordsTableMaxAttempts, authenticationErr))
 		}
-		authenticationErr = s.captureError("check_authorization", attempt, keywordsTableMaxAttempts, authenticationErr)
+		authenticationErr = s.captureError(ctx, "check_authorization", attempt, keywordsTableMaxAttempts, authenticationErr)
 	}
 	return s.stageError("check_authorization", authenticationErr)
 }
@@ -322,7 +322,7 @@ func (s *Service) start(ctx context.Context) error {
 		return fmt.Errorf("close previous Keys.so session: %w", err)
 	}
 
-	s.logContext(ctx, slog.LevelDebug, "запуск Playwright", "start_browser", "profile_path", profilePath)
+	s.log(ctx, slog.LevelDebug, "запуск Playwright", "start_browser", "profile_path", profilePath)
 	if err := os.MkdirAll(profilePath, 0o700); err != nil {
 		return fmt.Errorf("create persistent browser profile: %w", err)
 	}
@@ -367,19 +367,19 @@ func (s *Service) start(ctx context.Context) error {
 	s.pw = pw
 	s.browserContext = browserContext
 	s.page = page
-	s.logContext(ctx, slog.LevelDebug, "Playwright запущен с постоянным профилем", "start_browser")
+	s.log(ctx, slog.LevelDebug, "Playwright запущен с постоянным профилем", "start_browser")
 	return nil
 }
 
 func (s *Service) ensureAuthenticated(ctx context.Context) error {
-	s.log(slog.LevelDebug, "проверка активной сессии Keys.so", "check_authorization")
+	s.log(ctx, slog.LevelDebug, "проверка активной сессии Keys.so", "check_authorization")
 	if err := s.open(ctx, homeURL, "check Keys.so session"); err != nil {
 		return err
 	}
 	if err := s.detectAccessRestriction("check_authorization"); err != nil {
 		return err
 	}
-	if err := s.detectMaintenancePage(); err != nil {
+	if err := s.detectMaintenancePage(ctx); err != nil {
 		return err
 	}
 	searchInput := s.page.Locator(searchSelector)
@@ -395,16 +395,16 @@ func (s *Service) ensureAuthenticated(ctx context.Context) error {
 		return fmt.Errorf("determine Keys.so authorization state: %w", err)
 	}
 	if count == 0 {
-		s.log(slog.LevelInfo, "сессия Keys.so подтверждена", "check_authorization")
+		s.log(ctx, slog.LevelInfo, "сессия Keys.so подтверждена", "check_authorization")
 		return nil
 	}
 
-	s.log(slog.LevelWarn, "сессия Keys.so истекла, требуется повторная авторизация", "authorize")
-	visibleLoginLink, loginLinkIndex, err := s.firstVisible(loginLink, loginLinkSelector, "ссылка входа на главной странице")
+	s.log(ctx, slog.LevelWarn, "сессия Keys.so истекла, требуется повторная авторизация", "authorize")
+	visibleLoginLink, loginLinkIndex, err := s.firstVisible(ctx, loginLink, loginLinkSelector, "ссылка входа на главной странице")
 	if err != nil {
 		return err
 	}
-	s.log(slog.LevelDebug, "выбрана ссылка входа", "authorize", "locator_index", loginLinkIndex)
+	s.log(ctx, slog.LevelDebug, "выбрана ссылка входа", "authorize", "locator_index", loginLinkIndex)
 	if err := visibleLoginLink.Click(); err != nil {
 		return fmt.Errorf("open Keys.so login page through navigation link: %w", err)
 	}
@@ -415,12 +415,12 @@ func (s *Service) ensureAuthenticated(ctx context.Context) error {
 	); err != nil {
 		return fmt.Errorf("wait for Keys.so login URL: %w", err)
 	}
-	s.log(slog.LevelDebug, "страница входа Keys.so открыта", "open_login_page")
+	s.log(ctx, slog.LevelDebug, "страница входа Keys.so открыта", "open_login_page")
 	if err := s.detectAccessRestriction("open_login_page"); err != nil {
 		return err
 	}
 	if !strings.Contains(s.page.URL(), "/login") {
-		s.log(slog.LevelInfo, "сессия Keys.so подтверждена", "check_authorization")
+		s.log(ctx, slog.LevelInfo, "сессия Keys.so подтверждена", "check_authorization")
 		return nil
 	}
 
@@ -430,22 +430,22 @@ func (s *Service) ensureAuthenticated(ctx context.Context) error {
 		Name:  "Войти",
 		Exact: playwright.Bool(true),
 	})
-	if err := s.waitVisible(emailInput, emailSelector, "поле email формы входа", "wait_login_form"); err != nil {
+	if err := s.waitVisible(ctx, emailInput, emailSelector, "поле email формы входа", "wait_login_form"); err != nil {
 		return err
 	}
-	if err := s.waitVisible(passwordInput, passwordSelector, "поле пароля формы входа", "wait_login_form"); err != nil {
+	if err := s.waitVisible(ctx, passwordInput, passwordSelector, "поле пароля формы входа", "wait_login_form"); err != nil {
 		return err
 	}
-	if err := s.waitVisible(loginButton, `getByRole(button, name="Войти")`, "кнопка подтверждения входа", "wait_login_form"); err != nil {
+	if err := s.waitVisible(ctx, loginButton, `getByRole(button, name="Войти")`, "кнопка подтверждения входа", "wait_login_form"); err != nil {
 		return err
 	}
-	if err := s.requireUnique(emailInput, emailSelector, "поле email формы входа"); err != nil {
+	if err := s.requireUnique(ctx, emailInput, emailSelector, "поле email формы входа"); err != nil {
 		return err
 	}
-	if err := s.requireUnique(passwordInput, passwordSelector, "поле пароля формы входа"); err != nil {
+	if err := s.requireUnique(ctx, passwordInput, passwordSelector, "поле пароля формы входа"); err != nil {
 		return err
 	}
-	if err := s.requireUnique(loginButton, `getByRole(button, name="Войти")`, "кнопка подтверждения входа"); err != nil {
+	if err := s.requireUnique(ctx, loginButton, `getByRole(button, name="Войти")`, "кнопка подтверждения входа"); err != nil {
 		return err
 	}
 	if err := emailInput.Fill(s.cfg.Email); err != nil {
@@ -486,29 +486,29 @@ func (s *Service) ensureAuthenticated(ctx context.Context) error {
 	if count != 0 {
 		return fmt.Errorf("Keys.so authorization did not succeed")
 	}
-	s.log(slog.LevelInfo, "авторизация Keys.so выполнена", "authorize")
+	s.log(ctx, slog.LevelInfo, "авторизация Keys.so выполнена", "authorize")
 	return nil
 }
 
 func (s *Service) collectCompetitorQueries(ctx context.Context, referenceURL string) ([]string, error) {
-	s.log(slog.LevelDebug, "начало поиска конкурента", "collect_competitor_queries")
+	s.log(ctx, slog.LevelDebug, "начало поиска конкурента", "collect_competitor_queries")
 	var navigationErr error
 	for attempt := 1; attempt <= keywordsTableMaxAttempts; attempt++ {
 		navigationErr = s.submitCompetitorSearch(ctx, referenceURL)
 		if navigationErr == nil {
 			break
 		}
-		navigationErr = s.captureError("navigate_search_results", attempt, keywordsTableMaxAttempts, navigationErr)
+		navigationErr = s.captureError(ctx, "navigate_search_results", attempt, keywordsTableMaxAttempts, navigationErr)
 		if !isRetryableResultError(navigationErr) || attempt == keywordsTableMaxAttempts {
 			return nil, navigationErr
 		}
 		result, retryable := resultErrorFields(navigationErr)
-		s.log(slog.LevelWarn, "Keys.so search navigation retry", "navigate_search_results", "attempt", attempt+1, "max_attempts", keywordsTableMaxAttempts, "reference_url", referenceURL, "result", result, "retryable", retryable, "error", navigationErr)
+		s.log(ctx, slog.LevelWarn, "Keys.so search navigation retry", "navigate_search_results", "attempt", attempt+1, "max_attempts", keywordsTableMaxAttempts, "reference_url", referenceURL, "result", result, "retryable", retryable, "error", navigationErr)
 	}
 
 	if err := s.waitKeywordsResults(ctx); err != nil {
 		pageSize := s.page.Locator(pageSizeSelector)
-		s.logLocatorDiagnostic(pageSize, pageSizeSelector, "видимый select количества строк таблицы")
+		s.logLocatorDiagnostic(ctx, pageSize, pageSizeSelector, "видимый select количества строк таблицы")
 		if restrictionErr := s.detectAccessRestriction("wait_search_results"); restrictionErr != nil {
 			return nil, restrictionErr
 		}
@@ -519,9 +519,9 @@ func (s *Service) collectCompetitorQueries(ctx context.Context, referenceURL str
 	if err != nil {
 		return nil, fmt.Errorf("get result page size selectors: %w", err)
 	}
-	s.log(slog.LevelDebug, "найдены селекторы количества строк", "select_page_size", "matches_count", len(pageSizeMatches), "locator", pageSizeSelector)
+	s.log(ctx, slog.LevelDebug, "найдены селекторы количества строк", "select_page_size", "matches_count", len(pageSizeMatches), "locator", pageSizeSelector)
 	if len(pageSizeMatches) != 1 {
-		s.log(slog.LevelWarn, "найдено нестандартное количество селекторов строк", "select_page_size", "matches_count", len(pageSizeMatches), "locator", pageSizeSelector)
+		s.log(ctx, slog.LevelWarn, "найдено нестандартное количество селекторов строк", "select_page_size", "matches_count", len(pageSizeMatches), "locator", pageSizeSelector)
 	}
 
 	selectedIndex := -1
@@ -544,7 +544,7 @@ func (s *Service) collectCompetitorQueries(ctx context.Context, referenceURL str
 	if err != nil {
 		return nil, fmt.Errorf("read current result page size: %w", err)
 	}
-	s.log(slog.LevelDebug,
+	s.log(ctx, slog.LevelDebug,
 		"выбран видимый селектор количества строк",
 		"select_page_size",
 		"selected_index", selectedIndex,
@@ -555,7 +555,7 @@ func (s *Service) collectCompetitorQueries(ctx context.Context, referenceURL str
 	if _, err := selectedPageSize.SelectOption(playwright.SelectOptionValues{Values: &values}); err != nil {
 		return nil, fmt.Errorf("select 500 competitor queries: %w", err)
 	}
-	s.log(slog.LevelDebug, "успешно выбрано 500 строк", "select_page_size", "selected_index", selectedIndex, "value", "500")
+	s.log(ctx, slog.LevelDebug, "успешно выбрано 500 строк", "select_page_size", "selected_index", selectedIndex, "value", "500")
 	if err := s.page.WaitForLoadState(playwright.PageWaitForLoadStateOptions{
 		State:   playwright.LoadStateNetworkidle,
 		Timeout: playwright.Float(longOperationTimeoutMilliseconds),
@@ -577,7 +577,7 @@ func (s *Service) collectCompetitorQueries(ctx context.Context, referenceURL str
 	}
 
 	table := s.page.Locator(keywordsTableSelector)
-	if err := s.requireUnique(table, keywordsTableSelector, "таблица запросов конкурента"); err != nil {
+	if err := s.requireUnique(ctx, table, keywordsTableSelector, "таблица запросов конкурента"); err != nil {
 		return nil, err
 	}
 	raw, err := table.Evaluate(`table => {
@@ -602,7 +602,7 @@ func (s *Service) collectCompetitorQueries(ctx context.Context, referenceURL str
 			Err: fmt.Errorf("%w: таблица запросов конкурента пуста", ErrNoRawKeywords)}
 	}
 	s.collectedCount = len(queries)
-	s.log(slog.LevelInfo, "запросы конкурента получены", "collect_competitor_queries")
+	s.log(ctx, slog.LevelInfo, "запросы конкурента получены", "collect_competitor_queries")
 	return queries, nil
 }
 
@@ -615,10 +615,10 @@ func (s *Service) submitCompetitorSearch(ctx context.Context, referenceURL strin
 	}
 	searchInput := s.page.Locator(searchSelector)
 	searchButton := s.page.GetByRole("button", playwright.PageGetByRoleOptions{Name: "Поиск", Exact: playwright.Bool(true)})
-	if err := s.requireUnique(searchInput, searchSelector, "поле поиска конкурента"); err != nil {
+	if err := s.requireUnique(ctx, searchInput, searchSelector, "поле поиска конкурента"); err != nil {
 		return fmt.Errorf("search field not found: %w", err)
 	}
-	if err := s.requireUnique(searchButton, `getByRole(button, name="Поиск")`, "кнопка поиска конкурента"); err != nil {
+	if err := s.requireUnique(ctx, searchButton, `getByRole(button, name="Поиск")`, "кнопка поиска конкурента"); err != nil {
 		return err
 	}
 	if err := searchInput.Fill(referenceURL); err != nil {
@@ -649,9 +649,9 @@ func (s *Service) submitCompetitorSearch(ctx context.Context, referenceURL strin
 		s.resultsURL = s.currentURL()
 	}
 	s.requestedURL = s.resultsURL
-	s.log(slog.LevelDebug, "поиск конкурента отправлен, ожидание результатов", "collect_competitor_queries", "requested_url", s.requestedURL)
+	s.log(ctx, slog.LevelDebug, "поиск конкурента отправлен, ожидание результатов", "collect_competitor_queries", "requested_url", s.requestedURL)
 	if !resultsMatchReference(s.resultsURL, referenceURL) {
-		s.log(slog.LevelWarn,
+		s.log(ctx, slog.LevelWarn,
 			"страница результатов Keys.so не упоминает reference_url статьи",
 			"validate_results_url",
 			"article_id", s.cfg.ArticleID, "external_id", s.cfg.ExternalID,
@@ -691,24 +691,24 @@ func (s *Service) waitKeywordsResults(ctx context.Context) error {
 			return err
 		}
 		if attempt > 1 {
-			s.log(slog.LevelInfo, "Keys.so: refreshing results page", "wait_search_results", "attempt", attempt, "max_attempts", keywordsTableMaxAttempts)
+			s.log(ctx, slog.LevelInfo, "Keys.so: refreshing results page", "wait_search_results", "attempt", attempt, "max_attempts", keywordsTableMaxAttempts)
 			if err := s.refreshKeywordsResults(ctx); err != nil {
 				return fmt.Errorf("refresh Keys.so results before attempt %d/%d: %w", attempt, keywordsTableMaxAttempts, errors.Join(lastErr, err))
 			}
 		}
 
-		s.log(slog.LevelInfo, "Keys.so: waiting keywords table", "wait_search_results", "attempt", attempt, "max_attempts", keywordsTableMaxAttempts, "locator", keywordsTableSelector)
+		s.log(ctx, slog.LevelInfo, "Keys.so: waiting keywords table", "wait_search_results", "attempt", attempt, "max_attempts", keywordsTableMaxAttempts, "locator", keywordsTableSelector)
 		started := time.Now()
 		lastErr = s.waitKeywordsResultsOnce(ctx)
 		duration := time.Since(started)
 		durations = append(durations, duration)
 		if lastErr == nil {
-			s.log(slog.LevelInfo, "Keys.so: keywords table loaded", "wait_search_results", "attempt", attempt, "max_attempts", keywordsTableMaxAttempts, "attempt_duration_ms", duration.Milliseconds(), "locator", keywordsTableSelector)
+			s.log(ctx, slog.LevelInfo, "Keys.so: keywords table loaded", "wait_search_results", "attempt", attempt, "max_attempts", keywordsTableMaxAttempts, "attempt_duration_ms", duration.Milliseconds(), "locator", keywordsTableSelector)
 			return nil
 		}
 		result, retryable := resultErrorFields(lastErr)
-		s.log(slog.LevelWarn, "Keys.so: keywords table attempt failed", "wait_search_results", "attempt", attempt, "max_attempts", keywordsTableMaxAttempts, "attempt_duration_ms", duration.Milliseconds(), "locator", keywordsTableSelector, "reference_url", s.referenceURL, "requested_url", s.requestedURL, "result", result, "retryable", retryable, "error", lastErr)
-		lastErr = s.captureError("wait_search_results", attempt, keywordsTableMaxAttempts, lastErr)
+		s.log(ctx, slog.LevelWarn, "Keys.so: keywords table attempt failed", "wait_search_results", "attempt", attempt, "max_attempts", keywordsTableMaxAttempts, "attempt_duration_ms", duration.Milliseconds(), "locator", keywordsTableSelector, "reference_url", s.referenceURL, "requested_url", s.requestedURL, "result", result, "retryable", retryable, "error", lastErr)
+		lastErr = s.captureError(ctx, "wait_search_results", attempt, keywordsTableMaxAttempts, lastErr)
 		if !isRetryableResultError(lastErr) {
 			return lastErr
 		}
@@ -722,7 +722,7 @@ func (s *Service) waitKeywordsResults(ctx context.Context) error {
 		}
 	}
 	result, retryable := resultErrorFields(lastErr)
-	s.log(slog.LevelError, "Keys.so failed after 3 attempts", "wait_search_results", "attempts", keywordsTableMaxAttempts, "locator", keywordsTableSelector, "reference_url", s.referenceURL, "requested_url", s.requestedURL, "result", result, "retryable", retryable, "error", lastErr)
+	s.log(ctx, slog.LevelError, "Keys.so failed after 3 attempts", "wait_search_results", "attempts", keywordsTableMaxAttempts, "locator", keywordsTableSelector, "reference_url", s.referenceURL, "requested_url", s.requestedURL, "result", result, "retryable", retryable, "error", lastErr)
 	return &keywordsTableWaitError{
 		Attempts: keywordsTableMaxAttempts, URL: s.currentURL(), Selector: keywordsTableSelector,
 		AttemptDurations: durations, Err: lastErr,
@@ -811,7 +811,7 @@ func (s *Service) refreshKeywordsResults(ctx context.Context) error {
 }
 
 func (s *Service) cleanDuplicates(ctx context.Context, queries []string) ([]string, error) {
-	s.log(slog.LevelDebug, "открытие страницы удаления дублей", "open_cleanup_page", "target_url", cleanupURL)
+	s.log(ctx, slog.LevelDebug, "открытие страницы удаления дублей", "open_cleanup_page", "target_url", cleanupURL)
 	if err := s.open(ctx, cleanupURL, "open duplicate cleanup tool"); err != nil {
 		return nil, err
 	}
@@ -825,8 +825,8 @@ func (s *Service) cleanDuplicates(ctx context.Context, queries []string) ([]stri
 	if !strings.Contains(currentURL, "/ru/tools/delete-double") {
 		return nil, fmt.Errorf("duplicate cleanup navigation ended on unexpected URL %q", currentURL)
 	}
-	s.log(slog.LevelDebug, "страница удаления дублей открыта", "open_cleanup_page")
-	s.log(slog.LevelDebug, "ожидание формы удаления дублей", "find_cleanup_input")
+	s.log(ctx, slog.LevelDebug, "страница удаления дублей открыта", "open_cleanup_page")
+	s.log(ctx, slog.LevelDebug, "ожидание формы удаления дублей", "find_cleanup_input")
 
 	const inputLabel = "Список поисковых фраз"
 	_, waitErr := s.page.WaitForFunction(
@@ -852,10 +852,10 @@ func (s *Service) cleanDuplicates(ctx context.Context, queries []string) ([]stri
 	}
 	labelFound := labelCount > 0
 	if labelFound {
-		s.log(slog.LevelDebug, "найдена подпись поля удаления дублей", "find_cleanup_input", "label", inputLabel, "matches_count", labelCount)
+		s.log(ctx, slog.LevelDebug, "найдена подпись поля удаления дублей", "find_cleanup_input", "label", inputLabel, "matches_count", labelCount)
 	}
 	if labelCount != 1 {
-		s.log(slog.LevelWarn, "найдено нестандартное количество подписей поля удаления дублей", "find_cleanup_input", "matches_count", labelCount)
+		s.log(ctx, slog.LevelWarn, "найдено нестандартное количество подписей поля удаления дублей", "find_cleanup_input", "matches_count", labelCount)
 	}
 
 	labelMatches, err := labels.All()
@@ -879,7 +879,7 @@ func (s *Service) cleanDuplicates(ctx context.Context, queries []string) ([]stri
 		}
 		if containerCount == 1 {
 			formContainer = container
-			s.log(slog.LevelDebug, "найден контейнер поля удаления дублей", "find_cleanup_input", "label_index", index)
+			s.log(ctx, slog.LevelDebug, "найден контейнер поля удаления дублей", "find_cleanup_input", "label_index", index)
 			break
 		}
 	}
@@ -893,13 +893,13 @@ func (s *Service) cleanDuplicates(ctx context.Context, queries []string) ([]stri
 		if err != nil {
 			return nil, fmt.Errorf("count textareas in duplicate cleanup form container: %w", err)
 		}
-		s.log(slog.LevelDebug,
+		s.log(ctx, slog.LevelDebug,
 			"найдены textarea в контейнере удаления дублей",
 			"find_cleanup_input",
 			"matches_count", containerTextareaCount,
 		)
 		if containerTextareaCount != 1 {
-			s.log(slog.LevelWarn, "найдено нестандартное количество textarea в контейнере", "find_cleanup_input", "matches_count", containerTextareaCount)
+			s.log(ctx, slog.LevelWarn, "найдено нестандартное количество textarea в контейнере", "find_cleanup_input", "matches_count", containerTextareaCount)
 		}
 		containerTextareaMatches, err := containerTextareas.All()
 		if err != nil {
@@ -918,7 +918,7 @@ func (s *Service) cleanDuplicates(ctx context.Context, queries []string) ([]stri
 		}
 	}
 	if input == nil {
-		s.log(slog.LevelDebug,
+		s.log(ctx, slog.LevelDebug,
 			"поле формы удаления дублей не найдено",
 			"find_cleanup_input",
 			"input_label_found", labelFound,
@@ -936,20 +936,20 @@ func (s *Service) cleanDuplicates(ctx context.Context, queries []string) ([]stri
 			s.page.URL(), labelFound, containerTextareaCount, pageTextareaCount,
 		)
 	}
-	s.log(slog.LevelDebug, "выбрано видимое textarea в контейнере", "find_cleanup_input", "textarea_index", selectedTextareaIndex)
+	s.log(ctx, slog.LevelDebug, "выбрано видимое textarea в контейнере", "find_cleanup_input", "textarea_index", selectedTextareaIndex)
 
 	processButton := s.page.Locator(`button[aria-label="Обработать"]`)
-	if err := s.requireUnique(processButton, `button[aria-label="Обработать"]`, "кнопка обработки дублей"); err != nil {
+	if err := s.requireUnique(ctx, processButton, `button[aria-label="Обработать"]`, "кнопка обработки дублей"); err != nil {
 		return nil, err
 	}
 	if err := input.Fill(strings.Join(queries, "\n")); err != nil {
 		return nil, fmt.Errorf("fill duplicate cleanup input: %w", err)
 	}
-	s.log(slog.LevelDebug, "запросы вставлены в форму удаления дублей", "fill_cleanup_input", "queries_count", len(queries))
+	s.log(ctx, slog.LevelDebug, "запросы вставлены в форму удаления дублей", "fill_cleanup_input", "queries_count", len(queries))
 	if err := processButton.Click(); err != nil {
 		return nil, fmt.Errorf("start duplicate cleanup: %w", err)
 	}
-	s.log(slog.LevelDebug, "обработка дублей запущена, ожидание результата", "wait_cleanup_result")
+	s.log(ctx, slog.LevelDebug, "обработка дублей запущена, ожидание результата", "wait_cleanup_result")
 
 	resultField := s.page.Locator(resultFieldSelector).Filter(playwright.LocatorFilterOptions{
 		HasText: "Результат",
@@ -959,7 +959,7 @@ func (s *Service) cleanDuplicates(ctx context.Context, queries []string) ([]stri
 		State:   playwright.WaitForSelectorStateVisible,
 		Timeout: playwright.Float(longOperationTimeoutMilliseconds),
 	}); err != nil {
-		s.logLocatorDiagnostic(
+		s.logLocatorDiagnostic(ctx,
 			result,
 			`div.field hasText="Результат" >> textarea.p-inputtextarea`,
 			"textarea результата удаления дублей",
@@ -969,7 +969,7 @@ func (s *Service) cleanDuplicates(ctx context.Context, queries []string) ([]stri
 		}
 		return nil, fmt.Errorf("duplicate cleanup did not return result: %w", err)
 	}
-	if err := s.requireUnique(result, `div.field hasText="Результат" >> textarea.p-inputtextarea`, "результат удаления дублей"); err != nil {
+	if err := s.requireUnique(ctx, result, `div.field hasText="Результат" >> textarea.p-inputtextarea`, "результат удаления дублей"); err != nil {
 		return nil, err
 	}
 	value, err := result.InputValue()
@@ -981,7 +981,7 @@ func (s *Service) cleanDuplicates(ctx context.Context, queries []string) ([]stri
 		return nil, fmt.Errorf("duplicate cleanup result is empty")
 	}
 	s.cleanedCount = len(cleaned)
-	s.log(slog.LevelInfo, "запросы очищены", "clean_duplicates")
+	s.log(ctx, slog.LevelInfo, "запросы очищены", "clean_duplicates")
 	return cleaned, nil
 }
 
@@ -989,14 +989,14 @@ func (s *Service) open(ctx context.Context, url, stage string) error {
 	if err := checkContext(ctx, stage); err != nil {
 		return err
 	}
-	s.log(slog.LevelDebug, "открытие страницы Keys.so", stage, "target_url", url)
+	s.log(ctx, slog.LevelDebug, "открытие страницы Keys.so", stage, "target_url", url)
 	if _, err := s.page.Goto(url, playwright.PageGotoOptions{
 		WaitUntil: playwright.WaitUntilStateDomcontentloaded,
 	}); err != nil {
 		if !samePage(s.currentURL(), url) {
 			return &resultError{Kind: resultNavigationError, Retryable: true, Err: fmt.Errorf("Keys.so navigation failed during %s: %w", stage, err)}
 		}
-		s.log(slog.LevelWarn,
+		s.log(ctx, slog.LevelWarn,
 			"навигационное событие Keys.so не завершилось, но целевой URL достигнут",
 			stage,
 			"error", err,
@@ -1008,26 +1008,26 @@ func (s *Service) open(ctx context.Context, url, stage string) error {
 	if err := s.detectAccessRestriction(stage); err != nil {
 		return err
 	}
-	if err := s.detectMaintenancePage(); err != nil {
+	if err := s.detectMaintenancePage(ctx); err != nil {
 		return err
 	}
 	title, err := s.page.Title()
 	if err != nil {
-		s.log(slog.LevelWarn, "не удалось получить title страницы Keys.so", stage, "error", err)
+		s.log(ctx, slog.LevelWarn, "не удалось получить title страницы Keys.so", stage, "error", err)
 	} else {
-		s.log(slog.LevelInfo, "страница Keys.so загружена", stage, "page_title", title, "page_url", s.currentURL())
+		s.log(ctx, slog.LevelInfo, "страница Keys.so загружена", stage, "page_title", title, "page_url", s.currentURL())
 	}
-	s.log(slog.LevelDebug, "страница Keys.so открыта", stage)
+	s.log(ctx, slog.LevelDebug, "страница Keys.so открыта", stage)
 	return nil
 }
 
-func (s *Service) detectMaintenancePage() error {
+func (s *Service) detectMaintenancePage(ctx context.Context) error {
 	title, err := s.page.Title()
 	if err != nil {
 		return fmt.Errorf("read Keys.so page title: %w", err)
 	}
 	if strings.EqualFold(strings.TrimSpace(title), "Технические работы на сайте") {
-		s.log(slog.LevelWarn, "Keys.so maintenance page detected", "maintenance", "page_title", title, "retryable", true, "reference_url", s.referenceURL)
+		s.log(ctx, slog.LevelWarn, "Keys.so maintenance page detected", "maintenance", "page_title", title, "retryable", true, "reference_url", s.referenceURL)
 		return &resultError{Kind: resultMaintenance, Retryable: true, Err: fmt.Errorf("Keys.so is unavailable: maintenance page detected")}
 	}
 	return nil
@@ -1069,8 +1069,8 @@ func resultErrorFields(err error) (string, bool) {
 	return string(resultTimeout), true
 }
 
-// captureErrorContext сохраняет диагностику неудачной попытки в переданном контексте.
-func (s *Service) captureErrorContext(ctx context.Context, stage string, attempt, maxAttempts int, err error) error {
+// captureError сохраняет диагностику неудачной попытки.
+func (s *Service) captureError(ctx context.Context, stage string, attempt, maxAttempts int, err error) error {
 	if err == nil {
 		return nil
 	}
@@ -1086,13 +1086,9 @@ func (s *Service) captureErrorContext(ctx context.Context, stage string, attempt
 	return &debugCapturedError{err: err}
 }
 
-func (s *Service) captureError(stage string, attempt, maxAttempts int, err error) error {
-	return s.captureErrorContext(context.Background(), stage, attempt, maxAttempts, err)
-}
-
 func (s *Service) saveDebugArtifacts(ctx context.Context, stage string, attempt, maxAttempts int, processingErr error) {
 	if s.page == nil {
-		s.logContext(ctx, slog.LevelWarn, "Keys.so debug artifacts were not saved: page is unavailable", stage, "attempt", attempt)
+		s.log(ctx, slog.LevelWarn, "Keys.so debug artifacts were not saved: page is unavailable", stage, "attempt", attempt)
 		return
 	}
 	timestamp := time.Now()
@@ -1102,7 +1098,7 @@ func (s *Service) saveDebugArtifacts(ctx context.Context, stage string, attempt,
 		fmt.Sprintf("%s-attempt-%d", timestamp.Format("20060102-150405.000000000"), attempt),
 	)
 	if err := os.MkdirAll(directory, 0o750); err != nil {
-		s.logContext(ctx, slog.LevelWarn, "не удалось создать каталог Keys.so debug", stage, "attempt", attempt, "debug_path", directory, "error", err)
+		s.log(ctx, slog.LevelWarn, "не удалось создать каталог Keys.so debug", stage, "attempt", attempt, "debug_path", directory, "error", err)
 		return
 	}
 
@@ -1111,23 +1107,23 @@ func (s *Service) saveDebugArtifacts(ctx context.Context, stage string, attempt,
 	if _, err := s.page.Screenshot(playwright.PageScreenshotOptions{
 		Path: playwright.String(screenshotPath), FullPage: playwright.Bool(true), Mask: []playwright.Locator{sensitiveFields},
 	}); err != nil {
-		s.logContext(ctx, slog.LevelWarn, "не удалось сохранить screenshot Keys.so", stage, "attempt", attempt, "debug_path", screenshotPath, "error", err)
+		s.log(ctx, slog.LevelWarn, "не удалось сохранить screenshot Keys.so", stage, "attempt", attempt, "debug_path", screenshotPath, "error", err)
 	}
 
 	html, htmlErr := s.page.Content()
 	if htmlErr != nil {
-		s.logContext(ctx, slog.LevelWarn, "не удалось получить HTML Keys.so", stage, "attempt", attempt, "debug_path", directory, "error", htmlErr)
+		s.log(ctx, slog.LevelWarn, "не удалось получить HTML Keys.so", stage, "attempt", attempt, "debug_path", directory, "error", htmlErr)
 	} else if err := os.WriteFile(filepath.Join(directory, "page.html"), []byte(redactDiagnosticHTML(html, s.cfg.Email, s.cfg.Password)), 0o600); err != nil {
-		s.logContext(ctx, slog.LevelWarn, "не удалось сохранить HTML Keys.so", stage, "attempt", attempt, "debug_path", directory, "error", err)
+		s.log(ctx, slog.LevelWarn, "не удалось сохранить HTML Keys.so", stage, "attempt", attempt, "debug_path", directory, "error", err)
 	}
 
 	title, titleErr := s.page.Title()
 	if titleErr != nil {
-		s.logContext(ctx, slog.LevelWarn, "не удалось получить title для Keys.so debug", stage, "attempt", attempt, "error", titleErr)
+		s.log(ctx, slog.LevelWarn, "не удалось получить title для Keys.so debug", stage, "attempt", attempt, "error", titleErr)
 	}
 	readyState := "<unavailable>"
 	if value, evaluateErr := s.page.Evaluate(`() => document.readyState`); evaluateErr != nil {
-		s.logContext(ctx, slog.LevelWarn, "не удалось получить readyState для Keys.so debug", stage, "attempt", attempt, "error", evaluateErr)
+		s.log(ctx, slog.LevelWarn, "не удалось получить readyState для Keys.so debug", stage, "attempt", attempt, "error", evaluateErr)
 	} else if state, ok := value.(string); ok {
 		readyState = state
 	}
@@ -1141,11 +1137,11 @@ func (s *Service) saveDebugArtifacts(ctx context.Context, stage string, attempt,
 	}
 	encoded, encodeErr := json.MarshalIndent(info, "", "  ")
 	if encodeErr != nil {
-		s.logContext(ctx, slog.LevelWarn, "не удалось сформировать Keys.so info.json", stage, "attempt", attempt, "error", encodeErr)
+		s.log(ctx, slog.LevelWarn, "не удалось сформировать Keys.so info.json", stage, "attempt", attempt, "error", encodeErr)
 	} else if err := os.WriteFile(filepath.Join(directory, "info.json"), encoded, 0o600); err != nil {
-		s.logContext(ctx, slog.LevelWarn, "не удалось сохранить Keys.so info.json", stage, "attempt", attempt, "debug_path", directory, "error", err)
+		s.log(ctx, slog.LevelWarn, "не удалось сохранить Keys.so info.json", stage, "attempt", attempt, "debug_path", directory, "error", err)
 	}
-	s.logContext(ctx, slog.LevelInfo, "Keys.so debug artifacts saved", stage, "attempt", attempt, "debug_path", directory)
+	s.log(ctx, slog.LevelInfo, "Keys.so debug artifacts saved", stage, "attempt", attempt, "debug_path", directory)
 }
 
 func safeDiagnosticError(err error) string {
@@ -1207,31 +1203,32 @@ func normalizeQueries(values []string) []string {
 	return result
 }
 
-func (s *Service) requireUnique(locator playwright.Locator, selector, reason string) error {
+func (s *Service) requireUnique(ctx context.Context, locator playwright.Locator, selector, reason string) error {
 	count, err := locator.Count()
 	if err != nil {
 		return fmt.Errorf("count locator %s: %w", selector, err)
 	}
 	if count != 1 {
-		s.logLocatorDiagnostic(locator, selector, reason)
+		s.logLocatorDiagnostic(ctx, locator, selector, reason)
 		return fmt.Errorf("expected one %s using %s, found %d", reason, selector, count)
 	}
-	s.log(slog.LevelDebug, "locator Keys.so выбран", "select_locator", "locator", selector, "selection_reason", reason)
+	s.log(ctx, slog.LevelDebug, "locator Keys.so выбран", "select_locator", "locator", selector, "selection_reason", reason)
 	return nil
 }
 
 func (s *Service) waitVisible(
+	ctx context.Context,
 	locator playwright.Locator,
 	selector string,
 	reason string,
 	stage string,
 ) error {
-	s.log(slog.LevelDebug, "ожидание видимого locator Keys.so", stage, "locator", selector, "selection_reason", reason)
+	s.log(ctx, slog.LevelDebug, "ожидание видимого locator Keys.so", stage, "locator", selector, "selection_reason", reason)
 	if err := locator.WaitFor(playwright.LocatorWaitForOptions{
 		State:   playwright.WaitForSelectorStateVisible,
 		Timeout: playwright.Float(longOperationTimeoutMilliseconds),
 	}); err != nil {
-		s.logLocatorDiagnostic(locator, selector, reason)
+		s.logLocatorDiagnostic(ctx, locator, selector, reason)
 		if restrictionErr := s.detectAccessRestriction(stage); restrictionErr != nil {
 			return restrictionErr
 		}
@@ -1241,6 +1238,7 @@ func (s *Service) waitVisible(
 }
 
 func (s *Service) firstVisible(
+	ctx context.Context,
 	locator playwright.Locator,
 	selector string,
 	reason string,
@@ -1250,7 +1248,7 @@ func (s *Service) firstVisible(
 		return nil, -1, fmt.Errorf("get locator matches for %s: %w", selector, err)
 	}
 	if len(matches) != 1 {
-		s.log(slog.LevelWarn, "найдено нестандартное количество locator", "select_locator", "matches_count", len(matches), "locator", selector, "selection_reason", reason)
+		s.log(ctx, slog.LevelWarn, "найдено нестандартное количество locator", "select_locator", "matches_count", len(matches), "locator", selector, "selection_reason", reason)
 	}
 	for index, candidate := range matches {
 		visible, err := candidate.IsVisible()
@@ -1261,11 +1259,11 @@ func (s *Service) firstVisible(
 			return candidate, index, nil
 		}
 	}
-	s.logLocatorDiagnostic(locator, selector, reason)
+	s.logLocatorDiagnostic(ctx, locator, selector, reason)
 	return nil, -1, fmt.Errorf("visible %s not found using %s", reason, selector)
 }
 
-func (s *Service) logLocatorDiagnostic(locator playwright.Locator, selector, reason string) {
+func (s *Service) logLocatorDiagnostic(ctx context.Context, locator playwright.Locator, selector, reason string) {
 	count, countErr := locator.Count()
 	if countErr != nil {
 		count = -1
@@ -1274,7 +1272,7 @@ func (s *Service) logLocatorDiagnostic(locator playwright.Locator, selector, rea
 	if titleErr != nil {
 		title = "<title unavailable>"
 	}
-	s.log(slog.LevelDebug,
+	s.log(ctx, slog.LevelDebug,
 		"диагностика locator Keys.so",
 		"locator_diagnostic",
 		"page_title", title,
@@ -1340,8 +1338,8 @@ func (s *Service) stageError(stage string, err error) error {
 	}
 }
 
-// logContext пишет запись этапа в переданном контексте; log — обёртка над ним.
-func (s *Service) logContext(ctx context.Context, level slog.Level, message, stage string, attributes ...any) {
+// log пишет запись этапа с контекстом вызывающего.
+func (s *Service) log(ctx context.Context, level slog.Level, message, stage string, attributes ...any) {
 	duration := time.Duration(0)
 	if !s.startedAt.IsZero() {
 		duration = time.Since(s.startedAt)
@@ -1355,10 +1353,6 @@ func (s *Service) logContext(ctx context.Context, level slog.Level, message, sta
 	}
 	fields = append(fields, attributes...)
 	s.logger.Log(ctx, level, message, fields...)
-}
-
-func (s *Service) log(level slog.Level, message, stage string, attributes ...any) {
-	s.logContext(context.Background(), level, message, stage, attributes...)
 }
 
 func (s *Service) currentURL() string {

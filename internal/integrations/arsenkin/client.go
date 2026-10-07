@@ -142,7 +142,7 @@ func New(cfg Config, logger *slog.Logger) *Service {
 func (s *Service) CollectResearch(ctx context.Context, queries []string) (Result, error) {
 	s.startedAt = time.Now()
 	if sanitized, samples := sanitizedQueries(queries); sanitized > 0 {
-		s.logCtx(ctx, slog.LevelInfo, "во фразах Wordstat вычищены лишние символы", "wordstat_sanitize",
+		s.log(ctx, slog.LevelInfo, "во фразах Wordstat вычищены лишние символы", "wordstat_sanitize",
 			"sanitized_count", sanitized, "samples", samples)
 	}
 	normalized := normalizeInputQueries(queries)
@@ -151,10 +151,10 @@ func (s *Service) CollectResearch(ctx context.Context, queries []string) (Result
 	}
 	submitted := limitWordstatQueries(normalized)
 	if len(submitted) != len(normalized) {
-		s.log(slog.LevelInfo, "список запросов Wordstat обрезан до лимита формы", "wordstat_limit",
+		s.log(ctx, slog.LevelInfo, "список запросов Wordstat обрезан до лимита формы", "wordstat_limit",
 			"original_count", len(normalized), "submitted_count", len(submitted))
 	}
-	s.log(slog.LevelInfo, "запуск Arsenkin", "start")
+	s.log(ctx, slog.LevelInfo, "запуск Arsenkin", "start")
 	if err := s.start(); err != nil {
 		return Result{}, s.stageError("start_browser", err)
 	}
@@ -227,23 +227,23 @@ func (s *Service) ensureAuthenticated(ctx context.Context) error {
 	if err := s.open(ctx, wordstatURL, "check_session"); err != nil {
 		return err
 	}
-	authenticated, err := s.isAuthenticated()
+	authenticated, err := s.isAuthenticated(ctx)
 	if err != nil {
 		return err
 	}
 	if authenticated {
-		if err := s.waitWordstatForm(); err != nil {
+		if err := s.waitWordstatForm(ctx); err != nil {
 			return fmt.Errorf("verify active Arsenkin session: %w", err)
 		}
-		s.log(slog.LevelInfo, "сессия Arsenkin подтверждена", "check_session")
+		s.log(ctx, slog.LevelInfo, "сессия Arsenkin подтверждена", "check_session")
 		return nil
 	}
 
-	s.log(slog.LevelInfo, "авторизация Arsenkin", "authorize")
+	s.log(ctx, slog.LevelInfo, "авторизация Arsenkin", "authorize")
 	if err := s.open(ctx, loginURL, "open_login"); err != nil {
 		return err
 	}
-	authenticated, err = s.isAuthenticated()
+	authenticated, err = s.isAuthenticated(ctx)
 	if err != nil {
 		return err
 	}
@@ -251,22 +251,22 @@ func (s *Service) ensureAuthenticated(ctx context.Context) error {
 		if err := s.open(ctx, wordstatURL, "verify_authorization"); err != nil {
 			return err
 		}
-		s.log(slog.LevelInfo, "сессия Arsenkin подтверждена", "check_session")
+		s.log(ctx, slog.LevelInfo, "сессия Arsenkin подтверждена", "check_session")
 		return nil
 	}
 	email := s.page.Locator(emailSelector)
 	password := s.page.Locator(passwordSelector)
 	loginForm := s.page.Locator(`form:has(input[name="email"]):has(input[name="password"])`)
-	if err := s.waitUniqueVisible(email, emailSelector, "поле email"); err != nil {
+	if err := s.waitUniqueVisible(ctx, email, emailSelector, "поле email"); err != nil {
 		return err
 	}
-	if err := s.waitUniqueVisible(password, passwordSelector, "поле password"); err != nil {
+	if err := s.waitUniqueVisible(ctx, password, passwordSelector, "поле password"); err != nil {
 		return err
 	}
-	if err := s.waitUniqueVisible(loginForm, "verified login form", "форма входа"); err != nil {
+	if err := s.waitUniqueVisible(ctx, loginForm, "verified login form", "форма входа"); err != nil {
 		return err
 	}
-	submit, err := s.firstVisible(loginForm.Locator(`button[type="submit"], input[type="submit"], button`), "login form submit", "кнопка входа")
+	submit, err := s.firstVisible(ctx, loginForm.Locator(`button[type="submit"], input[type="submit"], button`), "login form submit", "кнопка входа")
 	if err != nil {
 		return err
 	}
@@ -291,27 +291,27 @@ func (s *Service) ensureAuthenticated(ctx context.Context) error {
 	if err := s.open(ctx, wordstatURL, "verify_authorization"); err != nil {
 		return err
 	}
-	authenticated, err = s.isAuthenticated()
+	authenticated, err = s.isAuthenticated(ctx)
 	if err != nil {
 		return err
 	}
 	if !authenticated {
 		return fmt.Errorf("Arsenkin authorization did not create an authenticated session")
 	}
-	if err := s.waitWordstatForm(); err != nil {
+	if err := s.waitWordstatForm(ctx); err != nil {
 		return fmt.Errorf("verify Arsenkin authorization: %w", err)
 	}
-	s.log(slog.LevelInfo, "сессия Arsenkin подтверждена", "check_session")
+	s.log(ctx, slog.LevelInfo, "сессия Arsenkin подтверждена", "check_session")
 	return nil
 }
 
-func (s *Service) isAuthenticated() (bool, error) {
+func (s *Service) isAuthenticated(ctx context.Context) (bool, error) {
 	logout := s.page.Locator(logoutSelector)
 	count, err := logout.Count()
 	if err != nil {
 		return false, fmt.Errorf("check Arsenkin logout control: %w", err)
 	}
-	s.log(slog.LevelDebug, "проверка признака авторизации", "check_session", "locator", logoutSelector, "matches_count", count)
+	s.log(ctx, slog.LevelDebug, "проверка признака авторизации", "check_session", "locator", logoutSelector, "matches_count", count)
 	return count > 0, nil
 }
 
@@ -322,12 +322,12 @@ func (s *Service) runWordstat(ctx context.Context, queries []string) ([]KeywordF
 	if isLoginURL(s.currentURL()) {
 		return nil, fmt.Errorf("Arsenkin session expired before Wordstat start")
 	}
-	input, err := s.wordstatInput()
+	input, err := s.wordstatInput(ctx)
 	if err != nil {
 		return nil, err
 	}
 	button := s.page.Locator(startSelector)
-	if err := s.waitUniqueVisible(button, startSelector, "кнопка запуска Wordstat"); err != nil {
+	if err := s.waitUniqueVisible(ctx, button, startSelector, "кнопка запуска Wordstat"); err != nil {
 		diagnostic, diagnosticErr := s.page.Locator("body").Evaluate(`body => Array.from(body.querySelectorAll('button, input[type="submit"], a.btn')).slice(0, 40).map(element => {
 			const style = getComputedStyle(element);
 			const rect = element.getBoundingClientRect();
@@ -354,7 +354,7 @@ func (s *Service) runWordstat(ctx context.Context, queries []string) ([]KeywordF
 	if err != nil {
 		return nil, err
 	}
-	s.log(slog.LevelInfo, "состояние Wordstat до запуска", "wordstat_start",
+	s.log(ctx, slog.LevelInfo, "состояние Wordstat до запуска", "wordstat_start",
 		"known_task_count", len(knownTaskIDs), "known_task_ids", knownTaskIDs)
 	expected := strings.Join(queries, "\n")
 	if err := input.Fill(expected); err != nil {
@@ -364,7 +364,7 @@ func (s *Service) runWordstat(ctx context.Context, queries []string) ([]KeywordF
 	if err != nil {
 		return nil, err
 	}
-	s.logCtx(ctx, slog.LevelInfo, "поле Wordstat заполнено", "wordstat_fill", filled.fields()...)
+	s.log(ctx, slog.LevelInfo, "поле Wordstat заполнено", "wordstat_fill", filled.fields()...)
 	s.saveStageSnapshot(ctx, "after_fill", filled, nil)
 	if err := filled.accept(); err != nil {
 		s.saveDebugArtifacts(ctx, "wordstat_fill", err, debugState{KnownTaskIDs: knownTaskIDs, SubmittedCount: len(queries)})
@@ -377,7 +377,7 @@ func (s *Service) runWordstat(ctx context.Context, queries []string) ([]KeywordF
 	if submit.ClickErr != nil {
 		return nil, fmt.Errorf("start Wordstat: %w", submit.ClickErr)
 	}
-	s.logCtx(ctx, slog.LevelInfo, "кнопка запуска Wordstat нажата", "wordstat_start",
+	s.log(ctx, slog.LevelInfo, "кнопка запуска Wordstat нажата", "wordstat_start",
 		append([]any{"queries_count", len(queries)}, submit.fields()...)...)
 
 	// Клик ничего не доказывает: отказ приёма выглядит как принятый запрос. Признак приёма —
@@ -386,23 +386,23 @@ func (s *Service) runWordstat(ctx context.Context, queries []string) ([]KeywordF
 	if err != nil {
 		return nil, err
 	}
-	s.log(slog.LevelInfo, "Arsenkin принял запросы", "wordstat_start",
+	s.log(ctx, slog.LevelInfo, "Arsenkin принял запросы", "wordstat_start",
 		"known_task_count", len(knownTaskIDs), "task_id", taskID, "queries_count", len(queries))
 
 	if err := s.waitWordstatTaskCompleted(ctx, taskID); err != nil {
 		return nil, err
 	}
-	s.log(slog.LevelInfo, "progress 100", "wordstat_progress")
-	s.log(slog.LevelInfo, "состояние Wordstat после ожидания", "wordstat_result",
+	s.log(ctx, slog.LevelInfo, "progress 100", "wordstat_progress")
+	s.log(ctx, slog.LevelInfo, "состояние Wordstat после ожидания", "wordstat_result",
 		"known_task_count", len(knownTaskIDs), "task_id", taskID)
-	result, err := s.downloadWordstatResult(taskID)
+	result, err := s.downloadWordstatResult(ctx, taskID)
 	if err != nil {
 		return nil, err
 	}
 	if err := acceptWordstatResult(queries, result); err != nil {
 		return nil, err
 	}
-	s.log(slog.LevelInfo, "таблица получена", "parse_download", "matches_count", len(result))
+	s.log(ctx, slog.LevelInfo, "таблица получена", "parse_download", "matches_count", len(result))
 	return result, nil
 }
 
@@ -414,7 +414,7 @@ func (s *Service) snapshotWordstatTasks(ctx context.Context) ([]string, error) {
 		return nil, err
 	}
 	if err := s.waitWordstatHistoryRendered(wordstatHistoryTimeout * time.Millisecond); err != nil {
-		s.log(slog.LevelWarn, "история задач Wordstat пуста или не отрисовалась", "wordstat_start",
+		s.log(ctx, slog.LevelWarn, "история задач Wordstat пуста или не отрисовалась", "wordstat_start",
 			"locator", wordstatTaskRowSelector, "timeout_ms", wordstatHistoryTimeout, "error", err)
 	}
 	tasks, err := s.wordstatTasks()
@@ -754,7 +754,7 @@ func (s *Service) submitWordstat(ctx context.Context, button playwright.Locator)
 	outcome.Acknowledged = s.waitSubmitAcknowledged() == nil
 
 	if state, err := s.readSubmitPageState(); err != nil {
-		s.logCtx(ctx, slog.LevelWarn, "не удалось прочитать состояние страницы после клика", "wordstat_start", "error", err)
+		s.log(ctx, slog.LevelWarn, "не удалось прочитать состояние страницы после клика", "wordstat_start", "error", err)
 	} else {
 		mutex.Lock()
 		outcome.ButtonDisabled, outcome.ButtonText, outcome.ContainerText = state.disabled, state.text, state.container
@@ -888,7 +888,7 @@ func (s *Service) confirmWordstatTaskCreated(ctx context.Context, knownTaskIDs, 
 		now:          time.Now,
 		sleep:        sleepContext,
 	}, func(attempt int, remaining time.Duration) {
-		s.logCtx(ctx, slog.LevelDebug, "подтверждение приёма запросов Wordstat", "wordstat_start",
+		s.log(ctx, slog.LevelDebug, "подтверждение приёма запросов Wordstat", "wordstat_start",
 			"attempt", attempt, "known_task_count", len(knownTaskIDs), "remaining_ms", remaining.Milliseconds())
 	})
 	if err != nil {
@@ -1002,7 +1002,7 @@ func (s *Service) waitWordstatTaskCompleted(ctx context.Context, taskID string) 
 			return err
 		}
 		wait := min(wordstatPollInterval*time.Millisecond, remaining)
-		s.log(slog.LevelDebug, "ожидание файла результата Wordstat", "wait_download",
+		s.log(ctx, slog.LevelDebug, "ожидание файла результата Wordstat", "wait_download",
 			"attempt", attempt, "task_id", taskID, "remaining_ms", remaining.Milliseconds())
 		// task_id сравнивается как значение атрибута, а не подставляется в селектор.
 		_, err := s.page.WaitForFunction(`taskID => Array.from(
@@ -1016,7 +1016,7 @@ func (s *Service) waitWordstatTaskCompleted(ctx context.Context, taskID string) 
 		}
 		if current, progressErr := s.currentProgress(); progressErr == nil && current > 0 {
 			for _, threshold := range progress.crossed(current) {
-				s.log(slog.LevelInfo, fmt.Sprintf("progress %d", threshold), "wordstat_progress", "task_id", taskID)
+				s.log(ctx, slog.LevelInfo, fmt.Sprintf("progress %d", threshold), "wordstat_progress", "task_id", taskID)
 			}
 		}
 		if reloadErr := s.reloadWordstatHistory(ctx); reloadErr != nil {
@@ -1030,7 +1030,7 @@ func (s *Service) reloadWordstatHistory(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	s.log(slog.LevelDebug, "перезагрузка списка задач Wordstat", "wait_download")
+	s.log(ctx, slog.LevelDebug, "перезагрузка списка задач Wordstat", "wait_download")
 	if _, err := s.page.Reload(playwright.PageReloadOptions{
 		WaitUntil: playwright.WaitUntilStateDomcontentloaded,
 		Timeout:   playwright.Float(operationTimeout),
@@ -1043,10 +1043,10 @@ func (s *Service) reloadWordstatHistory(ctx context.Context) error {
 	return nil
 }
 
-func (s *Service) downloadWordstatResult(taskID string) ([]KeywordFrequency, error) {
+func (s *Service) downloadWordstatResult(ctx context.Context, taskID string) ([]KeywordFrequency, error) {
 	selector := fmt.Sprintf(`.arshis__row--body[data-task-id="%s"] a[href*="/tools/download/23/csv/"][href*="encode=xls"]`, taskID)
 	link := s.page.Locator(selector)
-	if err := s.waitUniqueVisible(link, selector, "XLSX результата Wordstat"); err != nil {
+	if err := s.waitUniqueVisible(ctx, link, selector, "XLSX результата Wordstat"); err != nil {
 		return nil, err
 	}
 	download, err := s.page.ExpectDownload(func() error { return link.Click() }, playwright.PageExpectDownloadOptions{
@@ -1132,10 +1132,10 @@ func (s *Service) runCopywriters(ctx context.Context, keywords []KeywordFrequenc
 
 	input := s.page.Locator(copywritersInputSelector)
 	button := s.page.Locator(`button#ok`)
-	if err := s.waitUniqueVisible(input, copywritersInputSelector, "поле «Список запросов (до 50 шт.)» Copywriters"); err != nil {
+	if err := s.waitUniqueVisible(ctx, input, copywritersInputSelector, "поле «Список запросов (до 50 шт.)» Copywriters"); err != nil {
 		return Result{}, err
 	}
-	if err := s.waitUniqueVisible(button, `button#ok`, "кнопка запуска Copywriters"); err != nil {
+	if err := s.waitUniqueVisible(ctx, button, `button#ok`, "кнопка запуска Copywriters"); err != nil {
 		return Result{}, err
 	}
 	// Copywriters показывает последнюю завершённую задачу аккаунта: ждём другой task_id.
@@ -1143,7 +1143,7 @@ func (s *Service) runCopywriters(ctx context.Context, keywords []KeywordFrequenc
 	if err != nil {
 		return Result{}, err
 	}
-	s.log(slog.LevelInfo, "состояние Copywriters до запуска", "copywriters_start",
+	s.log(ctx, slog.LevelInfo, "состояние Copywriters до запуска", "copywriters_start",
 		"previous_task_id", previousTask.ID, "previous_structure_length", len([]rune(previousTask.Structure)))
 	if err := input.Fill(strings.Join(copywriterQueries, "\n")); err != nil {
 		return Result{}, fmt.Errorf("fill Copywriters Top-50: %w", err)
@@ -1151,7 +1151,7 @@ func (s *Service) runCopywriters(ctx context.Context, keywords []KeywordFrequenc
 	if err := button.Click(); err != nil {
 		return Result{}, fmt.Errorf("start Copywriters: %w", err)
 	}
-	s.log(slog.LevelInfo, "Copywriters стартовал", "copywriters_start", "queries_count", len(copywriterQueries))
+	s.log(ctx, slog.LevelInfo, "Copywriters стартовал", "copywriters_start", "queries_count", len(copywriterQueries))
 
 	for _, threshold := range []int{25, 50, 75} {
 		if err := s.waitCopywritersProgressOrResult(ctx, threshold, previousTask.ID); err != nil {
@@ -1163,32 +1163,32 @@ func (s *Service) runCopywriters(ctx context.Context, keywords []KeywordFrequenc
 			return Result{}, err
 		}
 		if progress >= threshold {
-			s.log(slog.LevelInfo, fmt.Sprintf("Copywriters progress %d", threshold), "copywriters_progress")
+			s.log(ctx, slog.LevelInfo, fmt.Sprintf("Copywriters progress %d", threshold), "copywriters_progress")
 		}
 	}
 	if err := s.waitCopywritersResult(ctx, previousTask.ID); err != nil {
 		s.saveDebugArtifacts(ctx, "copywriters_result", err, debugState{SubmittedCount: len(copywriterQueries)})
 		return Result{}, err
 	}
-	s.log(slog.LevelInfo, "Copywriters progress 100", "copywriters_progress")
+	s.log(ctx, slog.LevelInfo, "Copywriters progress 100", "copywriters_progress")
 
 	currentTask, err := s.copywritersTask()
 	if err != nil {
 		return Result{}, err
 	}
-	s.log(slog.LevelInfo, "состояние Copywriters после ожидания", "copywriters_result",
+	s.log(ctx, slog.LevelInfo, "состояние Copywriters после ожидания", "copywriters_result",
 		"previous_task_id", previousTask.ID, "task_id", currentTask.ID,
 		"structure_length", len([]rune(currentTask.Structure)))
 	if err := acceptCopywritersResult(previousTask, currentTask); err != nil {
 		return Result{}, err
 	}
 
-	result, err := s.parseCopywritersResult()
+	result, err := s.parseCopywritersResult(ctx)
 	if err != nil {
 		return Result{}, err
 	}
 	result.CopywriterQueries = copywriterQueries
-	s.log(slog.LevelInfo, "результат Copywriters получен", "copywriters_result",
+	s.log(ctx, slog.LevelInfo, "результат Copywriters получен", "copywriters_result",
 		"lsi_count", len(result.LSIWords),
 		"competitor_structure_length", len(result.CompetitorStructure),
 	)
@@ -1254,7 +1254,7 @@ func (s *Service) waitCopywritersProgressOrResult(ctx context.Context, threshold
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	s.log(slog.LevelDebug, "ожидание прогресса Copywriters", "wait_copywriters_progress", "threshold", threshold, "previous_task_id", previousTaskID)
+	s.log(ctx, slog.LevelDebug, "ожидание прогресса Copywriters", "wait_copywriters_progress", "threshold", threshold, "previous_task_id", previousTaskID)
 	_, err := s.page.WaitForFunction(`args => {
 		const match = (document.body?.innerText || '').match(/Прогресс\s*:\s*(\d+)\s*%/i);
 		const progress = match ? Number(match[1]) : 0;
@@ -1298,7 +1298,7 @@ func (s *Service) waitCopywritersResult(ctx context.Context, previousTaskID stri
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	s.log(slog.LevelDebug, "ожидание результата Copywriters", "wait_copywriters_result", "previous_task_id", previousTaskID)
+	s.log(ctx, slog.LevelDebug, "ожидание результата Copywriters", "wait_copywriters_result", "previous_task_id", previousTaskID)
 	_, err := s.page.WaitForFunction(`previousTaskID => {
 		const taskID = (document.querySelector('input[name="task_id"]')?.value || '').trim();
 		const theme = (document.querySelector('textarea[name="theme"]')?.value || '').trim();
@@ -1317,9 +1317,9 @@ func (s *Service) waitCopywritersResult(ctx context.Context, previousTaskID stri
 	return nil
 }
 
-func (s *Service) parseCopywritersResult() (Result, error) {
+func (s *Service) parseCopywritersResult(ctx context.Context) (Result, error) {
 	theme := s.page.Locator(`textarea[name="theme"][placeholder="Список тематических слов"]`)
-	if err := s.waitUniqueVisible(theme, `textarea[name="theme"][placeholder="Список тематических слов"]`, "тематические слова Copywriters"); err != nil {
+	if err := s.waitUniqueVisible(ctx, theme, `textarea[name="theme"][placeholder="Список тематических слов"]`, "тематические слова Copywriters"); err != nil {
 		return Result{}, err
 	}
 	value, err := theme.InputValue()
@@ -1332,7 +1332,7 @@ func (s *Service) parseCopywritersResult() (Result, error) {
 	}
 
 	structureLink := s.page.Locator(structureLinkSelector)
-	if err := s.waitUniqueVisible(structureLink, structureLinkSelector, "ссылка структуры конкурентов"); err != nil {
+	if err := s.waitUniqueVisible(ctx, structureLink, structureLinkSelector, "ссылка структуры конкурентов"); err != nil {
 		return Result{}, err
 	}
 	if err := structureLink.Click(); err != nil {
@@ -1343,7 +1343,7 @@ func (s *Service) parseCopywritersResult() (Result, error) {
 		return Result{}, fmt.Errorf("wait for visible Copywriters structure modal: %w", err)
 	}
 	modalBody := modal.Locator(`.modal-body`)
-	if err := s.waitUniqueVisible(modalBody, `#structure .modal-body`, "содержимое структуры конкурентов"); err != nil {
+	if err := s.waitUniqueVisible(ctx, modalBody, `#structure .modal-body`, "содержимое структуры конкурентов"); err != nil {
 		return Result{}, err
 	}
 	structureText, err := modalBody.InnerText()
@@ -1401,7 +1401,7 @@ func normalizeCompetitorStructure(text string) string {
 	return strings.Join(result, "\n")
 }
 
-func (s *Service) wordstatInput() (playwright.Locator, error) {
+func (s *Service) wordstatInput(ctx context.Context) (playwright.Locator, error) {
 	locator := s.page.Locator(keysSelector)
 	if err := locator.WaitFor(playwright.LocatorWaitForOptions{State: playwright.WaitForSelectorStateVisible, Timeout: playwright.Float(operationTimeout)}); err != nil {
 		return nil, fmt.Errorf("wait for Wordstat textarea using %s: %w", keysSelector, err)
@@ -1410,7 +1410,7 @@ func (s *Service) wordstatInput() (playwright.Locator, error) {
 	if err != nil {
 		return nil, fmt.Errorf("find Wordstat textareas: %w", err)
 	}
-	s.log(slog.LevelDebug, "найдены элементы", "select_locator", "locator", keysSelector, "matches_count", len(matches))
+	s.log(ctx, slog.LevelDebug, "найдены элементы", "select_locator", "locator", keysSelector, "matches_count", len(matches))
 	for _, match := range matches {
 		visible, err := match.IsVisible()
 		if err != nil {
@@ -1560,13 +1560,13 @@ func sanitizedQueries(queries []string) (int, []string) {
 	return count, samples
 }
 
-func (s *Service) waitWordstatForm() error {
-	_, err := s.wordstatInput()
+func (s *Service) waitWordstatForm(ctx context.Context) error {
+	_, err := s.wordstatInput(ctx)
 	return err
 }
 
-func (s *Service) waitUniqueVisible(locator playwright.Locator, selector, reason string) error {
-	s.log(slog.LevelDebug, "ожидание locator", "wait_locator", "locator", selector, "selection_reason", reason)
+func (s *Service) waitUniqueVisible(ctx context.Context, locator playwright.Locator, selector, reason string) error {
+	s.log(ctx, slog.LevelDebug, "ожидание locator", "wait_locator", "locator", selector, "selection_reason", reason)
 	if err := locator.WaitFor(playwright.LocatorWaitForOptions{State: playwright.WaitForSelectorStateVisible, Timeout: playwright.Float(operationTimeout)}); err != nil {
 		return fmt.Errorf("wait for %s using %s: %w", reason, selector, err)
 	}
@@ -1574,15 +1574,15 @@ func (s *Service) waitUniqueVisible(locator playwright.Locator, selector, reason
 	if err != nil {
 		return fmt.Errorf("count %s: %w", reason, err)
 	}
-	s.log(slog.LevelDebug, "найдены элементы", "select_locator", "locator", selector, "matches_count", count)
+	s.log(ctx, slog.LevelDebug, "найдены элементы", "select_locator", "locator", selector, "matches_count", count)
 	if count != 1 {
 		return fmt.Errorf("expected one %s using %s, found %d", reason, selector, count)
 	}
 	return nil
 }
 
-func (s *Service) firstVisible(locator playwright.Locator, selector, reason string) (playwright.Locator, error) {
-	s.log(slog.LevelDebug, "ожидание locator", "wait_locator", "locator", selector, "selection_reason", reason)
+func (s *Service) firstVisible(ctx context.Context, locator playwright.Locator, selector, reason string) (playwright.Locator, error) {
+	s.log(ctx, slog.LevelDebug, "ожидание locator", "wait_locator", "locator", selector, "selection_reason", reason)
 	if err := locator.First().WaitFor(playwright.LocatorWaitForOptions{State: playwright.WaitForSelectorStateVisible, Timeout: playwright.Float(operationTimeout)}); err != nil {
 		return nil, fmt.Errorf("wait for %s using %s: %w", reason, selector, err)
 	}
@@ -1590,7 +1590,7 @@ func (s *Service) firstVisible(locator playwright.Locator, selector, reason stri
 	if err != nil {
 		return nil, fmt.Errorf("find %s: %w", reason, err)
 	}
-	s.log(slog.LevelDebug, "найдены элементы", "select_locator", "locator", selector, "matches_count", len(matches))
+	s.log(ctx, slog.LevelDebug, "найдены элементы", "select_locator", "locator", selector, "matches_count", len(matches))
 	for _, match := range matches {
 		visible, err := match.IsVisible()
 		if err != nil {
@@ -1607,11 +1607,11 @@ func (s *Service) open(ctx context.Context, targetURL, stage string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	s.log(slog.LevelDebug, "открытие URL", stage, "target_url", targetURL)
+	s.log(ctx, slog.LevelDebug, "открытие URL", stage, "target_url", targetURL)
 	if _, err := s.page.Goto(targetURL, playwright.PageGotoOptions{WaitUntil: playwright.WaitUntilStateDomcontentloaded}); err != nil {
 		return fmt.Errorf("open %s: %w", targetURL, err)
 	}
-	s.log(slog.LevelDebug, "URL открыт", stage)
+	s.log(ctx, slog.LevelDebug, "URL открыт", stage)
 	return ctx.Err()
 }
 
@@ -1650,7 +1650,7 @@ var formFragmentSelectors = []string{"#div-queries", "#container"}
 // без полного HTML: он вызывается и на успешном пути.
 func (s *Service) saveStageSnapshot(ctx context.Context, stage string, payload any, failure error) {
 	if s.page == nil {
-		s.logCtx(ctx, slog.LevelWarn, "снимок стадии Arsenkin не сохранён: страница недоступна", stage)
+		s.log(ctx, slog.LevelWarn, "снимок стадии Arsenkin не сохранён: страница недоступна", stage)
 		return
 	}
 	directory, err := s.prepareDebugDirectory(ctx, stage)
@@ -1672,7 +1672,7 @@ func (s *Service) saveStageSnapshot(ctx context.Context, stage string, payload a
 		Timestamp: time.Now(), Error: safeDiagnosticError(failure), State: payload,
 	}
 	s.writeJSON(ctx, directory, "info.json", stage, snapshot)
-	s.logCtx(ctx, slog.LevelInfo, "снимок стадии Arsenkin сохранён", stage, "debug_path", directory)
+	s.log(ctx, slog.LevelInfo, "снимок стадии Arsenkin сохранён", stage, "debug_path", directory)
 }
 
 func (s *Service) prepareDebugDirectory(ctx context.Context, stage string) (string, error) {
@@ -1682,7 +1682,7 @@ func (s *Service) prepareDebugDirectory(ctx context.Context, stage string) (stri
 		fmt.Sprintf("%s-%s", time.Now().Format("20060102-150405.000000000"), stage),
 	)
 	if err := os.MkdirAll(directory, 0o750); err != nil {
-		s.logCtx(ctx, slog.LevelWarn, "не удалось создать каталог диагностики Arsenkin", stage,
+		s.log(ctx, slog.LevelWarn, "не удалось создать каталог диагностики Arsenkin", stage,
 			"debug_path", directory, "error", err)
 		return "", err
 	}
@@ -1695,7 +1695,7 @@ func (s *Service) writeScreenshot(ctx context.Context, directory, stage string) 
 	if _, err := s.page.Screenshot(playwright.PageScreenshotOptions{
 		Path: playwright.String(path), FullPage: playwright.Bool(true), Mask: []playwright.Locator{sensitiveFields},
 	}); err != nil {
-		s.logCtx(ctx, slog.LevelWarn, "не удалось сохранить screenshot Arsenkin", stage, "debug_path", path, "error", err)
+		s.log(ctx, slog.LevelWarn, "не удалось сохранить screenshot Arsenkin", stage, "debug_path", path, "error", err)
 	}
 }
 
@@ -1707,12 +1707,12 @@ func (s *Service) writeFormFragment(ctx context.Context, directory, stage string
 		})
 		.join('\n\n')`, formFragmentSelectors)
 	if err != nil {
-		s.logCtx(ctx, slog.LevelWarn, "не удалось получить фрагмент формы Arsenkin", stage, "error", err)
+		s.log(ctx, slog.LevelWarn, "не удалось получить фрагмент формы Arsenkin", stage, "error", err)
 		return
 	}
 	fragment := redactDiagnosticHTML(fmt.Sprint(raw), s.cfg.Email, s.cfg.Password)
 	if err := os.WriteFile(filepath.Join(directory, "form.html"), []byte(fragment), 0o600); err != nil {
-		s.logCtx(ctx, slog.LevelWarn, "не удалось сохранить фрагмент формы Arsenkin", stage,
+		s.log(ctx, slog.LevelWarn, "не удалось сохранить фрагмент формы Arsenkin", stage,
 			"debug_path", directory, "error", err)
 	}
 }
@@ -1720,11 +1720,11 @@ func (s *Service) writeFormFragment(ctx context.Context, directory, stage string
 func (s *Service) writeJSON(ctx context.Context, directory, name, stage string, payload any) {
 	encoded, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {
-		s.logCtx(ctx, slog.LevelWarn, "не удалось сформировать "+name+" Arsenkin", stage, "error", err)
+		s.log(ctx, slog.LevelWarn, "не удалось сформировать "+name+" Arsenkin", stage, "error", err)
 		return
 	}
 	if err := os.WriteFile(filepath.Join(directory, name), encoded, 0o600); err != nil {
-		s.logCtx(ctx, slog.LevelWarn, "не удалось сохранить "+name+" Arsenkin", stage,
+		s.log(ctx, slog.LevelWarn, "не удалось сохранить "+name+" Arsenkin", stage,
 			"debug_path", directory, "error", err)
 	}
 }
@@ -1732,7 +1732,7 @@ func (s *Service) writeJSON(ctx context.Context, directory, name, stage string, 
 // saveDebugArtifacts stores the screenshot, HTML and page state of a failed Arsenkin stage.
 func (s *Service) saveDebugArtifacts(ctx context.Context, stage string, failure error, state debugState) {
 	if s.page == nil {
-		s.logCtx(ctx, slog.LevelWarn, "диагностика Arsenkin не сохранена: страница недоступна", stage)
+		s.log(ctx, slog.LevelWarn, "диагностика Arsenkin не сохранена: страница недоступна", stage)
 		return
 	}
 	timestamp := time.Now()
@@ -1742,7 +1742,7 @@ func (s *Service) saveDebugArtifacts(ctx context.Context, stage string, failure 
 		fmt.Sprintf("%s-%s", timestamp.Format("20060102-150405.000000000"), stage),
 	)
 	if err := os.MkdirAll(directory, 0o750); err != nil {
-		s.logCtx(ctx, slog.LevelWarn, "не удалось создать каталог диагностики Arsenkin", stage, "debug_path", directory, "error", err)
+		s.log(ctx, slog.LevelWarn, "не удалось создать каталог диагностики Arsenkin", stage, "debug_path", directory, "error", err)
 		return
 	}
 
@@ -1751,31 +1751,31 @@ func (s *Service) saveDebugArtifacts(ctx context.Context, stage string, failure 
 	if _, err := s.page.Screenshot(playwright.PageScreenshotOptions{
 		Path: playwright.String(screenshotPath), FullPage: playwright.Bool(true), Mask: []playwright.Locator{sensitiveFields},
 	}); err != nil {
-		s.logCtx(ctx, slog.LevelWarn, "не удалось сохранить screenshot Arsenkin", stage, "debug_path", screenshotPath, "error", err)
+		s.log(ctx, slog.LevelWarn, "не удалось сохранить screenshot Arsenkin", stage, "debug_path", screenshotPath, "error", err)
 	}
 
 	html, htmlErr := s.page.Content()
 	if htmlErr != nil {
-		s.logCtx(ctx, slog.LevelWarn, "не удалось получить HTML Arsenkin", stage, "debug_path", directory, "error", htmlErr)
+		s.log(ctx, slog.LevelWarn, "не удалось получить HTML Arsenkin", stage, "debug_path", directory, "error", htmlErr)
 	} else if err := os.WriteFile(filepath.Join(directory, "page.html"),
 		[]byte(redactDiagnosticHTML(html, s.cfg.Email, s.cfg.Password)), 0o600); err != nil {
-		s.logCtx(ctx, slog.LevelWarn, "не удалось сохранить HTML Arsenkin", stage, "debug_path", directory, "error", err)
+		s.log(ctx, slog.LevelWarn, "не удалось сохранить HTML Arsenkin", stage, "debug_path", directory, "error", err)
 	}
 
 	title, titleErr := s.page.Title()
 	if titleErr != nil {
-		s.logCtx(ctx, slog.LevelWarn, "не удалось получить title для диагностики Arsenkin", stage, "error", titleErr)
+		s.log(ctx, slog.LevelWarn, "не удалось получить title для диагностики Arsenkin", stage, "error", titleErr)
 	}
 	readyState := "<unavailable>"
 	if value, evaluateErr := s.page.Evaluate(`() => document.readyState`); evaluateErr != nil {
-		s.logCtx(ctx, slog.LevelWarn, "не удалось получить readyState для диагностики Arsenkin", stage, "error", evaluateErr)
+		s.log(ctx, slog.LevelWarn, "не удалось получить readyState для диагностики Arsenkin", stage, "error", evaluateErr)
 	} else if state, ok := value.(string); ok {
 		readyState = state
 	}
 	pageTasks, taskIDsErr := s.wordstatTasks()
 	pageTaskIDs := wordstatTaskIDsOf(pageTasks)
 	if taskIDsErr != nil {
-		s.logCtx(ctx, slog.LevelWarn, "не удалось прочитать задачи Wordstat для диагностики", stage, "error", taskIDsErr)
+		s.log(ctx, slog.LevelWarn, "не удалось прочитать задачи Wordstat для диагностики", stage, "error", taskIDsErr)
 	}
 	info := debugInfo{
 		ArticleID: s.cfg.ArticleID, Stage: stage, Operation: "prepare",
@@ -1787,11 +1787,11 @@ func (s *Service) saveDebugArtifacts(ctx context.Context, stage string, failure 
 	}
 	encoded, encodeErr := json.MarshalIndent(info, "", "  ")
 	if encodeErr != nil {
-		s.logCtx(ctx, slog.LevelWarn, "не удалось сформировать info.json Arsenkin", stage, "error", encodeErr)
+		s.log(ctx, slog.LevelWarn, "не удалось сформировать info.json Arsenkin", stage, "error", encodeErr)
 	} else if err := os.WriteFile(filepath.Join(directory, "info.json"), encoded, 0o600); err != nil {
-		s.logCtx(ctx, slog.LevelWarn, "не удалось сохранить info.json Arsenkin", stage, "debug_path", directory, "error", err)
+		s.log(ctx, slog.LevelWarn, "не удалось сохранить info.json Arsenkin", stage, "debug_path", directory, "error", err)
 	}
-	s.logCtx(ctx, slog.LevelInfo, "диагностика Arsenkin сохранена", stage, "debug_path", directory)
+	s.log(ctx, slog.LevelInfo, "диагностика Arsenkin сохранена", stage, "debug_path", directory)
 }
 
 func redactDiagnosticHTML(html string, secrets ...string) string {
@@ -1819,12 +1819,8 @@ func (s *Service) stageError(stage string, err error) error {
 	return &StageError{ArticleID: s.cfg.ArticleID, Stage: stage, CurrentURL: s.currentURL(), Duration: time.Since(s.startedAt), Err: err}
 }
 
-func (s *Service) log(level slog.Level, message, stage string, fields ...any) {
-	s.logCtx(context.Background(), level, message, stage, fields...)
-}
-
-// logCtx пишет журнал с живым контекстом; log() подставляет context.Background().
-func (s *Service) logCtx(ctx context.Context, level slog.Level, message, stage string, fields ...any) {
+// log пишет журнал с контекстом вызывающего.
+func (s *Service) log(ctx context.Context, level slog.Level, message, stage string, fields ...any) {
 	attributes := []any{"stage", stage, "current_url", s.currentURL(), "duration_ms", time.Since(s.startedAt).Milliseconds()}
 	s.logger.Log(ctx, level, message, append(attributes, fields...)...)
 }
