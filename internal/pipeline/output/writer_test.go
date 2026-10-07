@@ -12,11 +12,11 @@ func TestWriterSaveArticle(t *testing.T) {
 	root := t.TempDir()
 	writer := NewWriter(root)
 
-	paths, err := writer.SaveStructure("42", "тестовая-статья", "Промпт структуры", "Итоговая структура")
+	_, err := writer.SaveStructure("42", "тестовая-статья", "Промпт структуры", "Итоговая структура")
 	if err != nil {
 		t.Fatal(err)
 	}
-	paths, err = writer.SaveArticle("42", "тестовая-статья", "Промпт на русском", "Текст статьи", "gemini-test")
+	paths, err := writer.SaveArticle("42", "тестовая-статья", "Промпт на русском", "Текст статьи", "gemini-test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,15 +43,15 @@ func TestWriterSaveArticle(t *testing.T) {
 	if err != nil || !strings.Contains(string(contextData), `"model": "gemini-test"`) {
 		t.Fatalf("generation context = %q, %v", contextData, err)
 	}
-	paths, err = writer.SaveReview("42", "тестовая-статья", "Промпт ревью", "Результат ревью")
+	_, err = writer.SaveReview("42", "тестовая-статья", "Промпт ревью", "Результат ревью")
 	if err != nil {
 		t.Fatal(err)
 	}
-	paths, err = writer.SaveArticleInfo("42", "тестовая-статья", "Промпт info", "Название, метки, TL;DR и FAQ")
+	_, err = writer.SaveArticleInfo("42", "тестовая-статья", "Промпт info", "Название, метки, TL;DR и FAQ")
 	if err != nil {
 		t.Fatal(err)
 	}
-	paths, err = writer.SaveFixedArticle("42", "тестовая-статья", "Промпт исправления", "Исправленная статья")
+	_, err = writer.SaveFixedArticle("42", "тестовая-статья", "Промпт исправления", "Исправленная статья")
 	if err != nil {
 		t.Fatal(err)
 	}

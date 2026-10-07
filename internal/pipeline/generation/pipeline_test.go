@@ -555,15 +555,15 @@ func TestPipelineDoesNotSaveEmptyReview(t *testing.T) {
 func TestRunFixByExternalIDCallsOnlyFixAndSavesResult(t *testing.T) {
 	root := t.TempDir()
 	writer := articleoutput.NewWriter(root)
-	paths, err := writer.SaveStructure("37", "tema", "structure prompt", "structure")
+	_, err := writer.SaveStructure("37", "tema", "structure prompt", "structure")
 	if err != nil {
 		t.Fatal(err)
 	}
-	paths, err = writer.SaveArticle("37", "tema", "article prompt", "Сохранённая статья", "model")
+	_, err = writer.SaveArticle("37", "tema", "article prompt", "Сохранённая статья", "model")
 	if err != nil {
 		t.Fatal(err)
 	}
-	paths, err = writer.SaveReview("37", "tema", "review prompt", "Сохранённое review")
+	paths, err := writer.SaveReview("37", "tema", "review prompt", "Сохранённое review")
 	if err != nil {
 		t.Fatal(err)
 	}

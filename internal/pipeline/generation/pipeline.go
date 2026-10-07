@@ -129,7 +129,6 @@ func (p *Pipeline) Run(ctx context.Context, input article.GenerationInput) (Pipe
 		return PipelineOutput{}, err
 	}
 	articleText := articleOutput.Text
-	paths := articleOutput.Paths
 
 	_, reviewChat, err := p.runReview(ctx, input, articleText)
 	if err != nil {
@@ -146,7 +145,7 @@ func (p *Pipeline) Run(ctx context.Context, input article.GenerationInput) (Pipe
 	if err != nil {
 		return PipelineOutput{}, err
 	}
-	paths = htmlOutput.Paths
+	paths := htmlOutput.Paths
 	if p.resultBuilder == nil {
 		return PipelineOutput{}, p.fail(ctx, logger, input, "result_generation", fmt.Errorf("result builder is not configured"))
 	}
