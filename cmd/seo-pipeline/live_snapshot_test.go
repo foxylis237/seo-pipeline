@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -85,6 +86,41 @@ func TestLiveDatabaseCommandsSnapshot(t *testing.T) {
 				}
 			}
 			compareSnapshotIn(t, env.dir, "db-"+profile.Command+".txt", out.String())
+		})
+	}
+}
+
+// The output directory is pinned to the profile default, so a local OUTPUT_DIR cannot move it.
+func TestLiveDryRunSnapshot(t *testing.T) {
+	env := liveSnapshotEnv(t)
+	for _, profile := range taskRegistry() {
+		if profile.ArticleAudit != nil {
+			continue
+		}
+		t.Run(profile.Command, func(t *testing.T) {
+			var out strings.Builder
+			out.WriteString(env.run(t, []string{"APP_ENV=test", profile.EnvPrefix + "OUTPUT_DIR=" + profile.OutputDir},
+				profile.Command, "run", "--dry-run"))
+			root := filepath.Join(env.workdir, profile.OutputDir, "dry-run")
+			err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+				if err != nil || entry.IsDir() {
+					return err
+				}
+				content, err := os.ReadFile(path)
+				if err != nil {
+					return err
+				}
+				relative, err := filepath.Rel(root, path)
+				if err != nil {
+					return err
+				}
+				fmt.Fprintf(&out, "=== %s\n%s\n", filepath.ToSlash(relative), content)
+				return nil
+			})
+			if err != nil && !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("read dry-run output: %v", err)
+			}
+			compareSnapshotIn(t, env.dir, "dry-run-"+profile.Command+".txt", out.String())
 		})
 	}
 }
