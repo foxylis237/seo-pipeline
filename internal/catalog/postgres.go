@@ -9,20 +9,12 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// PostgresStore — каталог в своей схеме.
-//
-// Схема не принадлежит ни одной задаче, поэтому имя её пишется в запросах явно, а не
-// приходит через search_path: тот у каждой задачи свой, и каталог, найденный «где-то в
-// текущей схеме», у разных задач оказался бы разным.
-//
-// Имя приходит параметром и умолчания не имеет. Площадок у проекта две, каждая со своим
-// каталогом в своей схеме, а Replace начинает с удаления всех услуг — «если не сказано,
-// пишем в site» означало бы, что забытая настройка стирает каталог соседа. Умолчание живёт
-// одним уровнем выше, в composition root, где известны и задача, и её площадка.
+// PostgresStore хранит каталог в схеме площадки.
+// Схема пишется в запросах явно, а не через search_path задачи, и умолчания не имеет:
+// Replace начинает с удаления всех услуг, и забытая настройка стёрла бы чужой каталог.
 type PostgresStore struct {
 	pool *pgxpool.Pool
-	// schema — имя схемы, уже приведённое к безопасному виду: оно подставляется в текст
-	// запроса, а не уходит параметром, — так схему назвать нельзя.
+	// schema уже санитизирована: имя схемы подставляется в текст запроса, параметром его не передать.
 	schema string
 }
 
@@ -33,15 +25,10 @@ func NewPostgresStore(pool *pgxpool.Pool, schema string) (*PostgresStore, error)
 	return &PostgresStore{pool: pool, schema: pgx.Identifier{schema}.Sanitize()}, nil
 }
 
-// table — полное имя таблицы каталога: «site_obuchim.programs».
 func (s *PostgresStore) table(name string) string { return s.schema + "." + name }
 
-// Replace заменяет услуги целиком, сохраняя рубрики и профессии.
-//
-// Услуги переписываются начисто: пропавшая с площадки программа обязана исчезнуть, иначе
-// однажды уйдёт в блок под статьёй ссылкой в никуда. Рубрики, профессии и их синонимы
-// переживают сбор: на профессии человек мог повесить свои синонимы (source = manual), и
-// снести их вместе с услугами значило бы потерять ручную работу.
+// Replace заменяет услуги целиком, сохраняя рубрики, профессии и их синонимы:
+// ручные синонимы (source = manual) переживают пересбор.
 func (s *PostgresStore) Replace(ctx context.Context, programs []Program) error {
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		industries, err := s.saveIndustries(ctx, tx, programs)
@@ -113,7 +100,6 @@ func (s *PostgresStore) List(ctx context.Context) ([]Program, error) {
 	return programs, nil
 }
 
-// industryKey — ключ рубрики в пределах сбора: таксономия и термин площадки.
 func industryKey(industry Industry) string {
 	return fmt.Sprintf("%s:%d", industry.Taxonomy, industry.TermID)
 }
@@ -142,10 +128,7 @@ func (s *PostgresStore) saveIndustries(ctx context.Context, tx pgx.Tx, programs 
 	return ids, nil
 }
 
-// saveProfessions сохраняет наши рубрики и слова, по которым они узнаются.
-//
-// Синоним, заведённый разбором, обновляется; заведённый человеком — остаётся: ON CONFLICT
-// здесь ничего не делает, и ручная строка переживает любой пересбор.
+// saveProfessions сохраняет профессии и их синонимы; ON CONFLICT DO NOTHING оставляет ручные синонимы.
 func (s *PostgresStore) saveProfessions(ctx context.Context, tx pgx.Tx, programs []Program) (map[string]int64, error) {
 	ids := make(map[string]int64)
 	for _, program := range programs {

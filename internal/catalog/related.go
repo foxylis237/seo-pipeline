@@ -6,45 +6,24 @@ import (
 	"strings"
 )
 
-// Подбор блока «Связанные курсы» под статьёй.
-//
-// Он не тот же, что подбор перелинковки, и отличие принципиальное: ссылки внутри текста
-// человек уже расставил колонкой links, и повторить их карточками под статьёй значит
-// показать читателю одно и то же дважды. Блок обязан вести дальше — к соседним профессиям
-// той же рубрики, которых в тексте не было.
-//
-// Курсов всегда ровно три: столько карточек рисует тема, и неполный блок выглядит ошибкой
-// вёрстки. Поэтому круг поиска расширяется, пока три не наберутся, — от профессий статьи к
-// их рубрикам и к тем же рубрикам в соседних таксономиях.
+// Подбор блока «Связанные курсы» под статьёй: дополняет перелинковку из колонки links,
+// а не повторяет её.
 
 // Related — подобранная услуга и то, откуда она пришла.
 type Related struct {
 	Program Program
-	// Neighbour — услуга смежной профессии, а не той, о которой статья. Признак нужен
-	// человеку: в result.md видно, сколько курсов блока про саму профессию, а сколько
-	// подтянуто из соседних.
+	// Neighbour — услуга смежной профессии, а не той, о которой статья.
 	Neighbour bool
-	// Widened — услуга, найденная за пределами рубрик статьи, когда трёх не набралось иначе.
-	// Такие стоит просмотреть глазами: связь с темой у них слабее.
+	// Widened — услуга, найденная за пределами рубрик статьи, на последней ступени.
 	Widened bool
 }
 
-// RelatedLimit — размер блока. Тема рисует три карточки, и это её вёрстка, а не наше
-// предпочтение: четвёртая никуда не поместится, а двух не хватит на ряд.
+// RelatedLimit — размер блока: тема площадки рисует ровно три карточки.
 const RelatedLimit = 3
 
-// SelectRelated подбирает услуги для блока под статьёй.
-//
-// Порядок отбора:
-//
-//  1. Из круга кандидатов вычёркиваются программы, уже стоящие ссылками в тексте (Links).
-//  2. Первыми идут профессии, которых в тексте не было вовсе, — блок ведёт дальше статьи.
-//  3. Внутри профессии первым идёт обучение, потом переподготовка и повышение.
-//  4. От каждой профессии берётся по одной услуге, и лишь потом второй круг.
-//
-// Круг кандидатов расширяется тремя ступенями и ровно настолько, насколько не хватило:
-// профессии статьи → их рубрики площадки → те же рубрики в соседних таксономиях
-// (обучение ↔ переподготовка ↔ повышение нарезаны почти одинаково).
+// SelectRelated подбирает услуги для блока под статьёй, исключая программы из Links.
+// Круг расширяется, пока не хватает: профессии статьи → их рубрики → те же рубрики в
+// соседних таксономиях.
 func SelectRelated(programs []Program, request Request) []Related {
 	limit := request.Limit
 	if limit <= 0 {
@@ -62,8 +41,6 @@ func SelectRelated(programs []Program, request Request) []Related {
 		mainProfession = keys[0]
 	}
 
-	// Ступени круга: профессии статьи, их рубрики, те же рубрики в соседних таксономиях.
-	// Каждая следующая шире предыдущей, и берётся ровно столько, сколько не хватило.
 	stages := []func(Program) bool{
 		func(item Program) bool { return scope.professions[item.Profession.Slug] },
 		func(item Program) bool { return scope.industries[industryKey(item.Industry)] },
@@ -98,24 +75,17 @@ func SelectRelated(programs []Program, request Request) []Related {
 	return selected
 }
 
-// scope — тематика статьи, очерченная тремя кругами.
 type scope struct {
-	// professions — профессии, которые статья назвала сама или показала ссылками в тексте.
+	// professions — профессии из колонки и из ссылок в тексте.
 	professions map[string]bool
-	// industries — рубрики площадки этих профессий, ключ «таксономия:термин».
+	// industries — ключ «таксономия:термин».
 	industries map[string]bool
-	// industrySlugs — те же рубрики без таксономии: obuch-cat santehnik и perepod-cat
-	// santehnik — одна профессиональная группа, разложенная по типам услуг.
+	// industrySlugs — те же рубрики без таксономии: obuch-cat santehnik и perepod-cat santehnik — одна группа.
 	industrySlugs map[string]bool
-	// linkedProfessions — профессии, уже представленные ссылками в тексте статьи. Блок
-	// начинает не с них: читатель эти курсы уже видел.
+	// linkedProfessions — профессии, уже представленные ссылками в тексте; они идут последними.
 	linkedProfessions map[string]bool
 }
 
-// articleScope очерчивает тематику статьи.
-//
-// Опора двойная: профессии из колонки и программы, уже стоящие в тексте. Второе точнее
-// любого разбора — выбирая ссылки перелинковки, человек тем самым назвал рубрику.
 func articleScope(programs []Program, keys []string, linkedSlugs map[string]bool) scope {
 	wanted := make(map[string]struct{}, len(keys))
 	for _, key := range keys {
@@ -145,11 +115,8 @@ func articleScope(programs []Program, keys []string, linkedSlugs map[string]bool
 	return result
 }
 
-// pickSpread разбирает кандидатов по одному от профессии, круг за кругом.
-//
-// Порядок профессий: сначала те, которых в тексте статьи не было, — блок ведёт дальше; за
-// ними те, что статья уже показывала. Внутри группы держится порядок колонки professions:
-// первой человек называет главную.
+// pickSpread берёт по одной услуге от профессии, круг за кругом: сначала профессии, которых
+// нет в ссылках текста, затем в порядке колонки professions.
 func pickSpread(
 	candidates []Program, keys []string, linkedProfessions map[string]bool,
 	topicWords map[string]struct{}, need int,
@@ -183,7 +150,6 @@ func pickSpread(
 	}
 	sort.SliceStable(order, func(i, j int) bool {
 		left, right := groups[order[i]][0], groups[order[j]][0]
-		// Профессия, которой в тексте не было, идёт первой: ради неё блок и существует.
 		if linkedProfessions[order[i]] != linkedProfessions[order[j]] {
 			return !linkedProfessions[order[i]]
 		}
@@ -226,11 +192,8 @@ func pickSpread(
 	return picked
 }
 
-// linkedProgramSlugs разбирает колонку links в слаги программ.
-//
-// Ссылки записаны адресами страниц («https://dpoprof.ru/obuchenie/santehnik/»), а сравнивать
-// их с каталогом надёжнее по слагу: адрес одной и той же программы пишут и со слешем на
-// конце, и без, и с http вместо https.
+// linkedProgramSlugs разбирает колонку links в слаги: адреса одной программы пишут
+// по-разному (слеш, http/https), слаг у них один.
 func linkedProgramSlugs(links string) map[string]bool {
 	slugs := make(map[string]bool)
 	for _, field := range strings.Fields(links) {
@@ -252,9 +215,6 @@ func linkedProgramSlugs(links string) map[string]bool {
 }
 
 // LinkedPrograms возвращает слаги программ, уже стоящих ссылками в тексте статьи.
-//
-// Нужна командам, которые показывают подбор человеку: сколько программ статья уже назвала
-// сама — половина ответа на вопрос, почему в блоке именно эти три.
 func LinkedPrograms(links string) []string {
 	slugs := linkedProgramSlugs(links)
 	names := make([]string, 0, len(slugs))
@@ -265,8 +225,7 @@ func LinkedPrograms(links string) []string {
 	return names
 }
 
-// professionKeyOf — ключ профессии услуги: та самая основа слова, по которой она сходится с
-// колонкой professions статьи.
+// professionKeyOf — основа, по которой услуга сходится с колонкой professions статьи.
 func professionKeyOf(program Program) string {
 	if len(program.Profession.Aliases) == 0 {
 		return ""
@@ -274,7 +233,7 @@ func professionKeyOf(program Program) string {
 	return program.Profession.Aliases[0]
 }
 
-// RelatedPostIDs возвращает идентификаторы записей блока — то, что уходит в связь.
+// RelatedPostIDs возвращает идентификаторы записей блока для связи related_courses.
 func RelatedPostIDs(related []Related) []int64 {
 	ids := make([]int64, 0, len(related))
 	for _, item := range related {
@@ -283,8 +242,7 @@ func RelatedPostIDs(related []Related) []int64 {
 	return ids
 }
 
-// DescribeRelated перечисляет подобранные услуги для человека: план публикации, лог и
-// result.md показывают не голые идентификаторы, а то, что читатель увидит под статьёй.
+// DescribeRelated перечисляет подобранные услуги словами: название и тип услуги.
 func DescribeRelated(related []Related) string {
 	parts := make([]string, 0, len(related))
 	for _, item := range related {
