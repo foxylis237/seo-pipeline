@@ -7,17 +7,11 @@ import (
 	"strings"
 )
 
-// catalogScanPages ограничивает обход одного типа записей.
-//
-// Восемь сотен услуг обучения — самый крупный тип площадки, то есть восемь страниц по сотне.
-// Двадцать страниц дают двукратный запас на рост каталога и при этом не дают циклу уйти в
-// бесконечность, если площадка начнёт отдавать одну и ту же страницу.
+// catalogScanPages ограничивает обход одного типа записей: запас к крупнейшему типу
+// и защита от площадки, отдающей одну и ту же страницу.
 const catalogScanPages = 20
 
-// CatalogPost — запись площадки, как её отдаёт перебор каталога.
-//
-// Это не StoredPost: тому нужны поля, термины и обложка одной записи, а здесь читаются
-// полторы тысячи записей подряд, и всё лишнее в ответе стоит времени.
+// CatalogPost — запись площадки, как её отдаёт перебор каталога; облегчённая против StoredPost.
 type CatalogPost struct {
 	ID    int64
 	Slug  string
@@ -27,7 +21,6 @@ type CatalogPost struct {
 }
 
 // CatalogTerm — термин записи: рубрика площадки или служебная метка вроде prof-type.
-// Какой из них рубрика, решает читающий: имя таксономии складывается из типа записи.
 type CatalogTerm struct {
 	TermID   int64
 	Taxonomy string
@@ -35,14 +28,8 @@ type CatalogTerm struct {
 	Name     string
 }
 
-// ListCatalogPosts читает все опубликованные записи одного типа.
-//
-// Читается по XML-RPC, а не по REST, и это вынужденно: у типов услуг show_in_rest = false,
-// и wp-json отдаёт по ним 404. Тот же перебор страницами, что и у поиска по слагу, — других
-// способов увидеть эти записи снаружи у площадки нет.
-//
-// Термины запрашиваются вместе с записями: рубрика приходит в том же ответе, и второго
-// запроса на каждую услугу не нужно.
+// ListCatalogPosts читает все опубликованные записи одного типа вместе с терминами.
+// Через XML-RPC: у типов услуг show_in_rest = false, и wp-json отдаёт по ним 404.
 func (c *Client) ListCatalogPosts(ctx context.Context, postType string) ([]CatalogPost, error) {
 	if strings.TrimSpace(postType) == "" {
 		return nil, fmt.Errorf("тип записи пуст")
@@ -90,8 +77,7 @@ func (c *Client) ListCatalogPosts(ctx context.Context, postType string) ([]Catal
 func catalogPostFromMembers(members map[string]any) CatalogPost {
 	post := CatalogPost{
 		ID: int64(intFromValue(members["post_id"])),
-		// Заголовки WordPress отдаёт с сущностями: «Сантехник &#8212; обучение». Разворот
-		// делается здесь, у входа, чтобы дальше по коду ходил обычный текст.
+		// WordPress отдаёт заголовки с HTML-сущностями (&#8212;).
 		Title: html.UnescapeString(stringFromValue(members["post_title"])),
 		Slug:  stringFromValue(members["post_name"]),
 		Link:  stringFromValue(members["link"]),

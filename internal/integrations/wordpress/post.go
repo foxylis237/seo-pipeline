@@ -11,101 +11,51 @@ import (
 	"strings"
 )
 
-// Статусы записи, которые умеет ставить пакет. Больше их не будет: команда либо публикует,
-// либо готовит черновик для проверки, а редактирование чужих записей запрещено целиком.
+// Статусы записи, которые умеет ставить пакет.
 const (
 	PostStatusPublish = "publish"
 	PostStatusDraft   = "draft"
 )
 
 const (
-	// defaultPostType — обычная запись блога. Подставляется, когда тип не назван.
-	defaultPostType = "post"
-	// defaultCategoryTaxonomy — встроенная таксономия рубрик. Подставляется, когда своя
-	// таксономия не названа.
+	defaultPostType         = "post"
 	defaultCategoryTaxonomy = "category"
-	// tagTaxonomy — встроенная таксономия меток. Своей у неё не бывает: метки либо есть у
-	// типа записи, либо их не отправляют вовсе.
-	tagTaxonomy = "post_tag"
+	tagTaxonomy             = "post_tag"
 )
 
-// CustomField — одна пара postmeta.
-//
-// Значение обычно строка, даже когда по смыслу это число: репитер ACF хранит и счётчик
-// строк, и сами подполя текстом, и WordPress отдаёт их обратно тоже текстом. Число здесь
-// завело бы обратную сверку в сравнение int со строкой.
+// CustomField — одна пара postmeta; числа тоже строкой — WordPress хранит и отдаёт их текстом.
 type CustomField struct {
 	Key   string
 	Value string
-	// IDs — значение-список идентификаторов записей, каким его хранит связь ACF на
-	// несколько записей (related_courses). Отдельное поле, а не строка в Value, потому что
-	// уходить оно обязано XML-RPC-массивом.
-	//
-	// Готовую сериализованную строку сюда класть нельзя: WordPress пропускает значение
-	// через maybe_serialize, и уже сериализованное сериализуется повторно — измерено на
-	// записи 22215, ушло a:1:{i:0;s:5:"18220";}, легло s:22:"a:1:{…}", то есть строка
-	// вместо массива, и ACF такую связь не читает. Настоящий массив PHP получает только из
-	// XML-RPC-массива, и сериализует его уже сам.
-	//
-	// Связь на ОДНУ запись массива не требует: скаляр ACF разворачивает сама
-	// (acf_get_array) — так устроены author_link у статьи и teachers у страницы услуги.
+	// IDs — связь ACF на несколько записей; уходит XML-RPC-массивом, потому что готовую
+	// сериализованную строку WordPress пропускает через maybe_serialize второй раз.
+	// Связи на одну запись хватает скаляра: ACF разворачивает его сама (acf_get_array).
 	IDs []int64
-	// Values — значение-список строк, каким его хранит набор флажков ACF (prog_format).
-	// Отдельное поле по той же причине, что и IDs: уходить оно обязано XML-RPC-массивом.
-	// Готовую строку `a:1:{i:0;s:4:"dist";}` сюда класть нельзя — WordPress сериализует её
-	// повторно, и в записи оказывается s:21:"a:1:{…}";, то есть строка вместо массива.
-	// Измерено на записи 19540 первой публикацией obuch_2.
+	// Values — набор флажков ACF (prog_format); уходит XML-RPC-массивом по той же причине, что IDs.
 	Values []string
 }
 
 // PostPayload — всё, что уходит в WordPress одним вызовом wp.newPost.
-//
-// Собирается целиком до запроса: наполовину собранной публикации не существует, а дособрать
-// её вторым запросом нельзя — редактирование записей пакету запрещено.
 type PostPayload struct {
-	// Title — заголовок записи.
 	Title string
-	// Slug — адрес записи (post_name). Пустое значение означает «пусть площадка соберёт
-	// сама»: WordPress выводит слаг из заголовка, а заголовки у нас русские и длинные,
-	// поэтому адрес получается на всю строку. Задача передаёт сюда короткий латинский слаг
-	// из книги импорта.
+	// Slug — адрес записи (post_name); пустой — WordPress выводит его из заголовка.
 	Slug string
-	// ContentHTML — тело записи. Уходит как есть, без обработки: у пользователя есть право
-	// unfiltered_html, и WordPress сохраняет разметку побайтово.
+	// ContentHTML — тело записи как есть: с правом unfiltered_html WordPress сохраняет его побайтово.
 	ContentHTML string
 	// Status — PostStatusPublish или PostStatusDraft.
 	Status string
-	// PostType — тип записи. Пустое значение означает обычную запись блога.
-	//
-	// Поле есть потому, что задачи публикуются в разные сущности одной площадки: статья
-	// блога — это post, коммерческая страница услуги живёт своим типом. Тип выбирает
-	// вызывающий, пакет за него не решает.
+	// PostType — тип записи; пустой — post.
 	PostType string
-	// CategoryTaxonomy — таксономия рубрики. Пустая означает встроенную category.
-	//
-	// Рубрика у записи одна при любой таксономии: это её место в каталоге. Своя таксономия
-	// нужна тем типам записей, к которым встроенная category не привязана вовсе, — там имя
-	// «category» WordPress просто отбросил бы, и запись легла бы без рубрики.
+	// CategoryTaxonomy — таксономия рубрики; пустая — category. Чужую для типа таксономию
+	// WordPress молча отбрасывает.
 	CategoryTaxonomy string
-	// CategoryID — рубрика, уже разрешённая в идентификатор.
-	CategoryID int64
-	// TagIDs — метки, уже разрешённые в идентификаторы.
-	//
-	// Именно идентификаторы, а не имена: XML-RPC принимает и terms_names, но тот молча
-	// заводит отсутствующие термины. Заводить рубрики и метки нам запрещено, поэтому
-	// несуществующее имя обязано отбиться раньше, при разрешении.
-	//
-	// Пустой список — законное состояние: метки есть не у каждого типа записи, и требовать
-	// их от страницы услуги значило бы не опубликовать её никогда. Требование «метки
-	// обязательны» принадлежит задаче и проверяется до сборки нагрузки.
+	CategoryID       int64
+	// TagIDs — идентификаторы меток: terms_names молча заводит отсутствующие термины.
+	// Пустой список допустим — метки есть не у каждого типа записи.
 	TagIDs []int64
-	// ThumbnailID — вложение, которое станет изображением записи.
-	//
-	// Идентификатор уже загруженного файла: загрузка идёт отдельным вызовом до создания
-	// записи, потому что wp.newPost принимает у обложки только идентификатор. Ноль означает
-	// «записи обложка не назначается» — решает это вызывающий, пакет обложку не требует.
+	// ThumbnailID — уже загруженное вложение-обложка (wp.newPost принимает только id); ноль — без обложки.
 	ThumbnailID int64
-	// Fields — ACF и Yoast одним списком. Порядок значим только для читаемости логов.
+	// Fields — ACF и Yoast одним списком.
 	Fields []CustomField
 }
 
@@ -114,33 +64,18 @@ type StoredPost struct {
 	ID     int64
 	Title  string
 	Status string
-	// PostType — фактический тип записи, каким его хранит WordPress.
-	//
-	// Сверкой не проверяется намеренно: у записи, созданной с пустым типом, здесь стоит
-	// подставленное площадкой «post», и сравнение с пустым ожиданием было бы ложной
-	// тревогой. Поле нужно тому, кто читает чужую запись, — например, чтобы узнать, каким
-	// типом заведены уже существующие страницы.
+	// PostType — фактический тип записи; сверкой не проверяется: пустой тип WordPress заменяет на post.
 	PostType string
-	// Slug — адрес, который у записи в итоге получился. Может отличаться от отправленного:
-	// занятый слаг WordPress дополняет числом.
+	// Slug — итоговый адрес: занятый слаг WordPress дополняет числом.
 	Slug        string
 	ContentHTML string
 	Link        string
-	// TermIDs — термины записи по таксономиям, как их вернул WordPress.
-	//
-	// Карта, а не пара полей под category и post_tag: таксономия рубрики у разных типов
-	// записей своя, и знать её имена заранее пакет не может. Сверка спрашивает ровно те
-	// таксономии, которые были в отправленной нагрузке.
+	// TermIDs — термины записи по таксономиям.
 	TermIDs map[string][]int64
-	// ThumbnailID — вложение, назначенное записи изображением. Ноль означает, что обложки
-	// у записи нет.
+	// ThumbnailID — обложка записи; ноль — обложки нет.
 	ThumbnailID int64
 	Fields      map[string]string
-	// FieldIDs — идентификаторы postmeta тех же полей.
-	//
-	// Нужны правке: wp.editPost обновляет поле только по его id, а без id заводит вторую
-	// запись postmeta с тем же ключом — и какая из двух достанется get_field(), решал бы
-	// порядок в базе. Создание записи их не спрашивает: у новой записи полей ещё нет.
+	// FieldIDs — идентификаторы postmeta тех же полей: wp.editPost обновляет поле только по id.
 	FieldIDs map[string]string
 }
 
@@ -156,11 +91,7 @@ func (m Mismatch) String() string {
 }
 
 // CreatePost создаёт запись одним вызовом и возвращает её идентификатор.
-//
-// Повторов нет ни при каком отказе, и это не упущение, а требование. При обрыве после
-// отправки неизвестно, дошёл ли запрос: вторая попытка — это второй пост в блоге, а удалять
-// записи пакету запрещено. Решение «повторять или нет» остаётся человеку, который может
-// посмотреть в админку.
+// Повторов нет: после обрыва вторая попытка может дать второй пост в блоге.
 func (c *Client) CreatePost(ctx context.Context, payload PostPayload) (int64, error) {
 	if err := payload.validate(); err != nil {
 		return 0, err
@@ -186,7 +117,7 @@ func (c *Client) CreatePost(ctx context.Context, payload PostPayload) (int64, er
 	return int64(postID), nil
 }
 
-// GetPost читает запись обратно. Нужен обязательной сверке после создания.
+// GetPost читает запись по идентификатору.
 func (c *Client) GetPost(ctx context.Context, postID int64) (StoredPost, error) {
 	var response xmlrpcResponse
 	params := []any{
@@ -207,11 +138,8 @@ func (c *Client) GetPost(ctx context.Context, postID int64) (StoredPost, error) 
 	return storedPostFromMembers(members), nil
 }
 
-// Verify сверяет отправленное с тем, что действительно легло в WordPress.
-//
-// Проверяются все записываемые поля, а не выборка: смысл сверки в том, чтобы поймать молча
-// отброшенный ключ, а какой именно ключ отбросят, заранее неизвестно. Пустой результат
-// означает, что публикация состоялась полностью.
+// Verify сверяет все отправленные поля с тем, что легло в WordPress: какой ключ будет молча
+// отброшен, заранее неизвестно.
 func (p PostPayload) Verify(stored StoredPost) []Mismatch {
 	var mismatches []Mismatch
 	add := func(field, expected, actual string) {
@@ -220,10 +148,7 @@ func (p PostPayload) Verify(stored StoredPost) []Mismatch {
 		}
 	}
 	add("post_title", p.Title, stored.Title)
-	// Слаг сверяется началом, а не равенством: занятый адрес WordPress дополняет числом
-	// («-2»), и это его законное решение, а не потерянное поле. Расхождением считается
-	// только слаг, в котором отправленного не осталось вовсе, — там площадка собрала адрес
-	// сама, и об этом надо знать.
+	// Слаг сверяется началом: занятый адрес WordPress дополняет числом («-2»).
 	if slug := strings.TrimSpace(p.Slug); slug != "" && !strings.HasPrefix(stored.Slug, slug) {
 		mismatches = append(mismatches, Mismatch{Field: "post_name", Expected: slug, Actual: stored.Slug})
 	}
@@ -231,24 +156,16 @@ func (p PostPayload) Verify(stored StoredPost) []Mismatch {
 	add("post_content", p.ContentHTML, stored.ContentHTML)
 	category := p.categoryTaxonomy()
 	add("terms."+category, formatIDs([]int64{p.CategoryID}), formatIDs(stored.TermIDs[category]))
-	// Метки сверяются и тогда, когда их не отправляли: пустое ожидание против непустого
-	// ответа — это метка, повешенная площадкой помимо нас, и знать об этом человек обязан.
+	// Метки сверяются и без отправленных: площадка может повесить свои.
 	add("terms."+tagTaxonomy, formatIDs(p.TagIDs), formatIDs(stored.TermIDs[tagTaxonomy]))
-	// Обложка сверяется наравне с остальным: назначить её вторым запросом нельзя —
-	// редактирование записей пакету запрещено, — а запись без картинки в блоге видна сразу.
 	add("post_thumbnail", formatIDs([]int64{p.ThumbnailID}), formatIDs([]int64{stored.ThumbnailID}))
 	for _, field := range p.Fields {
-		// Список идентификаторов возвращается сериализованным массивом PHP, а не тем, что
-		// мы отправляли. Сверяется поэтому состав, а не строка: порядок внутри связи ACF не
-		// значим, а её запись — единственное место, где мы вообще узнаем, легло ли поле
-		// массивом или строкой.
+		// Связь возвращается сериализованным массивом PHP: сверяется состав, а не строка.
 		if len(field.IDs) > 0 {
 			add(field.Key, formatIDs(field.IDs), formatIDs(serializedIDs(stored.Fields[field.Key])))
 			continue
 		}
-		// Набор флажков тоже возвращается сериализованным массивом. Сравнивать его со Value
-		// нельзя: оно у такого поля пустое, и 28.09.2026 запись 19728 с верным prog_format
-		// была объявлена несошедшейся.
+		// Набор флажков тоже возвращается сериализованным массивом; Value у него пуст.
 		if len(field.Values) > 0 {
 			add(field.Key, formatValues(field.Values), formatValues(serializedStrings(stored.Fields[field.Key])))
 			continue
@@ -258,11 +175,7 @@ func (p PostPayload) Verify(stored StoredPost) []Mismatch {
 	return mismatches
 }
 
-// validate отбивает заведомо непригодную нагрузку до запроса.
-//
-// Проверка структурная, а не деловая: готовность статьи выясняется раньше и по данным в
-// PostgreSQL. Здесь ловится только то, из чего WordPress собрал бы покалеченную запись,
-// которую мы потом не смогли бы ни исправить, ни удалить.
+// validate отбивает структурно непригодную нагрузку до запроса.
 func (p PostPayload) validate() error {
 	if strings.TrimSpace(p.Title) == "" {
 		return errors.New("WordPress: заголовок записи пуст")
@@ -276,9 +189,7 @@ func (p PostPayload) validate() error {
 	if p.CategoryID <= 0 {
 		return errors.New("WordPress: рубрика не разрешена в идентификатор")
 	}
-	// Метки не требуются: их наличие — правило задачи, а не структуры записи. Задача, у
-	// которой меток нет вовсе, проверяет это до сборки нагрузки и сюда доходит с пустым
-	// списком намеренно.
+	// Метки не требуются: это правило задачи, а не структуры записи.
 	for _, id := range p.TagIDs {
 		if id <= 0 {
 			return fmt.Errorf("WordPress: недопустимый идентификатор метки %d", id)
@@ -293,8 +204,7 @@ func (p PostPayload) validate() error {
 			return errors.New("WordPress: пустое имя поля в custom_fields")
 		}
 		if _, duplicate := seen[field.Key]; duplicate {
-			// Дубликат ключа WordPress разложил бы в две записи postmeta, и какая из них
-			// достанется get_field(), решал бы порядок в базе.
+			// Дубликат ключа WordPress разложил бы в две записи postmeta.
 			return fmt.Errorf("WordPress: поле %q встречается в custom_fields дважды", field.Key)
 		}
 		seen[field.Key] = struct{}{}
@@ -302,7 +212,6 @@ func (p PostPayload) validate() error {
 	return nil
 }
 
-// postType возвращает тип записи, подставляя обычную запись блога.
 func (p PostPayload) postType() string {
 	if strings.TrimSpace(p.PostType) == "" {
 		return defaultPostType
@@ -310,7 +219,6 @@ func (p PostPayload) postType() string {
 	return p.PostType
 }
 
-// categoryTaxonomy возвращает таксономию рубрики, подставляя встроенную.
 func (p PostPayload) categoryTaxonomy() string {
 	if strings.TrimSpace(p.CategoryTaxonomy) == "" {
 		return defaultCategoryTaxonomy
@@ -318,13 +226,11 @@ func (p PostPayload) categoryTaxonomy() string {
 	return p.CategoryTaxonomy
 }
 
-// content собирает структуру аргумента wp.newPost.
 func (p PostPayload) content() xmlrpcStruct {
 	terms := xmlrpcStruct{
 		{Name: p.categoryTaxonomy(), Value: xmlrpcArray{p.CategoryID}},
 	}
-	// Пустой post_tag не отправляется вовсе: у типа записи, к которому метки не привязаны,
-	// WordPress отвечает на такую таксономию отказом, а не молчаливым пропуском.
+	// Пустой post_tag не отправляется: у типа без меток WordPress отвечает на него отказом.
 	if len(p.TagIDs) > 0 {
 		tags := make(xmlrpcArray, 0, len(p.TagIDs))
 		for _, id := range p.TagIDs {
@@ -347,12 +253,10 @@ func (p PostPayload) content() xmlrpcStruct {
 		{Name: "terms", Value: terms},
 		{Name: "custom_fields", Value: fields},
 	}
-	// Пустой слаг не отправляется: адрес тогда соберёт сама площадка из заголовка.
 	if slug := strings.TrimSpace(p.Slug); slug != "" {
 		content = append(content, xmlrpcMember{Name: "post_name", Value: slug})
 	}
-	// Ноль не отправляется вовсе: пустой post_thumbnail WordPress понимает как «снять
-	// обложку», и у новой записи это лишнее поле в запросе с несуществующим смыслом.
+	// Пустой post_thumbnail WordPress понимает как «снять обложку».
 	if p.ThumbnailID > 0 {
 		content = append(content, xmlrpcMember{Name: "post_thumbnail", Value: p.ThumbnailID})
 	}
@@ -372,8 +276,6 @@ func storedPostFromMembers(members map[string]any) StoredPost {
 		Fields:      make(map[string]string),
 		FieldIDs:    make(map[string]string),
 	}
-	// Термины раскладываются по всем таксономиям, какие вернул WordPress, а не по двум
-	// известным: какая из них рубрика этой записи, знает отправленная нагрузка, а не ответ.
 	if terms, ok := members["terms"].([]any); ok {
 		for _, item := range terms {
 			term, ok := item.(map[string]any)
@@ -388,8 +290,7 @@ func storedPostFromMembers(members map[string]any) StoredPost {
 			post.TermIDs[taxonomy] = append(post.TermIDs[taxonomy], id)
 		}
 	}
-	// post_thumbnail приезжает целым описанием вложения, а не числом; у записи без обложки
-	// на его месте пустой массив.
+	// post_thumbnail приходит описанием вложения, у записи без обложки — пустым массивом.
 	if thumbnail, ok := members["post_thumbnail"].(map[string]any); ok {
 		post.ThumbnailID = int64(intFromValue(thumbnail["attachment_id"]))
 		if post.ThumbnailID < 0 {
@@ -415,17 +316,10 @@ func storedPostFromMembers(members map[string]any) StoredPost {
 	return post
 }
 
-// value — то, что уходит в custom_fields: строка или XML-RPC-массив идентификаторов.
 func (f CustomField) value() any { return customFieldValue(f.Value, f.IDs, f.Values) }
 
-// customFieldValue готовит значение поля postmeta и общий он у создания записи и у её правки.
-//
-// Общий намеренно: связь ACF обязана уйти массивом в обоих случаях, а второй копии правила
-// хватило бы, чтобы правка отправила строку — и связь перестала бы читаться ровно так же,
-// как от повторной сериализации.
+// customFieldValue готовит значение поля postmeta; общий у создания записи и у её правки.
 func customFieldValue(value string, ids []int64, values []string) any {
-	// Набор флажков уходит списком строк: WordPress сериализует его сам, и только так в
-	// записи оказывается массив, а не строка с сериализованным массивом внутри.
 	if len(values) > 0 {
 		list := make(xmlrpcArray, 0, len(values))
 		for _, item := range values {
@@ -436,8 +330,7 @@ func customFieldValue(value string, ids []int64, values []string) any {
 	if len(ids) == 0 {
 		return value
 	}
-	// Идентификаторы уходят строками: именно так их хранит ACF внутри сериализованного
-	// массива (s:3:"507"), и запись числами разошлась бы с тем, что уже лежит на площадке.
+	// Строками: так ACF хранит их внутри сериализованного массива (s:3:"507").
 	list := make(xmlrpcArray, 0, len(ids))
 	for _, id := range ids {
 		list = append(list, strconv.FormatInt(id, 10))
@@ -445,11 +338,8 @@ func customFieldValue(value string, ids []int64, values []string) any {
 	return list
 }
 
-// serializedIDs вынимает идентификаторы из сериализованного массива PHP.
-//
-// Разбор нарочно грубый и знает ровно один случай — a:N:{i:0;s:3:"507";…}: полноценный
-// разбор PHP-сериализации здесь не нужен, а нужна проверка «легло ли то, что отправляли».
-// Строка, не похожая на массив, даёт пустой набор — и сверка честно покажет расхождение.
+// serializedIDs вынимает идентификаторы из сериализованного массива PHP вида
+// a:N:{i:0;s:3:"507";…}; строка другого вида даёт пустой набор.
 func serializedIDs(value string) []int64 {
 	var ids []int64
 	for _, match := range serializedStringValue.FindAllStringSubmatch(value, -1) {
@@ -462,8 +352,7 @@ func serializedIDs(value string) []int64 {
 	return ids
 }
 
-// serializedStrings вынимает строковые элементы сериализованного массива PHP
-// (a:1:{i:0;s:4:"dist";} → [dist]). Разбор такой же грубый, как у serializedIDs.
+// serializedStrings вынимает строковые элементы сериализованного массива PHP (a:1:{i:0;s:4:"dist";} → [dist]).
 func serializedStrings(value string) []string {
 	var values []string
 	for _, match := range serializedAnyString.FindAllStringSubmatch(value, -1) {
@@ -479,14 +368,11 @@ func formatValues(values []string) string {
 	return strings.Join(sorted, ",")
 }
 
-// serializedAnyString — строковый элемент сериализованного массива PHP с любым содержимым.
 var serializedAnyString = regexp.MustCompile(`s:\d+:"([^"]*)"`)
 
-// serializedStringValue — строковый элемент сериализованного массива PHP.
 var serializedStringValue = regexp.MustCompile(`s:\d+:"(\d+)"`)
 
-// formatIDs приводит набор идентификаторов к сравнимому виду. Порядок терминов WordPress не
-// сохраняет, и сравнивать их как последовательность было бы ложной тревогой.
+// formatIDs приводит набор идентификаторов к сравнимому виду: порядок WordPress не сохраняет.
 func formatIDs(ids []int64) string {
 	sorted := make([]int64, len(ids))
 	copy(sorted, ids)

@@ -18,24 +18,13 @@ const (
 	tagsPath       = "/wp-json/wp/v2/tags"
 )
 
-// termsPerPage — размер страницы справочника. Сотня — потолок, который принимает WordPress.
+// termsPerPage — размер страницы справочника; сотня — потолок WordPress.
 const termsPerPage = 100
 
-// maxTermPages ограничивает обход справочника.
-//
-// Нужен не рубрикам, которых два десятка, а меткам: их на площадке тысячи, и поиск с
-// неудачным запросом мог бы вычерпывать их страницами до бесконечности. Дойти до предела —
-// значит признать, что термин не найден, а не молча взять не тот.
+// maxTermPages ограничивает обход справочника: меток на площадке тысячи.
 const maxTermPages = 10
 
 // ErrTermNotFound — термин с таким именем на площадке отсутствует.
-//
-// Отдельная ошибка, потому что решение по ней принимается разное. Рубрики приложение заводить
-// не имеет права: их два десятка, они продуманы человеком, и опечатка в Excel обязана
-// останавливать публикацию, а не плодить восьмую «Строительство и ремонт». Метки, наоборот,
-// заводятся по требованию (EnsureTag) — их тысячи, и заранее завести их руками нельзя.
-// Наружу ErrTermNotFound уходит от чистого поиска: FindTagID им отвечает сухому прогону,
-// которому запрещено что-либо создавать.
 type ErrTermNotFound struct {
 	Taxonomy string
 	Name     string
@@ -50,11 +39,8 @@ type termPayload struct {
 	Name string `json:"name"`
 }
 
-// FindCategoryID ищет рубрику по точному имени.
-//
-// Справочник обходится целиком, без параметра search: рубрик два десятка, а search у
-// WordPress ищет подстрокой и по имени, и по описанию — то есть на «Строительство» вернул бы
-// ещё и всё, где это слово встречается в описании.
+// FindCategoryID ищет рубрику по точному имени, обходя справочник целиком: search у WordPress
+// ищет подстрокой и по имени, и по описанию.
 func (c *Client) FindCategoryID(ctx context.Context, name string) (int64, error) {
 	wanted := normalizeTermName(name)
 	if wanted == "" {
@@ -77,19 +63,7 @@ func (c *Client) FindCategoryID(ctx context.Context, name string) (int64, error)
 }
 
 // FindTermIDInTaxonomy ищет термин произвольной таксономии по точному имени.
-//
-// Идёт через XML-RPC, а не через REST, и это не прихоть. У встроенных category и post_tag
-// маршрут REST известен заранее (/wp/v2/categories, /wp/v2/tags); у таксономии, заведённой
-// темой или плагином, он существует, только если её зарегистрировали с show_in_rest, а имя
-// маршрута задаётся отдельным rest_base и с именем таксономии не обязано совпадать. Угадывать
-// его — значит получить 404 вместо ответа «термина нет». wp.getTerms принимает имя таксономии
-// как есть и работает независимо от настроек REST.
-//
-// FindCategoryID остаётся на REST: он обслуживает уже работающие задачи, и менять транспорт
-// у живой публикации ради единообразия — риск без выгоды.
-//
-// Отбор точный, как и везде: search у WordPress ищет подстрокой, и «Медицина» вернула бы
-// заодно «Медицинский массаж».
+// Через XML-RPC: маршрут REST у таксономии темы есть только при show_in_rest и зовётся по rest_base.
 func (c *Client) FindTermIDInTaxonomy(ctx context.Context, taxonomy, name string) (int64, error) {
 	if strings.TrimSpace(taxonomy) == "" {
 		return 0, fmt.Errorf("имя таксономии пусто")
@@ -136,15 +110,8 @@ func (c *Client) FindTermIDInTaxonomy(ctx context.Context, taxonomy, name string
 	return 0, &ErrTermNotFound{Taxonomy: taxonomy, Name: name}
 }
 
-// FindTagID ищет метку по точному имени, ничего не создавая.
-//
-// Чистое чтение нужно тем, кому запрещено писать, — прежде всего сухому прогону публикации:
-// он обязан показать человеку, каких меток на площадке ещё нет, и при этом не завести ни
-// одной. Боевая публикация ходит через EnsureTag.
-//
-// Здесь search обязателен — меток тысячи, — но его результат отбирается точным сравнением.
-// Сам по себе он ищет подстрокой: на «Как стать» WordPress возвращает два десятка меток
-// вроде «как стать сварщиком», и взять первую значило бы повесить на статью чужую метку.
+// FindTagID ищет метку по точному имени, ничего не создавая (для сухого прогона).
+// Результат search отбирается точным сравнением: search ищет подстрокой.
 func (c *Client) FindTagID(ctx context.Context, name string) (int64, error) {
 	wanted := normalizeTermName(name)
 	if wanted == "" {
@@ -170,28 +137,14 @@ func (c *Client) FindTagID(ctx context.Context, name string) (int64, error) {
 // Tag — метка, разрешённая в идентификатор.
 type Tag struct {
 	ID int64
-	// Name — имя, которым метку искали. Возвращается обратно, чтобы вызывающему не
-	// приходилось помнить, какому из списка соответствует ответ.
+	// Name — имя, которым метку искали.
 	Name string
-	// Created — метку завела эта операция, до неё её на площадке не было.
-	//
-	// Отдельное поле, а не догадка вызывающего по логам: заведение термина в чужом блоге
-	// человек имеет право видеть, и решение о логировании принимает он, а не пакет — своего
-	// логгера у пакета нет и заводить его здесь незачем.
+	// Created — метку завела эта операция.
 	Created bool
 }
 
 // EnsureTag разрешает имя метки в идентификатор: сначала ищет, ненайденную заводит.
-//
-// Дублей не создаёт по двум причинам сразу. Первая — поиск идёт до создания, поэтому у
-// заведённой ранее метки берётся её же идентификатор. Вторая — сам WordPress: одноимённая
-// метка в одной таксономии существовать дважды не может, и на попытку создать существующую
-// он отвечает 400 term_exists с её term_id. Этот ответ считается успехом, а не отказом:
-// значит, метку успели завести между нашим поиском и нашей записью.
-//
-// Повторов у создания нет намеренно. Отказ здесь останавливает публикацию до загрузки
-// обложки и до создания записи, то есть блог остаётся нетронутым, а следующий запуск
-// повторит всю операцию с начала — и найдёт метку, если она всё же успела появиться.
+// На существующую метку WordPress отвечает 400 term_exists с её term_id — это успех.
 func (c *Client) EnsureTag(ctx context.Context, name string) (Tag, error) {
 	id, err := c.FindTagID(ctx, name)
 	if err == nil {
@@ -199,8 +152,7 @@ func (c *Client) EnsureTag(ctx context.Context, name string) (Tag, error) {
 	}
 	var notFound *ErrTermNotFound
 	if !errors.As(err, &notFound) {
-		// Пустое имя и отказ площадки — не повод заводить метку: в первом случае заводить
-		// нечего, во втором неизвестно, есть она там или нет.
+		// При отказе площадки неизвестно, есть ли метка.
 		return Tag{}, err
 	}
 	id, existed, err := c.createTag(ctx, name)
@@ -210,11 +162,7 @@ func (c *Client) EnsureTag(ctx context.Context, name string) (Tag, error) {
 	return Tag{ID: id, Name: name, Created: !existed}, nil
 }
 
-// createTag заводит метку и возвращает её идентификатор.
-//
-// existed означает, что метку завёл не этот вызов: WordPress ответил term_exists и назвал
-// term_id уже существующей. Для вызывающего это такой же успех, но в лог о создании такая
-// метка попадать не должна.
+// createTag заводит метку; existed — WordPress ответил term_exists и назвал существующую.
 func (c *Client) createTag(ctx context.Context, name string) (int64, bool, error) {
 	wanted := normalizeTermName(name)
 	body, err := json.Marshal(struct {
@@ -223,8 +171,7 @@ func (c *Client) createTag(ctx context.Context, name string) (int64, bool, error
 	if err != nil {
 		return 0, false, fmt.Errorf("собрать тело запроса %s: %w", tagsPath, err)
 	}
-	// Слаг не передаётся: WordPress составит его сам, и делать это за него — значит взять на
-	// себя транслитерацию кириллицы, о которой площадка знает больше нас.
+	// Слаг не передаётся: транслитерацию кириллицы делает WordPress.
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.cfg.BaseURL+tagsPath, bytes.NewReader(body))
 	if err != nil {
 		return 0, false, fmt.Errorf("собрать запрос %s: %w", tagsPath, err)
@@ -265,8 +212,7 @@ func (c *Client) createTag(ctx context.Context, name string) (int64, bool, error
 			Message:  fmt.Sprintf("ответ без идентификатора метки — неизвестно, заведена ли %q", name),
 		}
 	}
-	// Имя сверяется с отправленным: площадка могла подрезать его фильтром или плагином, и
-	// тогда на статью встала бы метка, которой человек не заказывал.
+	// Площадка может подрезать имя фильтром или плагином.
 	if normalizeTermName(created.Name) != wanted {
 		return 0, false, &ResponseError{
 			Endpoint: tagsPath,
@@ -277,11 +223,7 @@ func (c *Client) createTag(ctx context.Context, name string) (int64, bool, error
 	return created.ID, false, nil
 }
 
-// existingTermID достаёт идентификатор из отказа term_exists.
-//
-// WordPress отвечает так, когда метку с этим именем уже завели, и в data.term_id называет её.
-// Идентификатор берётся только у этого кода: у остальных отказов в data лежит своё, и принять
-// оттуда число значило бы повесить на статью произвольный термин.
+// existingTermID достаёт data.term_id из отказа term_exists и только из него.
 func existingTermID(body []byte) int64 {
 	var payload struct {
 		Code string `json:"code"`
@@ -307,21 +249,13 @@ func matchTerm(terms []termPayload, wanted string) (int64, bool) {
 	return 0, false
 }
 
-// normalizeTermName приводит имя к сравнимому виду.
-//
-// Регистр не учитывается: в Excel метка записана как «Газосварщик», а в блоге могла быть
-// заведена строчными. Сущности HTML разворачиваются, потому что WordPress отдаёт имена
-// закодированными — «Финансы &amp; право» приезжает именно так и с сырым амперсандом из
-// Excel не совпал бы.
+// normalizeTermName приводит имя к сравнимому виду: без регистра, с развёрнутыми
+// HTML-сущностями — WordPress отдаёт имена закодированными.
 func normalizeTermName(name string) string {
 	return strings.ToLower(strings.TrimSpace(html.UnescapeString(name)))
 }
 
-// SplitTermNames разбирает список имён из колонки Excel.
-//
-// Разделитель — запятая, пустые элементы отбрасываются, порядок сохраняется. Повторы тоже
-// отбрасываются: одна и та же метка дважды — это не две метки, а лишний идентификатор в
-// запросе.
+// SplitTermNames разбирает список имён через запятую, отбрасывая пустые и повторы с сохранением порядка.
 func SplitTermNames(raw string) []string {
 	parts := strings.Split(raw, ",")
 	names := make([]string, 0, len(parts))

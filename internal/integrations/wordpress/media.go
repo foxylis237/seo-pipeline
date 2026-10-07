@@ -13,71 +13,37 @@ import (
 	"strings"
 )
 
-// mediaPath — создание вложения в медиабиблиотеке.
-//
-// Единственная запись, которая идёт по REST, а не через XML-RPC, и на то есть причина:
-// alt и title — это собственные поля эндпоинта (alt_text, title), а не postmeta. У
-// wp.uploadFile их нет вовсе, и проставлять их пришлось бы вторым, редактирующим вызовом
-// по защищённому ключу _wp_attachment_image_alt — то есть тем самым способом, который у
-// этого сайта и не работает (ради него запись и ушла в XML-RPC).
+// mediaPath — создание вложения; единственная запись по REST: у wp.uploadFile нет alt и title,
+// а защищённый ключ _wp_attachment_image_alt через XML-RPC не записать.
 const mediaPath = "/wp-json/wp/v2/media"
 
-// MaxMediaBytes — потолок файла, который пакет вообще берётся отправить.
-//
-// Ограничение своё, а не «пусть решит сервер»: тело запроса собирается в памяти целиком, и
-// узнавать о непосильном файле по отказу, потратив на передачу весь бюджет, незачем.
-//
-// Значение публично: тот же потолок обязан проверять и вызывающий, который держит файл на
-// диске, — иначе сухой прогон объявит статью готовой, а публикация отвалится на размере.
-//
-// Настоящий потолок всё равно у площадки (upload_max_filesize и post_max_size в PHP), и он
-// обычно ниже этого. Наш смысл в другом: отбить заведомо неподъёмное до запроса.
+// MaxMediaBytes — потолок файла, который пакет берётся отправить (тело собирается в памяти).
+// Его же проверяет сухой прогон; настоящий потолок площадки (upload_max_filesize) обычно ниже.
 const MaxMediaBytes = 32 << 20
 
-// MediaFile — файл вместе со всем, что о нём должно быть известно библиотеке.
-//
-// Title и AltText приходят готовыми значениями из данных статьи и уходят тем же запросом,
-// что и содержимое. Ни вычислять их после загрузки, ни дописывать вторым вызовом пакет не
-// станет: у эндпоинта они первоклассные поля, и разносить создание вложения на два шага
-// значило бы допустить состояние «файл есть, подписи нет».
+// MediaFile — файл с подписью и alt, которые уходят тем же запросом, что и содержимое.
 type MediaFile struct {
-	// Name — имя файла в библиотеке. Именно имя, без каталогов: WordPress раскладывает
-	// загруженное по своим папкам года и месяца сам.
+	// Name — имя файла без каталогов.
 	Name string
 	// MIMEType — тип, который WordPress сверит со своим списком разрешённых.
 	MIMEType string
-	// Title — подпись вложения (поле title).
-	Title string
-	// AltText — альтернативный текст (поле alt_text). Именно он читается вслух и попадает
-	// в выдачу по картинкам, поэтому пустым он тут быть не может.
-	AltText string
-	// Bits — содержимое файла как есть.
-	Bits []byte
+	Title    string
+	AltText  string
+	Bits     []byte
 }
 
 // UploadedMedia — то, чем WordPress ответил на загрузку.
-//
-// AttachmentID дальше нужен ровно одному вызову — созданию записи, где он уходит обложкой.
-// Ни в PostgreSQL, ни в артефактах статьи он не сохраняется: вложение без записи ценности
-// не имеет, а связь «статья ⇄ запись» уже хранится в articles.wordpress_post_id.
 type UploadedMedia struct {
 	AttachmentID int64
 	URL          string
 	Type         string
-	// Title и AltText — то, что вернул сам WordPress. Нужны сверке: молча отброшенное поле
-	// иначе обнаружилось бы картинкой без подписи в уже опубликованной статье.
+	// Title и AltText — то, что вернул сам WordPress, для сверки.
 	Title   string
 	AltText string
 }
 
-// UploadMedia кладёт файл в медиабиблиотеку вместе с подписью и alt.
-//
-// Повторов нет, по той же причине, что и у CreatePost: при обрыве после отправки неизвестно,
-// дошёл ли файл, а удалять вложения пакету запрещено. Вторая попытка — это вторая копия в
-// библиотеке, и решение о ней принимает человек.
-//
-// Ответ сверяется сразу: context=edit возвращает title и alt_text ровно теми строками,
-// которые были отправлены, и расхождение здесь означает, что площадка поле не приняла.
+// UploadMedia кладёт файл в медиабиблиотеку вместе с подписью и alt и сверяет ответ.
+// Повторов нет: вторая попытка после обрыва дала бы вторую копию в библиотеке.
 func (c *Client) UploadMedia(ctx context.Context, file MediaFile) (UploadedMedia, error) {
 	if err := file.validate(); err != nil {
 		return UploadedMedia{}, err
@@ -86,8 +52,7 @@ func (c *Client) UploadMedia(ctx context.Context, file MediaFile) (UploadedMedia
 	if err != nil {
 		return UploadedMedia{}, err
 	}
-	// context=edit нужен ответу, а не запросу: без него WordPress отдаёт title только
-	// отрисованным, а сверять надо с тем, что отправляли.
+	// Без context=edit WordPress отдаёт title только отрисованным.
 	endpoint := c.cfg.BaseURL + mediaPath + "?context=edit"
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
@@ -141,7 +106,6 @@ func (c *Client) UploadMedia(ctx context.Context, file MediaFile) (UploadedMedia
 	return media, nil
 }
 
-// mediaPayload — та часть ответа, которая нам нужна.
 type mediaPayload struct {
 	ID        int64  `json:"id"`
 	SourceURL string `json:"source_url"`
@@ -168,10 +132,6 @@ func (p mediaPayload) media() UploadedMedia {
 }
 
 // verify сверяет подписи с тем, что вернула площадка.
-//
-// Проверяются только те поля, которые мы задавали. Смысл тот же, что у сверки записи:
-// поймать молча отброшенное значение до того, как картинка окажется в опубликованной
-// статье без подписи, — исправить её потом пакет не сможет.
 func (f MediaFile) verify(media UploadedMedia) []Mismatch {
 	var mismatches []Mismatch
 	if f.AltText != media.AltText {
@@ -183,19 +143,13 @@ func (f MediaFile) verify(media UploadedMedia) []Mismatch {
 	return mismatches
 }
 
-// multipartBody собирает тело запроса: файл и подписи одной формой.
-//
-// Форма, а не сырое тело с Content-Disposition: с сырым телом title и alt_text пришлось бы
-// класть в строку запроса, где они видны в логах веб-сервера и упираются в его лимит длины.
+// multipartBody собирает файл и подписи одной формой: иначе подписи ушли бы в строку запроса.
 func (f MediaFile) multipartBody() ([]byte, string, error) {
 	var buffer bytes.Buffer
-	// Ёмкость под файл резервируется заранее: без этого буфер переедет с десяток раз,
-	// каждый раз копируя мегабайты.
 	buffer.Grow(len(f.Bits) + 1024)
 	form := multipart.NewWriter(&buffer)
 
-	// Заголовки части с файлом задаются вручную: CreateFormFile проставил бы
-	// application/octet-stream, а WordPress сверяет присланный тип с расширением.
+	// Не CreateFormFile: тот ставит application/octet-stream, а WordPress сверяет тип с расширением.
 	header := make(textproto.MIMEHeader)
 	header.Set("Content-Disposition",
 		fmt.Sprintf(`form-data; name="file"; filename=%q`, f.Name))
@@ -221,11 +175,7 @@ func (f MediaFile) multipartBody() ([]byte, string, error) {
 	return buffer.Bytes(), form.FormDataContentType(), nil
 }
 
-// validate отбивает непригодный файл до запроса.
-//
-// Проверка структурная: годится ли эта картинка статье, решает вызывающий. Здесь ловится
-// только то, из чего WordPress сделал бы вложение, которое мы не сможем ни исправить, ни
-// удалить, — и то, что заведомо не дойдёт.
+// validate отбивает структурно непригодный файл до запроса.
 func (f MediaFile) validate() error {
 	name := strings.TrimSpace(f.Name)
 	if name == "" {
@@ -237,9 +187,7 @@ func (f MediaFile) validate() error {
 	if strings.TrimSpace(f.MIMEType) == "" {
 		return fmt.Errorf("WordPress: не задан тип файла обложки %q", name)
 	}
-	// Пустые подписи не «просто пустые»: WordPress подставит вместо title имя файла, alt
-	// останется пустым, и картинка уедет в статью без альтернативного текста. Молча
-	// допускать это нельзя — ради этих двух полей загрузка и идёт по REST.
+	// Пустой title WordPress заменяет именем файла.
 	if strings.TrimSpace(f.Title) == "" {
 		return fmt.Errorf("WordPress: у обложки %q пустой title", name)
 	}

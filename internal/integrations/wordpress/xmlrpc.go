@@ -13,52 +13,25 @@ import (
 	"time"
 )
 
-// xmlrpcPath — второй и последний вход в WordPress, которым пользуется пакет.
-//
-// Он существует не по любви к XML-RPC, а по единственной причине: REST этого сайта принимает
-// в meta только зарегистрированные ключи, а полей ACF среди них нет. wp.newPost принимает
-// custom_fields и пишет произвольную postmeta — другого способа заполнить ACF, не меняя
-// ничего на стороне WordPress, нет. Проверено на живой площадке: черновик со всеми 19
-// ключами лёг побайтово, включая защищённые _yoast_wpseo_*.
-//
-// Чтение остаётся на REST: там уже есть повторы, классификация отказов и вычистка секрета.
+// xmlrpcPath — вход XML-RPC. REST принимает в meta только зарегистрированные ключи, полей ACF
+// среди них нет; custom_fields у wp.newPost пишут произвольную postmeta, включая _yoast_wpseo_*.
 const xmlrpcPath = "/xmlrpc.php"
 
-// xmlrpcBlogID — единственный блог площадки. Мультисайта у проекта нет и не планируется,
-// поэтому значение зафиксировано здесь, а не протекает в конфигурацию.
+// xmlrpcBlogID — единственный блог площадки (мультисайта нет).
 const xmlrpcBlogID = 1
 
-// maxXMLRPCResponseBytes ограничивает читаемый ответ. Тело статьи возвращается целиком в
-// wp.getPost при обратной сверке, поэтому лимит заметно выше REST-ного.
+// maxXMLRPCResponseBytes ограничивает читаемый ответ; wp.getPost возвращает тело статьи целиком.
 const maxXMLRPCResponseBytes = 16 << 20
 
-// xmlrpcTimeout — бюджет одного вызова XML-RPC.
-//
-// Он не выводится из Config.Timeout и не складывается с ним: тело статьи — десятки килобайт,
-// а WordPress на wp.newPost успевает сходить в базу, перестроить индексы Yoast и сбросить
-// кэш. Десяти секунд чтения справочника здесь мало, а перемножать вложенные таймауты в этом
-// проекте уже дорого обходилось (ловушка H6).
-//
-// Повтором истёкший бюджет не лечится: у записи повторов нет.
+// xmlrpcTimeout — бюджет одного вызова XML-RPC, независимый от Config.Timeout: на wp.newPost
+// WordPress ещё перестраивает индексы Yoast и сбрасывает кэш.
 const xmlrpcTimeout = 90 * time.Second
 
-// mediaUploadTimeout — бюджет загрузки одного файла в медиабиблиотеку.
-//
-// Живёт рядом с бюджетом XML-RPC намеренно: оба относятся к записывающим вызовам, и видеть
-// их надо вместе. Сама загрузка идёт по REST — там у неё первоклассные поля alt и title.
-//
-// Отдельный от xmlrpcTimeout и заметно больший: у обложки статьи вес измеряется мегабайтами,
-// и время запроса определяется шириной канала, а не работой WordPress. Девяноста секунд
-// wp.newPost хватает с запасом, а двадцатимегабайтному webp на медленном аплинке — нет.
-//
-// Повторов у загрузки нет, как и у создания записи: истёкший бюджет означает, что файл мог
-// уже лечь в библиотеку, и вторая попытка положила бы туда его копию.
+// mediaUploadTimeout — бюджет загрузки одного файла (по REST): время определяет ширина канала,
+// а не WordPress.
 const mediaUploadTimeout = 5 * time.Minute
 
 // FaultError — отказ, о котором XML-RPC сообщил структурой fault.
-//
-// Отдельный тип, потому что классифицировать его надо через errors.As, как и StatusError:
-// текст сообщения зависит от локали сайта и набора плагинов, а код — нет.
 type FaultError struct {
 	Code    int
 	Message string
@@ -68,9 +41,7 @@ func (e *FaultError) Error() string {
 	return fmt.Sprintf("WordPress XML-RPC: fault %d: %s", e.Code, e.Message)
 }
 
-// xmlrpcMember — одно поле структуры XML-RPC. Порядок сохраняется списком, а не картой:
-// иначе один и тот же запрос сериализовался бы каждый раз по-новому, и сравнить его в тесте
-// было бы нечем.
+// xmlrpcMember — одно поле структуры XML-RPC; список, а не карта, ради стабильного порядка.
 type xmlrpcMember struct {
 	Name  string
 	Value any
@@ -80,12 +51,7 @@ type xmlrpcStruct []xmlrpcMember
 
 type xmlrpcArray []any
 
-// call выполняет один вызов XML-RPC. Повторов здесь нет и быть не может.
-//
-// Метод общий для чтения и записи, но политика повторов — нет: решать, безопасен ли повтор,
-// имеет право только вызывающий, который знает, создаёт его метод запись или нет. Для
-// wp.newPost повтор запрещён при любом отказе: неизвестно, дошёл ли первый запрос, а вторая
-// попытка — это второй пост в блоге, удалить который мы не можем.
+// call выполняет один вызов XML-RPC без повторов: безопасен ли повтор, знает только вызывающий.
 func (c *Client) call(ctx context.Context, method string, params []any, out *xmlrpcResponse) error {
 	body, err := encodeMethodCall(method, params)
 	if err != nil {
@@ -98,9 +64,7 @@ func (c *Client) call(ctx context.Context, method string, params []any, out *xml
 	}
 	request.Header.Set("Content-Type", "text/xml; charset=UTF-8")
 	request.Header.Set("Accept", "text/xml")
-	// Пароль уходит внутри тела вызова, как того требует протокол. Тело не логируется нигде
-	// и ни при каком уровне логов — по той же причине, по которой не логируется заголовок
-	// Authorization у REST.
+	// Пароль уходит внутри тела вызова, поэтому тело не логируется.
 
 	response, err := c.xmlrpcClient.Do(request)
 	if err != nil {
@@ -119,9 +83,7 @@ func (c *Client) call(ctx context.Context, method string, params []any, out *xml
 		return &transportError{Endpoint: xmlrpcPath, Err: fmt.Errorf("прочитать ответ: %w", err)}
 	}
 	if response.StatusCode != http.StatusOK {
-		// XML-RPC отвечает 200 даже на ошибку — она приезжает структурой fault. Любой другой
-		// код означает, что до обработчика запрос не дошёл: выключенный xmlrpc.php, плагин
-		// безопасности, заглушка хостера.
+		// XML-RPC отвечает 200 и на ошибку (fault); другой код — запрос не дошёл до обработчика.
 		return newStatusError(xmlrpcPath, response, raw, c.cfg.AppPassword)
 	}
 	decoded, err := decodeMethodResponse(raw)
@@ -141,10 +103,7 @@ type xmlrpcResponse struct {
 	Fault *FaultError
 }
 
-// encodeMethodCall собирает тело вызова.
-//
-// Своя сборка, а не сторонняя библиотека: пакету нужны ровно два метода и четыре типа
-// значений, а зависимость пришлось бы обновлять и проверять ради этого объёма.
+// encodeMethodCall собирает тело вызова; своя сборка вместо библиотеки — типов значений немного.
 func encodeMethodCall(method string, params []any) ([]byte, error) {
 	var b strings.Builder
 	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?><methodCall><methodName>`)
@@ -163,9 +122,7 @@ func encodeMethodCall(method string, params []any) ([]byte, error) {
 	return []byte(b.String()), nil
 }
 
-// encodeValue поддерживает ровно те типы, которые встречаются в наших вызовах.
-// Неизвестный тип — ошибка, а не тихое приведение к строке: молча отправленное не то
-// значение обнаружилось бы уже опубликованной записью.
+// encodeValue кодирует значение; неизвестный тип — ошибка, а не приведение к строке.
 func encodeValue(b *strings.Builder, value any) error {
 	b.WriteString(`<value>`)
 	defer b.WriteString(`</value>`)
@@ -215,11 +172,8 @@ func encodeValue(b *strings.Builder, value any) error {
 	return nil
 }
 
-// escapeXMLRPCText экранирует текст и выбрасывает символы, которых в XML 1.0 быть не может.
-//
-// Выбрасывание нужно телу статьи: HTML приходит из внешнего источника, и один управляющий
-// символ сделал бы весь запрос неразбираемым для WordPress. Перевод строки, возврат каретки
-// и табуляция допустимы и сохраняются.
+// escapeXMLRPCText экранирует текст и выбрасывает символы, недопустимые в XML 1.0:
+// один такой символ делает весь запрос неразбираемым для WordPress.
 func escapeXMLRPCText(b *strings.Builder, value string) error {
 	cleaned := strings.Map(func(r rune) rune {
 		switch {
@@ -235,15 +189,12 @@ func escapeXMLRPCText(b *strings.Builder, value string) error {
 			return r
 		}
 	}, value)
-	// xml.EscapeText переводит \n в &#xA;, и WordPress возвращает его обратно переводом
-	// строки — обратная сверка после создания это подтверждает.
+	// \n уходит как &#xA;, WordPress возвращает его переводом строки.
 	return xml.EscapeText(b, []byte(cleaned))
 }
 
-// decodeMethodResponse разбирает ответ в обобщённое значение.
-//
-// Разбор идёт по токенам, а не через структуры encoding/xml: у XML-RPC значение
-// рекурсивно и полиморфно, и описать его тегами структуры нельзя.
+// decodeMethodResponse разбирает ответ по токенам: значение XML-RPC рекурсивно и полиморфно,
+// тегами структуры его не описать.
 func decodeMethodResponse(raw []byte) (xmlrpcResponse, error) {
 	decoder := xml.NewDecoder(bytes.NewReader(raw))
 	for {
@@ -303,9 +254,7 @@ func decodeNextValue(decoder *xml.Decoder) (any, error) {
 	}
 }
 
-// decodeValue разбирает содержимое уже открытого <value>.
-//
-// Отсутствие вложенного тега — это <string> по спецификации, и WordPress этим пользуется.
+// decodeValue разбирает содержимое уже открытого <value>; без вложенного тега это строка.
 func decodeValue(decoder *xml.Decoder) (any, error) {
 	var text strings.Builder
 	for {
@@ -337,8 +286,7 @@ func decodeValue(decoder *xml.Decoder) (any, error) {
 				}
 				return strings.TrimSpace(raw) == "1", nil
 			case "double", "dateTime.iso8601", "base64":
-				// Ни одно из наших полей этих типов не имеет. Значение сохраняется строкой,
-				// чтобы разбор соседних полей не рухнул из-за поля, которое нам не нужно.
+				// Не нужны пакету; строкой, чтобы не уронить разбор соседних полей.
 				return decodeText(decoder)
 			case "array":
 				return decodeArray(decoder)
@@ -355,7 +303,6 @@ func decodeValue(decoder *xml.Decoder) (any, error) {
 				}
 			}
 		case xml.EndElement:
-			// </value> без вложенного тега — строка.
 			return text.String(), nil
 		}
 	}
@@ -393,7 +340,6 @@ func decodeArray(decoder *xml.Decoder) ([]any, error) {
 		case xml.StartElement:
 			switch typed.Name.Local {
 			case "data":
-				// Обёртка без собственного значения — просто идём дальше.
 			case "value":
 				item, err := decodeValue(decoder)
 				if err != nil {
@@ -453,8 +399,7 @@ func decodeStruct(decoder *xml.Decoder) (map[string]any, error) {
 	}
 }
 
-// intFromValue приводит к числу то, что WordPress отдаёт то числом, то строкой.
-// wp.newPost, например, возвращает идентификатор новой записи строкой.
+// intFromValue приводит к числу то, что WordPress отдаёт то числом, то строкой (id от wp.newPost).
 func intFromValue(value any) int {
 	switch typed := value.(type) {
 	case int64:

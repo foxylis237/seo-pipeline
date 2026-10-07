@@ -7,22 +7,14 @@ import (
 	"strings"
 )
 
-// postsPerPage — размер страницы при поиске записи. Совпадает с размером страницы
-// справочника терминов: причина та же — это потолок, за которым WordPress начинает отдавать
-// заметно медленнее, а не предел, который что-то ограничивает по смыслу.
+// postsPerPage — размер страницы при поиске записи; выше WordPress отвечает заметно медленнее.
 const postsPerPage = 100
 
-// maxPostPages ограничивает обход выдачи поиска.
-//
-// Поиск идёт подстрокой, и на коротком имени WordPress вернёт сотни записей. Дойти до
-// предела — значит признать, что записи с точно таким заголовком нет, а не взять похожую.
+// maxPostPages ограничивает обход выдачи поиска: поиск идёт подстрокой и на коротком имени
+// возвращает сотни записей.
 const maxPostPages = 5
 
 // ErrPostNotFound — записи с таким заголовком в этом типе записей нет.
-//
-// Отдельная ошибка, потому что решение по ней принимает вызывающий: заводить записи чужих
-// типов приложению запрещено, и единственный законный исход — остановить публикацию этой
-// статьи и назвать человеку, чего именно не нашли.
 type ErrPostNotFound struct {
 	PostType string
 	Title    string
@@ -33,10 +25,7 @@ func (e *ErrPostNotFound) Error() string {
 		e.PostType, e.Title)
 }
 
-// ErrPostAmbiguous — заголовку соответствует больше одной записи.
-//
-// Взять первую нельзя: это связь, которая уйдёт в опубликованную страницу, и ошибка в ней
-// означает чужого преподавателя на чужом курсе. Разбирается человеком в админке.
+// ErrPostAmbiguous — заголовку соответствует больше одной записи; брать первую нельзя.
 type ErrPostAmbiguous struct {
 	PostType string
 	Title    string
@@ -52,14 +41,8 @@ func (e *ErrPostAmbiguous) Error() string {
 		e.PostType, e.Title, strings.Join(ids, ", "))
 }
 
-// FindPostIDByTitle ищет опубликованную запись заданного типа по точному заголовку.
-//
-// Нужен связям ACF: они хранят не имя, а идентификатор записи, и превратить одно в другое
-// можно только запросом к площадке. Записи не заводятся ни при каком исходе — ровно как
-// рубрики: их состав продуман человеком, и опечатка обязана останавливать публикацию.
-//
-// Отбор точный: search у WordPress ищет подстрокой, и «Иванов» вернул бы всех однофамильцев.
-// Найденных с точно совпавшим заголовком должно быть ровно одна.
+// FindPostIDByTitle ищет единственную опубликованную запись заданного типа по точному заголовку.
+// Параметр s у WordPress ищет подстрокой, поэтому заголовки сверяются ещё раз.
 func (c *Client) FindPostIDByTitle(ctx context.Context, postType, title string) (int64, error) {
 	if strings.TrimSpace(postType) == "" {
 		return 0, fmt.Errorf("тип записи пуст")
@@ -77,9 +60,7 @@ func (c *Client) FindPostIDByTitle(ctx context.Context, postType, title string) 
 			c.cfg.AppPassword,
 			xmlrpcStruct{
 				{Name: "post_type", Value: postType},
-				// Статус задаётся явно: умолчание wp.getPosts зависит от версии WordPress, а
-				// связывать страницу с черновиком или корзиной нельзя — в блоге такой
-				// преподаватель не отображается.
+				// Умолчание статуса у wp.getPosts зависит от версии WordPress.
 				{Name: "post_status", Value: PostStatusPublish},
 				{Name: "s", Value: strings.TrimSpace(title)},
 				{Name: "number", Value: postsPerPage},
@@ -119,11 +100,7 @@ func (c *Client) FindPostIDByTitle(ctx context.Context, postType, title string) 
 	}
 }
 
-// normalizePostTitle приводит заголовок к сравнимому виду.
-//
-// Те же правила, что у имён терминов: регистр не значим, сущности HTML разворачиваются —
-// WordPress отдаёт заголовки закодированными, и «Пётр &amp; сын» иначе не совпал бы с тем,
-// что записано в книге.
+// normalizePostTitle приводит заголовок к сравнимому виду: WordPress отдаёт его с HTML-сущностями.
 func normalizePostTitle(title string) string {
 	return strings.Join(strings.Fields(strings.ToLower(html.UnescapeString(title))), " ")
 }
