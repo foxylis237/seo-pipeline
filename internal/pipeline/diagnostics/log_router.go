@@ -11,22 +11,15 @@ import (
 	"sync"
 )
 
-// LogFileOpener opens the stage log of one article. It is implemented by the article output
-// writer, which owns the <external_id>-<slug>/logs/ layout. An empty slug means the writer
-// resolves the existing article directory itself.
+// LogFileOpener opens the stage log of one article; an empty slug means the existing directory.
 type LogFileOpener interface {
 	OpenArticleLog(externalID, slug, name string) (*os.File, string, error)
 }
 
 // ArticleLogRouter duplicates log records into the stage log of the article they belong to,
-// so that a run no longer has to be piped through tee to be kept.
-//
-// Routing is by the article_id and external_id attributes that stage loggers already carry:
-// no call site has to know about the file. Стадии после prepare маршрутизируются сами —
-// каталог статьи уже существует; Register нужен только там, где каталог ещё не создан.
+// routing by the article_id and external_id attributes.
 type ArticleLogRouter struct {
-	opener LogFileOpener
-	// stageLog is the file name of the running operation, e.g. "prepare.log".
+	opener   LogFileOpener
 	stageLog string
 	newFile  func(io.Writer) slog.Handler
 
@@ -40,7 +33,6 @@ type ArticleLogRouter struct {
 }
 
 // NewArticleLogRouter creates a router writing <stage>.log next to the article artifacts.
-// newFile builds the file handler, so stage logs keep the format configured for the run.
 func NewArticleLogRouter(opener LogFileOpener, stage string, newFile func(io.Writer) slog.Handler) *ArticleLogRouter {
 	return &ArticleLogRouter{
 		opener: opener, stageLog: stage + ".log", newFile: newFile,
@@ -50,8 +42,7 @@ func NewArticleLogRouter(opener LogFileOpener, stage string, newFile func(io.Wri
 	}
 }
 
-// Register supplies the slug of an article whose directory may not exist yet, so that the
-// very first prepare of an article still gets its own log.
+// Register supplies the slug of an article whose directory may not exist yet.
 func (r *ArticleLogRouter) Register(articleID int64, externalID, slug string) {
 	if r == nil || strings.TrimSpace(externalID) == "" || strings.TrimSpace(slug) == "" {
 		return
@@ -64,8 +55,7 @@ func (r *ArticleLogRouter) Register(articleID int64, externalID, slug string) {
 	}
 }
 
-// LogPath returns the stage log path of one article, relative to the output root, once it
-// has been opened.
+// LogPath returns the opened stage log path of one article, relative to the output root.
 func (r *ArticleLogRouter) LogPath(externalID string) string {
 	if r == nil {
 		return ""
@@ -101,7 +91,6 @@ func (r *ArticleLogRouter) Close() error {
 	return closeErr
 }
 
-// handlerFor returns the file handler of one article, opening the file on first use.
 func (r *ArticleLogRouter) handlerFor(externalID string) slog.Handler {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -114,7 +103,6 @@ func (r *ArticleLogRouter) handlerFor(externalID string) slog.Handler {
 	slug := r.slugs[externalID]
 	file, relativePath, err := r.opener.OpenArticleLog(externalID, slug, r.stageLog)
 	if err != nil {
-		// Логи статьи — вспомогательные: обработку статьи их отсутствие не останавливает.
 		r.openFailed[externalID] = struct{}{}
 		return nil
 	}
@@ -125,7 +113,6 @@ func (r *ArticleLogRouter) handlerFor(externalID string) slog.Handler {
 	return handler
 }
 
-// externalIDFor resolves the article an id-only record belongs to.
 func (r *ArticleLogRouter) externalIDFor(articleID string) (string, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -133,8 +120,7 @@ func (r *ArticleLogRouter) externalIDFor(articleID string) (string, bool) {
 	return externalID, found
 }
 
-// learn remembers the article_id ↔ external_id pair seen in a record, so that records
-// carrying only article_id — LLM router requests, for one — route as well.
+// learn lets records carrying only article_id route as well.
 func (r *ArticleLogRouter) learn(articleID, externalID string) {
 	if articleID == "" || externalID == "" {
 		return
@@ -145,18 +131,14 @@ func (r *ArticleLogRouter) learn(articleID, externalID string) {
 }
 
 type routingHandler struct {
-	base   slog.Handler
-	router *ArticleLogRouter
-	// identity carries article_id and external_id already fixed by With calls.
+	base       slog.Handler
+	router     *ArticleLogRouter
 	articleID  string
 	externalID string
 	attrs      []slog.Attr
 	groups     []string
-	// mu guards the memoised handler below. slog requires Handle to be safe for
-	// concurrent use, and the pipeline relies on it: the heartbeat goroutine of
-	// internal/llm logs through the very same logger as the stage that started it.
-	mu sync.Mutex
-	// file is the per-destination handler with the same attrs and groups applied.
+	// mu: the internal/llm heartbeat goroutine logs through the same logger concurrently.
+	mu      sync.Mutex
 	file    slog.Handler
 	fileFor string
 }
@@ -200,7 +182,6 @@ func (h *routingHandler) Handle(ctx context.Context, record slog.Record) error {
 	return baseErr
 }
 
-// fileHandler applies the attrs and groups of this handler to the article log handler once.
 func (h *routingHandler) fileHandler(externalID string) slog.Handler {
 	h.mu.Lock()
 	defer h.mu.Unlock()

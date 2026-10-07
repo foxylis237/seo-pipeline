@@ -9,82 +9,32 @@ import (
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/article"
 )
 
-// Колонки article_inputs, которые есть у каждой задачи.
-//
-// Это контракт движка в узком смысле: без них не собрать ни каталог артефактов, ни один
-// промпт, и убрать любую из них нельзя. Всё остальное объявляет задача — и то, что есть
-// только у неё, и то, чего у неё нет, хотя есть у соседей (см. extraInputColumns).
+// baseInputColumns — колонки article_inputs, которые есть у каждой задачи; остальное объявляет задача.
 var baseInputColumns = []string{
 	"category", "header", "image_slug", "meta_description", "key_word",
 	"reference_url",
 }
 
-// extraInputColumn — колонка article_inputs, которую заводит не каждая задача.
-//
-// Здесь собрано всё, что о ней нужно знать трём местам сразу: проверке схемы (тип и
-// nullable), импорту (откуда взять значение) и сборке result.md (куда его положить).
-// Разложить это по трём файлам значило бы, что колонку можно завести, но забыть прочитать, —
-// и обнаружилось бы это пустым полем в result.md, а не отказом на старте.
+// extraInputColumn — колонка article_inputs, которую заводит не каждая задача: тип для проверки
+// схемы, источник для импорта и поле result.md в одном месте.
 type extraInputColumn struct {
 	typeName string
 	nullable bool
-	// write отдаёт значение колонки из импортированной строки Excel.
-	write func(article.Input) string
-	// read указывает, в какое поле сборки result.md кладётся прочитанное значение.
-	//
-	// Пустой read — не забывчивость: колонку читают не одна выборка result.md, а несколько
-	// запросов, каждый в своё поле и в своём порядке. Такие колонки называются в SQL по
-	// имени, а их отсутствие у задачи подставляет пустую строку — см. inputColumn.
+	write    func(article.Input) string
+	// read — поле result.md; nil у колонок, которые читают именованные запросы (см. inputColumn).
 	read func(*article.ResultInput) *string
 }
 
-// SharedInputColumns — необщие колонки, которые две задачи вправе объявить одновременно.
-//
-// Обычно колонка из extraInputColumns принадлежит одной задаче: links и tags есть только у
-// статей блога, service_name — только у страницы услуги, и колонка соседа, приехавшая в чужую
-// схему, означает опечатку. На этом стоят проверки в internal/tasks/*/profile_test.go.
-//
-// Исключение — поле, которое у двух задач значит буквально одно и то же и уходит в одно и то
-// же место площадки. Второго имени такому полю заводить нельзя: два способа сказать одно и то
-// же расходятся молча, и через полгода никто не помнит, какой из них читает публикация.
-// Поэтому список исключений явный и короткий, а не выведенный правилом.
-//
-// seo_title — короткий заголовок для поисковой выдачи (_yoast_wpseo_title). Он одинаково
-// нужен и странице услуги, и статье блога: название статьи человек читает в админке, а поиск
-// режет заголовок примерно на 60 знаках, и короткую строку приходится хранить отдельно.
-//
-// profession — название профессии, о которой страница. Его объявили обе задачи коммерческих
-// страниц, по одной на площадку, и значит оно у них буквально одно и то же: не список
-// похожих профессий для перелинковки (это professions), а предмет самой страницы. Второго
-// имени тому же полю заводить нельзя, а где оно в итоге окажется — в поле ACF prof_name у
-// одной площадки и только в result.md у другой, — свойство площадки, а не колонки.
-//
-// hours, duration, price, document, attestation — числа программы. Их объявили обе задачи
-// коммерческих страниц, по одной на площадку, и значит они у них буквально одни и те же:
-// объём, срок, стоимость, документ по итогам и форма аттестации той самой программы, о
-// которой страница. Держать их в книге, а не выводить из вида программы, — общее решение
-// обеих площадок: те же пять значений человек заполняет в полях записи руками, и второй их
-// источник разошёлся бы с первым молча. Расходятся площадки не смыслом колонки, а тем, куда
-// значение попадает на странице, — это свойство вёрстки, а не колонки.
-//
-// course_url — адрес кнопки карточки призыва в конце статьи блога. Его объявили статьи блога
-// обеих площадок (obuch_1 и pprof_1), и значит он у них одно и то же: куда ведёт кнопка
-// «Записаться на обучение». Адрес задаёт человек книгой, потому что кнопка ведёт в деньги.
+// SharedInputColumns — необщие колонки, которые две задачи вправе объявить одновременно:
+// у обеих они значат одно и то же и уходят в одно поле площадки. На списке стоят проверки
+// internal/tasks/*/profile_test.go.
 var SharedInputColumns = []string{
 	"seo_title", "profession", "course_url",
 	"hours", "duration", "price", "document", "attestation",
 }
 
-// extraInputColumns — реестр необщих колонок.
-//
-// Имя колонки здесь — то же имя, которым её называет профиль задачи в ExtraInputColumns и
-// миграция в migrations/. Задача, не объявившая колонку, не пишет её и не читает: у неё этой
-// колонки в схеме PostgreSQL нет, и запрос с ней просто не выполнился бы.
+// extraInputColumns — реестр необщих колонок; имя то же, что в ExtraInputColumns профиля и в миграции.
 var extraInputColumns = map[string]extraInputColumn{
-	// Колонки, которые раньше были общими. Задача, которой они нужны, объявляет их наравне
-	// со своими: у pprof_2 перелинковки нет, похожих профессий он не печатает, меток в блог
-	// не публикует, а автора у страницы услуги нет вовсе — раздел result.md называется
-	// «Преподаватели» и читает свою колонку.
 	"author": {
 		typeName: "text", nullable: true,
 		write: func(input article.Input) string { return input.Author },
@@ -126,12 +76,6 @@ var extraInputColumns = map[string]extraInputColumn{
 		write: func(input article.Input) string { return input.ServiceName },
 		read:  func(result *article.ResultInput) *string { return &result.ServiceName },
 	},
-	// Колонки коммерческой страницы площадки без ACF. Числа программы приходят из книги, а
-	// не от модели: те же значения человек заполняет в полях записи руками, и второй
-	// источник того же числа разошёлся бы с первым молча.
-	//
-	// Все они читаются в result.md — именно затем, чтобы расхождение книги с админкой было
-	// видно человеку на одном листе.
 	"post_type": {
 		typeName: "text", nullable: true,
 		write: func(input article.Input) string { return input.PostType },
@@ -167,10 +111,7 @@ var extraInputColumns = map[string]extraInputColumn{
 		write: func(input article.Input) string { return input.ImageSourceURL },
 		read:  func(result *article.ResultInput) *string { return &result.ImageSourceURL },
 	},
-	// Колонка статей блога обеих площадок: адрес курса, на который ведёт кнопка призыва.
-	//
-	// read пуст намеренно: адрес виден в самой кнопке готовой статьи, и второй его копии в
-	// result.md заводить незачем. Читает колонку поток генерации через GetGenerationInput.
+	// course_url читает поток генерации через GetGenerationInput, в result.md он не нужен.
 	"course_url": {
 		typeName: "text", nullable: true,
 		write: func(input article.Input) string { return input.CourseURL },
@@ -178,19 +119,12 @@ var extraInputColumns = map[string]extraInputColumn{
 }
 
 // IsOptionalInputColumn отвечает, объявляется ли колонка профилем задачи.
-//
-// Нужна сверке импорта: поле, которого нет в схеме задачи, сравнивать с книгой бессмысленно —
-// оно всегда будет «не перенесено». Знание одно на весь проект и живёт здесь же, рядом с
-// реестром: второй список необязательных колонок разошёлся бы с первым молча.
 func IsOptionalInputColumn(name string) bool {
 	_, found := extraInputColumns[name]
 	return found
 }
 
 // ValidateExtraInputColumns проверяет, что профиль назвал существующие колонки.
-//
-// Отдельная функция нужна затем, чтобы опечатка в профиле роняла команду на старте, а не
-// оборачивалась пустым полем в result.md через два часа генерации.
 func ValidateExtraInputColumns(names []string) error {
 	seen := make(map[string]struct{}, len(names))
 	for _, name := range names {
@@ -220,10 +154,7 @@ func knownExtraInputColumns() []string {
 	return names
 }
 
-// insertInputColumns собирает список колонок и значений для записи строки article_inputs.
-//
-// Порядок колонок и порядок значений задаётся здесь одним проходом: разъехаться они не могут
-// даже теоретически, потому что собираются вместе.
+// insertInputColumns собирает колонки и значения строки article_inputs одним проходом.
 func (r *ArticleRepository) insertInputColumns(input article.Input) (columns []string, values []any) {
 	columns = make([]string, 0, len(baseInputColumns)+len(r.extraInputs))
 	values = make([]any, 0, cap(columns))
@@ -243,10 +174,7 @@ func (r *ArticleRepository) insertInputColumns(input article.Input) (columns []s
 	return columns, values
 }
 
-// resultInputProjection дописывает необщие колонки к выборке данных result.md.
-//
-// Возвращает готовый кусок SELECT и цели сканирования в том же порядке: как и при записи,
-// список и порядок собираются одним проходом.
+// resultInputProjection дописывает необщие колонки к выборке result.md и цели сканирования в том же порядке.
 func (r *ArticleRepository) resultInputProjection(input *article.ResultInput) (projection string, targets []any) {
 	if len(r.extraInputs) == 0 {
 		return "", nil
@@ -255,8 +183,6 @@ func (r *ArticleRepository) resultInputProjection(input *article.ResultInput) (p
 	targets = make([]any, 0, len(r.extraInputs))
 	for _, name := range r.extraInputs {
 		read := extraInputColumns[name].read
-		// Колонку без read эта выборка не дописывает: её читают именованные запросы, каждый
-		// в своё поле. Дописать её сюда значило бы прочитать значение в никуда.
 		if read == nil {
 			continue
 		}
@@ -266,11 +192,8 @@ func (r *ArticleRepository) resultInputProjection(input *article.ResultInput) (p
 	return builder.String(), targets
 }
 
-// inputColumn возвращает выражение колонки article_inputs для запроса этой задачи.
-//
-// У задачи, объявившей колонку, это обычное чтение; у задачи без неё — пустая строка вместо
-// значения. Так один и тот же запрос работает в обеих схемах, а порядок и число целей
-// сканирования не зависят от набора колонок: расходятся схемы, а не разбор ответа.
+// inputColumn возвращает чтение колонки или пустую строку, если её нет в схеме задачи,
+// чтобы порядок и число целей сканирования не зависели от набора колонок.
 func (r *ArticleRepository) inputColumn(name string) string {
 	if r.hasInputColumn(name) {
 		return "COALESCE(i." + name + ", '')"
@@ -278,7 +201,6 @@ func (r *ArticleRepository) inputColumn(name string) string {
 	return "''"
 }
 
-// hasInputColumn отвечает, есть ли колонка в схеме этой задачи.
 func (r *ArticleRepository) hasInputColumn(name string) bool {
 	if slices.Contains(baseInputColumns, name) {
 		return true
@@ -286,10 +208,7 @@ func (r *ArticleRepository) hasInputColumn(name string) bool {
 	return slices.Contains(r.extraInputs, name)
 }
 
-// metadataTLDR возвращает выражение колонки article_metadata.tldr.
-//
-// Колонки нет у задачи, которая TL;DR не генерирует: держать её пустой во всех строках
-// значит обещать раздел, которого не будет. Чтение при этом остаётся одним и тем же.
+// metadataTLDR возвращает выражение article_metadata.tldr или пустую строку у схемы без колонки.
 func (r *ArticleRepository) metadataTLDR() string {
 	if r.withoutTLDR {
 		return "''"
@@ -297,10 +216,7 @@ func (r *ArticleRepository) metadataTLDR() string {
 	return "COALESCE(m.tldr, '')"
 }
 
-// articleMetadataUpsert собирает запись article_metadata под схему этой задачи.
-//
-// Возвращает готовый запрос и аргументы к нему: у задачи без колонки tldr она не называется
-// ни в списке колонок, ни в SET — иначе первый же вызов упал бы на «column does not exist».
+// articleMetadataUpsert собирает запись article_metadata; у схемы без tldr колонка не называется.
 func (r *ArticleRepository) articleMetadataUpsert(articleID int64, rawText string, info article.ArticleInfo) (string, []any) {
 	if r.withoutTLDR {
 		return `
@@ -332,18 +248,8 @@ func placeholders(from, count int) string {
 	return strings.Join(parts, ", ")
 }
 
-// coalesceAssignments собирает `колонка = COALESCE(article_inputs.колонка, EXCLUDED.колонка)`.
-//
-// Нужен он ровно одному месту, импорту, и ровно одному случаю: в схеме появилась новая колонка, а
-// строки article_inputs уже есть, и в них по этой колонке NULL. Без дозаполнения такая
-// колонка досталась бы только статьям, импортированным после миграции, а всем прежним — лишь
-// через `reset`, то есть ценой стёртых артефактов.
-//
-// Заполненное значение не трогается никогда, и это важнее удобства: книгу правят по ходу
-// работы, а статья, уже ушедшая в research или в блог, писалась по тем данным, что были на
-// момент импорта. Молча подменить их под ней — значит развести артефакты на диске с БД.
-// Пустая строка значением считается: NULL здесь означает «колонки тогда не было», а ” —
-// «человек оставил клетку пустой», и это разные вещи.
+// coalesceAssignments собирает `колонка = COALESCE(article_inputs.колонка, EXCLUDED.колонка)`:
+// импорт дозаполняет только NULL-колонки и не трогает заполненные; пустая строка — значение.
 func coalesceAssignments(table string, columns []string) string {
 	parts := make([]string, 0, len(columns))
 	for _, name := range columns {

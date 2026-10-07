@@ -1,8 +1,5 @@
-// Package diagnostics contains temporary tracing and mechanical consistency checks used to
-// locate cross-article data mix-ups.
-//
-// Nothing here talks to an LLM and nothing here decides the pipeline flow: helpers either emit
-// a log record or return a check result, and the caller decides how to treat it.
+// Package diagnostics contains tracing and mechanical consistency checks that locate
+// cross-article data mix-ups; the caller decides how to treat a check result.
 package diagnostics
 
 import (
@@ -27,8 +24,7 @@ func TraceFields(trace article.Trace) []any {
 	}
 }
 
-// LogStep records the article identity around one external step. The phase is "before" or
-// "after", the integration names the external system ("keysso", "arsenkin", "save_research").
+// LogStep records the article identity before or after one external step.
 func LogStep(logger *slog.Logger, integration, phase string, trace article.Trace, extra ...any) {
 	if logger == nil {
 		return
@@ -52,8 +48,7 @@ func TraceMismatch(expected, actual article.Trace) error {
 	)
 }
 
-// Fingerprint returns a short stable hash of a payload. Two articles logging the same
-// fingerprint for competitor structure or keywords received literally the same data.
+// Fingerprint returns a short stable hash of a payload.
 func Fingerprint(value string) string {
 	sum := sha256.Sum256([]byte(strings.TrimSpace(value)))
 	return hex.EncodeToString(sum[:])[:12]
@@ -74,15 +69,12 @@ const (
 	sampleLimit          = 5
 )
 
-// KeywordRelevance reports how many collected queries share a word with the article keyword
-// or title. It is a coarse smoke test: Keys.so returns queries of the competitor page named
-// in reference_url, so they must be about the same subject as the article itself.
+// KeywordRelevance reports how many collected queries share a word with the article keyword or title.
 type KeywordRelevance struct {
 	// Skipped is true when neither keyword nor title produced a usable reference word.
 	Skipped bool
-	// KeywordBased is true when the article keyword itself produced a reference word. Only
-	// then is a zero match reliable enough to block the article: a title alone may legitimately
-	// share no word with the queries of the competitor page.
+	// KeywordBased is true when the keyword itself produced a reference word; only then does
+	// a zero match block the article, since a title alone may share no word with the queries.
 	KeywordBased bool
 	// Reference holds the normalized stems the queries were compared against.
 	Reference []string
@@ -113,17 +105,8 @@ func (r KeywordRelevance) Fields() []any {
 	}
 }
 
-// CheckKeywordRelevance compares collected queries with the article keyword and title.
-//
-// Comparison is intentionally primitive and library-free: words are lowercased, ё is folded
-// to е, short words are dropped, and the remaining words are compared by a common prefix.
-// That tolerates most Russian declension ("курсы" ~ "курсов", "врач" ~ "врача") without a
-// stemmer and is enough to tell "queries of this article" from "queries of another one".
-//
-// A fleeting vowel still breaks the stem too early to be caught ("окна" ~ "окон"), so the
-// check relies on at least one query out of the whole collected list carrying a plain form
-// of the keyword. That holds for a real Keys.so list of hundreds of queries; a zero match
-// across all of them means the browser showed the results of a different search.
+// CheckKeywordRelevance compares collected queries with the article keyword and title by a
+// common word prefix, without a stemmer; a zero match means a different search was shown.
 func CheckKeywordRelevance(keyword, title string, queries []string) KeywordRelevance {
 	keywordStems := stems(keyword)
 	reference := stems(keyword + " " + title)
@@ -144,9 +127,8 @@ func CheckKeywordRelevance(keyword, title string, queries []string) KeywordRelev
 	return result
 }
 
-// QueryMembership reports how many returned phrases were actually submitted. Arsenkin
-// Wordstat answers with the very phrases it was given, so anything else means the page
-// showed the result of a different task.
+// QueryMembership reports how many returned phrases were actually submitted.
+// Wordstat answers with the very phrases it was given, so anything else is a different task.
 type QueryMembership struct {
 	Returned  int
 	Matched   int
@@ -237,13 +219,8 @@ func matchesAny(candidates, reference []string) bool {
 	return false
 }
 
-// matches reports two word beginnings pointing at the same word.
-//
-// Requiring one stem to be a prefix of the other is too strict for Russian: declension
-// rewrites the tail, and a four-rune word has no room for it — "окна" and "окон" already
-// diverge on the fourth rune. So the comparison is a common prefix: four runes for long
-// stems and one less when either stem is short. Over-matching is acceptable here, the check
-// only has to tell "queries of this article" from "queries of a completely different one".
+// matches compares by common prefix, not prefix-of: declension rewrites the tail
+// ("окна" ~ "окон"). Over-matching is acceptable.
 func matches(left, right string) bool {
 	leftRunes, rightRunes := []rune(left), []rune(right)
 	common := 0

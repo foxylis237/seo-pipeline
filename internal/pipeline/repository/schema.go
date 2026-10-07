@@ -25,13 +25,8 @@ var expectedSchema = []schemaColumn{
 	{"articles", "error_message", "text", true},
 	{"articles", "created_at", "timestamp with time zone", false},
 	{"articles", "updated_at", "timestamp with time zone", false},
-	// Отметка о публикации в WordPress, миграция 000004. Стоит на articles, а не на
-	// article_outputs, потому что строку article_outputs удаляет не только clear/reset/
-	// regenerate, но и штатный prepare через SaveResearch — а отметка, которую стирает
-	// обычный повторный prepare, от дублей не защищает.
-	//
-	// wordpress_status NOT NULL с умолчанием 'not_published': NULL как состояние не
-	// используется. post_id и url остаются NULL у статьи, отмеченной вручную.
+	// Отметка о публикации стоит на articles: строку article_outputs удаляет и штатный prepare.
+	// post_id и url остаются NULL у статьи, отмеченной вручную.
 	{"articles", "wordpress_status", "text", false},
 	{"articles", "wordpress_post_id", "bigint", true},
 	{"articles", "wordpress_url", "text", true},
@@ -42,8 +37,7 @@ var expectedSchema = []schemaColumn{
 	{"article_inputs", "header", "text", true},
 	{"article_inputs", "meta_description", "text", true},
 	{"article_inputs", "key_word", "text", true},
-	// author, links, professions и tags здесь нет намеренно: они есть не у каждой задачи и
-	// приходят из её профиля списком необязательных колонок — см. ValidateSchema.
+	// Необязательные колонки article_inputs приходят из профиля задачи — см. ValidateSchema.
 	{"article_research", "article_id", "bigint", false},
 	{"article_research", "competitor_structure", "text", true},
 	{"article_research", "cleaned_keywords", "jsonb", false},
@@ -60,7 +54,7 @@ var expectedSchema = []schemaColumn{
 	{"article_outputs", "review_path", "text", true},
 	{"article_outputs", "fixed_article_path", "text", true},
 	{"article_outputs", "html_path", "text", true},
-	// google_doc_url добавлен миграцией 000002. NULL означает «промпт ещё не публиковался».
+	// google_doc_url: NULL — промпт ещё не публиковался.
 	{"article_outputs", "google_doc_url", "text", true},
 	{"article_outputs", "updated_at", "timestamp with time zone", false},
 	{"article_errors", "id", "bigint", false},
@@ -73,16 +67,12 @@ var expectedSchema = []schemaColumn{
 	{"article_errors", "created_at", "timestamp with time zone", false},
 }
 
-// SchemaProfile — чем схема задачи отличается от обязательного набора колонок.
-//
-// Обе стороны важны одинаково: у задачи, объявившей колонку, её отсутствие — ошибка, а у
-// задачи, которая не объявляла, лишняя колонка означает недоприменённую или чужую миграцию.
-// Без этого pprof_2 падал бы на «unexpected column», а pprof_1 молча принимал бы в свою
-// схему чужие колонки.
+// SchemaProfile — чем схема задачи отличается от обязательного набора колонок;
+// и отсутствие объявленной колонки, и лишняя необъявленная — ошибка.
 type SchemaProfile struct {
 	// ExtraInputColumns — необязательные колонки article_inputs, которые у задачи есть.
 	ExtraInputColumns []string
-	// WithoutTLDR — в article_metadata задачи нет колонки tldr: TL;DR она не генерирует.
+	// WithoutTLDR — в article_metadata задачи нет колонки tldr.
 	WithoutTLDR bool
 }
 
@@ -174,9 +164,6 @@ func validateSchema(ctx context.Context, pool *pgxpool.Pool, expectedSchema []sc
 
 	if len(mismatches) > 0 {
 		sort.Strings(mismatches)
-		// Каталог миграций у задач разный: у одних общий migrations/, у других свой
-		// migrations/<схема>/ вместо него. Называть в сообщении один путь значило бы
-		// отправлять половину задач применять чужие миграции.
 		return fmt.Errorf("database schema is inconsistent with code: %s; apply the migrations of this task's schema (see migrations/README.md)", strings.Join(mismatches, "; "))
 	}
 	return nil

@@ -43,11 +43,9 @@ func NewInputSnapshot(selected article.Article, input article.Input) InputSnapsh
 const (
 	// KeywordSourceKeysSO — запросы собраны браузерной автоматизацией Keys.so.
 	KeywordSourceKeysSO = "keysso"
-	// KeywordSourceManual — запросы заполнены руками в article_research.cleaned_keywords,
-	// этап Keys.so пропущен.
+	// KeywordSourceManual — запросы заполнены руками, этап Keys.so пропущен.
 	KeywordSourceManual = "manual"
-	// KeywordSourceFallback — исходные запросы подобрала модель, потому что Keys.so не нашёл
-	// у конкурента ни одного. Очистка при этом всё равно прошла через Keys.so.
+	// KeywordSourceFallback — исходные запросы подобрала модель: Keys.so отказал или выключен.
 	KeywordSourceFallback = "keywords_fallback"
 )
 
@@ -67,8 +65,7 @@ type KeysSOSnapshot struct {
 	CleanedKeywords []string  `json:"cleaned_keywords"`
 }
 
-// NewKeysSOSnapshot records the collected queries together with the article they belong to
-// and the source they came from — Keys.so or a manual fill.
+// NewKeysSOSnapshot records the collected queries with their article and source.
 func NewKeysSOSnapshot(trace article.Trace, source string, collectedCount int, cleaned []string, duration time.Duration) KeysSOSnapshot {
 	return KeysSOSnapshot{
 		ArticleID: trace.ArticleID, ExternalID: trace.ExternalID, Title: trace.Title,
@@ -101,8 +98,7 @@ type ArsenkinSnapshot struct {
 	CompetitorStructure            string                     `json:"competitor_structure"`
 }
 
-// ArsenkinResult carries the Arsenkin payload without this package depending on the
-// integration that produced it.
+// ArsenkinResult carries the Arsenkin payload without depending on the integration.
 type ArsenkinResult struct {
 	WordstatKeywords    []article.KeywordFrequency
 	CopywriterQueries   []string

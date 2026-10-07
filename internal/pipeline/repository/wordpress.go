@@ -12,10 +12,6 @@ import (
 )
 
 // GetPublicationInput собирает всё, что нужно для публикации одной статьи, одним запросом.
-//
-// Запрос читающий и ничего не решает: годна ли статья к публикации, выясняет вызывающий по
-// собранным данным. Так проверка остаётся в одном месте и одинаково работает и для publish
-// с идентификатором, и для массового прогона.
 func (r *ArticleRepository) GetPublicationInput(ctx context.Context, externalID string) (article.PublicationInput, error) {
 	query := `
 		SELECT
@@ -64,16 +60,8 @@ func (r *ArticleRepository) GetPublicationInput(ctx context.Context, externalID 
 	return input, nil
 }
 
-// ListPublishable возвращает статьи, готовые к массовой публикации.
-//
-// Отдельный метод, а не восьмая ветка в GetPendingForOperation, и не по вкусовым причинам:
-// все ветки того switch начинаются с status <> 'completed', потому что описывают
-// незавершённый пайплайн. Здесь условие ровно обратное — публикуется только завершённое.
-// Ветка с перевёрнутым смыслом внутри общего метода читалась бы как опечатка.
-//
-// Наличие артефактов и полноту данных метод не проверяет: это делает та же валидация, что и
-// у publish с идентификатором, по данным GetPublicationInput. Иначе условий готовности стало
-// бы два, и они разошлись бы.
+// ListPublishable возвращает статьи, готовые к массовой публикации; полноту данных проверяет
+// ValidatePublicationInput, а не этот запрос.
 func (r *ArticleRepository) ListPublishable(ctx context.Context) ([]string, error) {
 	const query = `
 		SELECT a.external_id
@@ -102,11 +90,8 @@ func (r *ArticleRepository) ListPublishable(ctx context.Context) ([]string, erro
 	return externalIDs, nil
 }
 
-// SavePublication запоминает созданную запись WordPress.
-//
-// Вызывается сразу после wp.newPost и до обратной сверки — намеренно. Запись уже создана,
-// удалять её нельзя, повторять запрос нельзя; отметка, поставленная только после успешной
-// сверки, означала бы, что расхождение в одном поле открывает дорогу второму посту.
+// SavePublication запоминает созданную запись WordPress; вызывается сразу после wp.newPost,
+// до обратной сверки, чтобы расхождение сверки не открыло дорогу второму посту.
 func (r *ArticleRepository) SavePublication(ctx context.Context, externalID string, postID int64, url string) error {
 	if postID <= 0 {
 		return fmt.Errorf("сохранить публикацию статьи %s: идентификатор записи не задан", externalID)
@@ -129,16 +114,8 @@ func (r *ArticleRepository) SavePublication(ctx context.Context, externalID stri
 	return nil
 }
 
-// LinkPublication привязывает к статье запись, существовавшую в блоге до нас.
-//
-// Состояние ставится linked, а не published: эту запись собирал человек, и что в ней лежит,
-// приложение не знает. Автоматически такие записи не ищутся — сопоставление по заголовку даёт
-// ложные совпадения, а ошибка стоит либо дубля в блоге, либо молча пропущенной статьи.
-//
-// postID нулевой означает «запись неизвестна»: тогда сохраняется только состояние, а адрес и
-// идентификатор остаются пустыми, и раздел со ссылкой в result.md у статьи будет пустым.
-//
-// Идемпотентна: повторный вызов на уже привязанной статье не ошибка.
+// LinkPublication привязывает к статье существовавшую запись блога со статусом linked;
+// нулевой postID сохраняет только состояние. Повторный вызов не ошибка.
 func (r *ArticleRepository) LinkPublication(ctx context.Context, externalID string, postID int64, url string) error {
 	const query = `
 		UPDATE articles
@@ -158,16 +135,8 @@ func (r *ArticleRepository) LinkPublication(ctx context.Context, externalID stri
 	return nil
 }
 
-// ValidatePublicationInput решает, годна ли статья к публикации.
-//
-// Проверка одна на обе команды и целиком локальная: WordPress о готовности статьи не
-// спрашивают. Ошибка называет первую причину — человеку нужно знать, что чинить, а не
-// список из восьми пунктов.
-//
-// Существование файла article.html здесь не проверяется: репозиторий о файловой системе не
-// знает. Это делает вызывающий, у которого есть writer.
-//
-// TL;DR и FAQ проверяются отдельно — см. ValidateArticleMetadata: они есть не у каждой задачи.
+// ValidatePublicationInput решает, годна ли статья к публикации, и называет первую причину отказа.
+// Файл article.html и метаданные (ValidateArticleMetadata) проверяет вызывающий.
 func ValidatePublicationInput(input article.PublicationInput) error {
 	if input.Article.Status != "completed" {
 		return fmt.Errorf("статья %s не прошла пайплайн: статус %q, а публикуются только completed",
@@ -176,8 +145,6 @@ func ValidatePublicationInput(input article.PublicationInput) error {
 	if input.Article.ErrorMessage != nil && strings.TrimSpace(*input.Article.ErrorMessage) != "" {
 		return fmt.Errorf("на статье %s висит ошибка: %s", input.Article.ExternalID, *input.Article.ErrorMessage)
 	}
-	// Различать published и linked здесь незачем: дубль одинаково недопустим и для записи,
-	// созданной нами, и для найденной вручную.
 	if input.Publication.InWordPress() {
 		return fmt.Errorf("статья %s уже есть в WordPress (%s)%s — повторная публикация создала бы дубль",
 			input.Article.ExternalID, input.Publication.Status, publishedPostSuffix(input.Publication))
@@ -186,9 +153,6 @@ func ValidatePublicationInput(input article.PublicationInput) error {
 }
 
 // ValidateRepublishInput решает, годна ли статья к перезаписи тела уже существующей записи.
-//
-// Требования те же, кроме одного, и оно перевёрнуто: запись обязана существовать. Перезапись
-// ничего не создаёт, поэтому опубликованная статья для неё — не препятствие, а условие.
 func ValidateRepublishInput(input article.PublicationInput) error {
 	if input.Article.Status != "completed" {
 		return fmt.Errorf("статья %s не прошла пайплайн: статус %q, а переписываются только completed",
@@ -204,7 +168,6 @@ func ValidateRepublishInput(input article.PublicationInput) error {
 	return validatePublicationFields(input)
 }
 
-// validatePublicationFields — общая часть обеих проверок: поля, без которых записи не собраться.
 func validatePublicationFields(input article.PublicationInput) error {
 	required := []struct {
 		name  string
@@ -216,9 +179,6 @@ func validatePublicationFields(input article.PublicationInput) error {
 		{"фокусное ключевое слово", input.Keyword},
 		{"мета-описание", input.MetaDescription},
 		{"заголовок профблока", input.Header},
-		// Слаг картинки уходит подписью вложения (title), заголовок H1 — его alt. Пустыми
-		// они означали бы картинку без альтернативного текста в опубликованной статье, а
-		// исправить её приложение не умеет.
 		{"слаг картинки (image_slug)", input.Article.Slug},
 	}
 	for _, field := range required {
@@ -230,13 +190,7 @@ func validatePublicationFields(input article.PublicationInput) error {
 	return nil
 }
 
-// ValidateArticleMetadata проверяет разделы, которые рождает стадия info: TL;DR и FAQ.
-//
-// Отдельно от общей проверки потому, что стадии info есть не у каждой задачи. Требовать
-// TL;DR и FAQ от задачи, которая их не генерирует, — значит не опубликовать её никогда;
-// не требовать их от задачи со стадией info — значит выложить статью с пустыми полями
-// темы, чего по ней потом не видно. Кто из двух перед нами, знает вызывающий: движок имён
-// задач не знает и знать не должен.
+// ValidateArticleMetadata проверяет разделы стадии info (TL;DR и FAQ); зовётся только у задач с этой стадией.
 func ValidateArticleMetadata(input article.PublicationInput) error {
 	required := []struct {
 		name  string

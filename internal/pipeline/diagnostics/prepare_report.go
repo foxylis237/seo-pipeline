@@ -21,9 +21,7 @@ type CheckResult struct {
 	Message string         `json:"message,omitempty"`
 }
 
-// PrepareReport collects everything prepare verified about one article. It is written to
-// prepare/prepare-report.json on success and on failure alike: a failed run is exactly when
-// the report matters most.
+// PrepareReport collects everything prepare verified about one article; it is written on failure too.
 type PrepareReport struct {
 	ArticleID    int64         `json:"article_id"`
 	ExternalID   string        `json:"external_id"`

@@ -15,8 +15,7 @@ import (
 	articleoutput "github.com/foxylis237/seo-pipeline/internal/pipeline/output"
 )
 
-// TemplateFileName — имя шаблона внутри каталога templates задачи. Полный путь приходит
-// снаружи: пакет собирает result.md любой задачи и её имени не знает.
+// TemplateFileName — имя шаблона внутри каталога templates задачи.
 const TemplateFileName = "result.md.tmpl"
 
 // FAQItem is one structured question and answer rendered in result.md.
@@ -40,41 +39,30 @@ type Service struct {
 	writer       Writer
 	logger       *slog.Logger
 	templatePath string
-	// courses — подбор связанных курсов под статью. Пусто у задачи, которой блок не нужен:
-	// раздел result.md тогда остаётся пустым, как и поле записи.
+	// courses — подбор связанных курсов; nil у задачи без блока.
 	courses CourseSelector
 }
 
-// NewService собирает сборщик result.md. templatePath — обязательная зависимость и потому
-// обычный параметр: шаблон у каждой задачи свой.
+// NewService собирает сборщик result.md по шаблону задачи.
 func NewService(repository Repository, writer Writer, logger *slog.Logger, templatePath string) *Service {
 	return &Service{repository: repository, writer: writer, logger: logger, templatePath: templatePath}
 }
 
-// RelatedCourse — одна карточка блока «Связанные курсы» под статьёй.
-//
-// Свой тип, а не тип каталога: сборщику result.md нужны четыре строки для шаблона, а не
-// модель услуги площадки. Так движок ничего не знает ни про каталог, ни про WordPress.
+// RelatedCourse — одна карточка блока «Связанные курсы» под статьёй (свой тип, а не каталога).
 type RelatedCourse struct {
 	Name     string
 	Category string
 	URL      string
-	// Neighbour — курс смежной профессии, а не той, о которой статья. Человек по этому
-	// признаку видит, насколько блок вышел за тему.
+	// Neighbour — курс смежной профессии, а не той, о которой статья.
 	Neighbour bool
 }
 
 // CourseSelector подбирает курсы под уже собранные данные статьи.
-//
-// Интерфейс объявлен у потребителя и принимает готовый ResultInput: колонки professions и
-// links в нём уже есть, и второго похода в базу не нужно.
 type CourseSelector interface {
 	RelatedCourses(ctx context.Context, input article.ResultInput) ([]RelatedCourse, error)
 }
 
 // UseCourseSelector подключает подбор связанных курсов.
-//
-// Сеттер, а не параметр конструктора: у задачи без блока под статьёй зависимости нет вовсе.
 func (s *Service) UseCourseSelector(courses CourseSelector) {
 	s.courses = courses
 }
@@ -97,8 +85,7 @@ type templateData struct {
 	ImageURL           string
 	ReadingTimeMinutes int
 	FAQItems           []FAQItem
-	// RelatedCourses — блок связанных курсов. Пуст у задачи без него и у статьи, которой
-	// подбор не удался: раздел листа тогда печатается пустым, как и остальные незаполненные.
+	// RelatedCourses — блок связанных курсов; пуст без блока и при неудачном подборе.
 	RelatedCourses []RelatedCourse
 }
 
@@ -206,10 +193,7 @@ func (s *Service) BuildStaged(ctx context.Context, externalID string) (*articleo
 	return pending, nil
 }
 
-// render fills result.md.tmpl. Единственное место, где шаблон читается и исполняется:
-// боевая сборка и demo обязаны давать один и тот же файл из одних и тех же данных.
-// relatedCourses подбирает блок под статьёй. Отказ подбора лист не роняет: result.md нужен
-// человеку и без блока, а публикация всё равно спросит курсы заново и остановится сама.
+// relatedCourses подбирает блок под статьёй; отказ подбора лист не роняет.
 func (s *Service) relatedCourses(ctx context.Context, input article.ResultInput) []RelatedCourse {
 	if s.courses == nil {
 		return nil
@@ -223,6 +207,7 @@ func (s *Service) relatedCourses(ctx context.Context, input article.ResultInput)
 	return courses
 }
 
+// render fills result.md.tmpl — общий для боевой сборки и demo.
 func (s *Service) render(
 	input article.ResultInput, articleText string, faqItems []FAQItem, courses []RelatedCourse,
 ) (string, error) {
@@ -240,10 +225,7 @@ func (s *Service) render(
 	if err := tmpl.Execute(&rendered, templateData{
 		ResultInput: input,
 		Title:       input.Article.Title,
-		// SEO-заголовок и название профессии приходят своими колонками у той задачи, которая
-		// их завела. У остальных этих колонок нет, значение пусто — и подставляется прежнее
-		// приближение: заголовок статьи и фокусное ключевое слово. Так result.md task_1 и
-		// pprof_1 остаётся тем же, что был.
+		// Без своих колонок — заголовок статьи и фокусное ключевое слово.
 		SEOTitle:           fallback(input.SEOTitle, input.Article.Title),
 		ProfessionName:     fallback(input.Profession, input.Keyword),
 		ImageName:          input.Header,
@@ -257,14 +239,8 @@ func (s *Service) render(
 	return rendered.String(), nil
 }
 
-// RenderForDemo renders result.md from whatever is already persisted, without writing anything.
-// В отличие от Build отсутствующие данные здесь не ошибка: demo обязан получить result.md и на
-// статье, которая ещё не прошла пайплайн, — незаполненные поля остаются пустыми.
-//
-// metadata подменяет сохранённые TL;DR, FAQ и допинфо целиком — пополевого смешивания с
-// PostgreSQL нет: набор метаданных приходит либо из БД (metadata == nil), либо из разобранного
-// demo article_info.txt. Половина одного источника с половиной другого дала бы result.md,
-// которого не существует ни в одном прогоне.
+// RenderForDemo renders result.md from whatever is already persisted, without writing anything;
+// missing data is not an error. Non-nil metadata replaces the stored set entirely, not per field.
 func (s *Service) RenderForDemo(ctx context.Context, externalID, articleText string, metadata *article.ArticleInfo) (string, error) {
 	input, err := s.repository.GetResultInput(ctx, externalID)
 	if err != nil {
@@ -273,8 +249,7 @@ func (s *Service) RenderForDemo(ctx context.Context, externalID, articleText str
 	if input.HTMLPath != "" && !s.writer.Exists(input.HTMLPath) {
 		input.HTMLPath = ""
 	}
-	// Метки сюда не попадают намеренно: они приходят из article_inputs — колонки tags
-	// Excel — и переданный набор метаданных их не подменяет.
+	// Метки берутся из article_inputs, metadata их не подменяет.
 	if metadata != nil {
 		input.TLDR, input.FAQ, input.AdditionalInfo = metadata.TLDR, metadata.FAQ, metadata.AdditionalInfo
 	}
@@ -284,13 +259,11 @@ func (s *Service) RenderForDemo(ctx context.Context, externalID, articleText str
 			"external_id", externalID, "stage", "result_generation", "error", err)
 		faqItems = nil
 	}
-	// Блок связанных курсов DEMO собирает тем же подбором, что и боевой лист: расхождение
-	// между ними человек принял бы за ошибку подбора.
+	// Тот же подбор курсов, что у боевого листа.
 	return s.render(input, articleText, faqItems, s.relatedCourses(ctx, input))
 }
 
-// fallback возвращает первое непустое значение. Пустая колонка и отсутствующая колонка здесь
-// одно и то же: у задачи, которая её не завела, поле всегда пусто.
+// fallback возвращает value, а пустое — previous.
 func fallback(value, previous string) string {
 	if strings.TrimSpace(value) != "" {
 		return value

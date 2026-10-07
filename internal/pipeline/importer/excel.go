@@ -26,8 +26,7 @@ func ReadArticles(path string) ([]article.Input, error) {
 	return ReadArticlesWithLimit(path, 0)
 }
 
-// ReadArticlesWithLimit возвращает не больше limit строк данных.
-// Нулевой limit означает отсутствие ограничения.
+// ReadArticlesWithLimit возвращает не больше limit строк данных; нулевой limit — без ограничения.
 func ReadArticlesWithLimit(path string, limit int) ([]article.Input, error) {
 	if limit < 0 {
 		return nil, fmt.Errorf("лимит строк не может быть отрицательным")
@@ -57,21 +56,18 @@ func ReadArticlesWithLimit(path string, limit int) ([]article.Input, error) {
 
 // ReadRows читает все строки данных, сохраняя ошибки отдельных строк в результате.
 func ReadRows(path string) ([]Row, error) {
-	// Открываем Excel-файл.
 	file, err := excelize.OpenFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("открыть Excel-файл %q: %w", path, err)
 	}
 
-	// Закрываем файл при выходе из функции.
 	defer func() {
 		_ = file.Close()
 	}()
 
-	// Пытаемся открыть лист с ожидаемым именем.
 	sheetName := defaultSheetName
 
-	// Если такого листа нет, используем первый найденный.
+	// Нет листа с ожидаемым именем — берём первый.
 	if index, err := file.GetSheetIndex(sheetName); err != nil || index == -1 {
 		sheets := file.GetSheetList()
 		if len(sheets) == 0 {
@@ -81,18 +77,15 @@ func ReadRows(path string) ([]Row, error) {
 		sheetName = sheets[0]
 	}
 
-	// Получаем все строки выбранного листа.
 	rows, err := file.GetRows(sheetName)
 	if err != nil {
 		return nil, fmt.Errorf("прочитать лист %q: %w", sheetName, err)
 	}
 
-	// Первая строка — заголовки, поэтому данных должно быть минимум две строки.
 	if len(rows) < 2 {
 		return nil, fmt.Errorf("в Excel-файле нет строк с данными")
 	}
 
-	// Строим карту "имя колонки -> индекс".
 	columnIndexes, err := buildColumnIndexes(rows[0])
 	if err != nil {
 		return nil, err
@@ -101,7 +94,6 @@ func ReadRows(path string) ([]Row, error) {
 	result := make([]Row, 0, len(rows)-1)
 	seenExternalIDs := make(map[int]int)
 
-	// Начинаем со второй строки, так как первая содержит заголовки.
 	for rowIndex := 1; rowIndex < len(rows); rowIndex++ {
 		row := rows[rowIndex]
 		if isEmptyRow(row) {
@@ -154,13 +146,10 @@ func ReadRows(path string) ([]Row, error) {
 			SEOTitle:        optionalCellValue(row, columnIndexes, "seo_title"),
 			Section:         optionalCellValue(row, columnIndexes, "section"),
 			Profession:      optionalCellValue(row, columnIndexes, "profession"),
-			// Преподаватели приходят той же колонкой authors, что и автор: колонка в книге
-			// одна, а как её называет задача — вопрос её единого языка, а не импорта.
+			// Преподаватели — та же колонка authors, что и автор.
 			Teachers:    optionalCellValue(row, columnIndexes, "authors"),
 			ServiceName: optionalCellValue(row, columnIndexes, "service_name"),
-			// Числа программы коммерческой страницы второй площадки. Импортёр читает их
-			// всегда: колонки в книге просто нет, и значение остаётся пустым, — а до базы
-			// они доходят лишь там, где колонка объявлена профилем задачи.
+			// Читаются всегда; до базы доходят только колонки, объявленные профилем задачи.
 			PostType:       optionalCellValue(row, columnIndexes, "post_type"),
 			Hours:          optionalCellValue(row, columnIndexes, "hours"),
 			Duration:       optionalCellValue(row, columnIndexes, "duration"),
@@ -176,19 +165,12 @@ func ReadRows(path string) ([]Row, error) {
 	return result, nil
 }
 
-// columnAliases сводит заголовки книги к именам, которыми колонки называет код.
-//
-// Заголовки пишет человек в Excel, и они уже разошлись: у одной задачи «сео-заголовок»
-// кириллицей, у другой того же поля нет вовсе. Разбирать их здесь, одной таблицей, а не
-// ветками в чтении строки — тогда новая книга добавляет строку в карту, а не правку разбора.
-// Ключи — уже приведённые к нижнему регистру и обрезанные заголовки.
+// columnAliases сводит заголовки книги к именам колонок в коде; ключи — в нижнем регистре
+// и без пробелов по краям.
 var columnAliases = map[string]string{
-	// Старая опечатка в таблице task_1.
+	// Опечатка в книге task_1.
 	"referense_url": "reference_url", //nolint:misspell // заголовок колонки в книге
-	// Книга pprof_2 называет slug и преподавателей по-своему. Значение колонок то же самое,
-	// расходятся только заголовки: слаг картинки там slug, преподаватели — teachers, а не
-	// authors. Колонка service_name у неё своя и с article_name не путается: в книге есть обе,
-	// и это два разных значения — полное название страницы и короткое название услуги.
+	// Заголовки книги pprof_2; service_name — отдельная колонка, не article_name.
 	"slug":          "image_slug",
 	"teachers":      "authors",
 	"услуга-нейм":   "service_name",
@@ -200,8 +182,7 @@ var columnAliases = map[string]string{
 	"раздел":        "section",
 	"профессия":     "profession",
 	"преподаватели": "authors",
-	// Книга коммерческих страниц второй площадки. Заголовки там русские: числа программы
-	// заполняет человек, и просить его писать post_type латиницей незачем.
+	// Книга коммерческих страниц второй площадки: русские заголовки.
 	"тип записи":    "post_type",
 	"тип_записи":    "post_type",
 	"объём":         "hours",
@@ -218,17 +199,13 @@ var columnAliases = map[string]string{
 	"ссылка на картинку":    "image_source_url",
 }
 
-// buildColumnIndexes проверяет наличие всех обязательных колонок
-// и строит карту "имя колонки -> индекс".
+// buildColumnIndexes проверяет наличие обязательных колонок и строит карту «имя колонки → индекс».
 func buildColumnIndexes(headerRow []string) (map[string]int, error) {
 	requiredColumns := []string{"id", "article_name", "image_slug", "reference_url"}
 
-	// Карта для быстрого поиска индекса колонки по её имени.
 	indexes := make(map[string]int, len(headerRow))
 
-	// Проходим по строке заголовков.
 	for index, value := range headerRow {
-		// Убираем пробелы и приводим название к нижнему регистру.
 		columnName := strings.TrimSpace(strings.ToLower(value))
 
 		if canonical, found := columnAliases[columnName]; found {
@@ -249,7 +226,6 @@ func buildColumnIndexes(headerRow []string) (map[string]int, error) {
 		indexes[columnName] = index
 	}
 
-	// Проверяем наличие всех обязательных колонок.
 	for _, column := range requiredColumns {
 		if _, ok := indexes[column]; !ok {
 			return nil, fmt.Errorf(
@@ -284,8 +260,7 @@ func isEmptyRow(row []string) bool {
 	return true
 }
 
-// cellValue безопасно возвращает значение ячейки по индексу.
-// Если индекс выходит за границы строки, возвращается пустая строка.
+// cellValue возвращает значение ячейки по индексу или пустую строку за границами строки.
 func cellValue(row []string, index int) string {
 	if index < 0 || index >= len(row) {
 		return ""

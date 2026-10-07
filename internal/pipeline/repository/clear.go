@@ -6,12 +6,8 @@ import (
 	"strings"
 )
 
-// clearArticleTables перечисляет таблицы, которые очищает ClearArticleState, в порядке
-// удаления: от зависимых к article_research.
-//
-// articles и article_inputs сюда не входят намеренно — это и есть результат импорта,
-// который команда обязана сохранить вместе с id и external_id статьи. Список отдельный от
-// resetTables: очистка одной статьи и сброс всей базы не должны меняться вместе.
+// clearArticleTables — таблицы ClearArticleState в порядке удаления; articles и article_inputs
+// (результат импорта) не входят.
 var clearArticleTables = []string{
 	"article_errors",
 	"article_outputs",
@@ -19,13 +15,7 @@ var clearArticleTables = []string{
 	"article_research",
 }
 
-// resetArticleTables перечисляет таблицы, которые очищает ResetArticleState. Тот же порядок и
-// те же таблицы, что у clear, плюс article_inputs: reset ведёт статью не к состоянию после
-// импорта, а к состоянию «импорта ещё не было», поэтому результат импорта тоже стирается.
-//
-// articles сюда не входит: строка статьи и её id переживают reset — в этом и смысл команды.
-// Список отдельный от clearArticleTables, а не производный от него: две команды с разными
-// обещаниями не должны менять состав друг друга.
+// resetArticleTables — таблицы clear плюс article_inputs; строка articles и её id переживают reset.
 var resetArticleTables = []string{
 	"article_errors",
 	"article_outputs",
@@ -40,9 +30,7 @@ type ClearCount struct {
 	Rows  int64
 }
 
-// ClearArticleCounts считает строки статьи по тем же таблицам и в том же порядке, в каком их
-// удалит ClearArticleState. Один список обслуживает и подсчёт, и удаление, поэтому отчёт не
-// может разойтись с тем, что команда действительно сотрёт.
+// ClearArticleCounts считает строки статьи по таблицам, которые удалит ClearArticleState.
 func (r *ArticleRepository) ClearArticleCounts(ctx context.Context, articleID int64) ([]ClearCount, error) {
 	return r.articleTableCounts(ctx, clearArticleTables, articleID)
 }
@@ -52,7 +40,6 @@ func (r *ArticleRepository) ResetArticleCounts(ctx context.Context, articleID in
 	return r.articleTableCounts(ctx, resetArticleTables, articleID)
 }
 
-// articleTableCounts считает строки статьи по переданному списку таблиц, сохраняя его порядок.
 func (r *ArticleRepository) articleTableCounts(
 	ctx context.Context,
 	tables []string,
@@ -80,29 +67,16 @@ func (r *ArticleRepository) articleTableCounts(
 	return counts, nil
 }
 
-// ClearArticleState возвращает одну статью к состоянию сразу после импорта: удаляет research,
-// metadata, outputs и историю ошибок, сбрасывает статус в pending и снимает этап с ошибкой.
-//
-// Строка articles и её article_inputs остаются на месте, id не переиспользуется и не
-// сдвигается — место статьи в базе сохраняется, повторный импорт ей не нужен.
-//
-// Всё делается одной транзакцией: наполовину очищенная статья хуже неочищенной, потому что
-// пайплайн увидит research без outputs и посчитает часть этапов готовыми.
+// ClearArticleState возвращает одну статью к состоянию сразу после импорта одной транзакцией.
 func (r *ArticleRepository) ClearArticleState(ctx context.Context, articleID int64) error {
 	return r.deleteArticleState(ctx, clearArticleTables, articleID)
 }
 
-// ResetArticleState возвращает одну статью к состоянию «импорта ещё не было»: удаляет research,
-// metadata, outputs, историю ошибок и входные данные импорта, сбрасывает статус в pending и
-// снимает этап с ошибкой.
-//
-// От ClearArticleState отличается ровно одним: стирается ещё и article_inputs. Строка articles
-// остаётся, id и external_id сохраняются — статью ждёт повторный импорт, а не новая строка.
+// ResetArticleState — ClearArticleState плюс article_inputs; id и external_id сохраняются до повторного импорта.
 func (r *ArticleRepository) ResetArticleState(ctx context.Context, articleID int64) error {
 	return r.deleteArticleState(ctx, resetArticleTables, articleID)
 }
 
-// deleteArticleState чистит переданные таблицы статьи и сбрасывает её состояние в articles.
 func (r *ArticleRepository) deleteArticleState(ctx context.Context, tables []string, articleID int64) error {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {

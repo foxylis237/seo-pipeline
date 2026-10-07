@@ -13,7 +13,6 @@ import (
 	articleoutput "github.com/foxylis237/seo-pipeline/internal/pipeline/output"
 )
 
-// articleState — всё, что известно о статье к началу сборки.
 type articleState struct {
 	externalID  string
 	directory   string
@@ -22,8 +21,7 @@ type articleState struct {
 	research    article.GenerationInput
 	hasResearch bool
 	production  articleoutput.ArticlePaths
-	// researchErr — несобранный research. Сборку он не прерывает, но попадает в итог,
-	// иначе заведомо неполная папка выглядела бы успешной.
+	// researchErr не прерывает сборку, но попадает в её итог.
 	researchErr error
 }
 
@@ -45,28 +43,21 @@ func (s articleState) links() string {
 
 func (s articleState) title() string { return s.result.Article.Title }
 
-// promptInput — то, из чего собираются данные промптов стадий: собранный research и заголовок
-// статьи.
-//
-// Заголовок берётся из ResultInput, а не из research: research может быть не собран вовсе, и
-// тогда на его месте стоит запасной набор из article_inputs — с заголовком, но без ключей.
+// promptInput берёт заголовок из ResultInput, а не из research: research может быть запасным
+// набором из article_inputs.
 func (s articleState) promptInput() article.GenerationInput {
 	input := s.research
 	input.Article.Title = s.title()
 	return input
 }
 
-// hasStoredMetadata сообщает, что стадия info уже отработала и её результат лежит в
-// PostgreSQL. Признак читается из того же ResultInput, по которому собирается result.md,
-// поэтому «есть метаданные» и «они попадут в result.md» — одно и то же условие.
+// hasStoredMetadata читает тот же ResultInput, по которому собирается result.md.
 func (s articleState) hasStoredMetadata() bool {
 	return strings.TrimSpace(s.result.TLDR) != "" ||
 		strings.TrimSpace(s.result.FAQ) != ""
 }
 
-// load собирает состояние статьи из читающих методов репозитория. Отсутствие research или
-// сохранённых артефактов — не ошибка: DEMO обязан собраться и для статьи, которая ещё не
-// проходила пайплайн.
+// load собирает состояние статьи; отсутствие research или артефактов — не ошибка.
 func (b *Builder) load(ctx context.Context, externalID string) (articleState, error) {
 	resultInput, err := b.repository.GetResultInput(ctx, externalID)
 	if err != nil {
@@ -104,9 +95,7 @@ func (b *Builder) load(ctx context.Context, externalID string) (articleState, er
 	return state, nil
 }
 
-// loadResearch берёт готовый research, а при его отсутствии один раз запускает prepare и
-// перечитывает результат. Повторно Keys.so и Arsenkin не дёргаются: собранный research
-// остаётся в PostgreSQL и следующей сборке достаётся уже готовым.
+// loadResearch берёт готовый research, а при его отсутствии один раз запускает prepare.
 func (b *Builder) loadResearch(ctx context.Context, externalID string, state *articleState) {
 	research, err := b.repository.GetGenerationInput(ctx, externalID)
 	if err != nil && b.preparer != nil {
@@ -130,8 +119,7 @@ func (b *Builder) loadResearch(ctx context.Context, externalID string, state *ar
 	}
 }
 
-// slugFromArtifactPath восстанавливает slug из пути сохранённого артефакта: он всегда
-// начинается с каталога <external_id>-<slug>.
+// slugFromArtifactPath восстанавливает slug из каталога <external_id>-<slug> в пути артефакта.
 func slugFromArtifactPath(externalID, path string) string {
 	directory := strings.SplitN(strings.Trim(filepath.ToSlash(path), "/"), "/", 2)[0]
 	prefix := externalID + "-"
@@ -141,7 +129,6 @@ func slugFromArtifactPath(externalID, path string) string {
 	return strings.TrimPrefix(directory, prefix)
 }
 
-// structure кладёт в DEMO готовую структуру, а при её отсутствии генерирует новую.
 func (b *Builder) structure(ctx context.Context, state articleState, staging string) (string, error) {
 	if text, found := b.readProduction(state, state.saved.StructurePath); found {
 		if err := writeDemoFile(staging, structureFile, text); err != nil {
@@ -169,8 +156,7 @@ func (b *Builder) structure(ctx context.Context, state articleState, staging str
 	return text, writeDemoFile(staging, structureFile, text)
 }
 
-// article кладёт в DEMO готовую статью, а при её отсутствии генерирует новую. Промпт статьи
-// сохраняется всегда — им пользуются в ручном чате, даже когда сама генерация не удалась.
+// article кладёт в DEMO готовую статью или генерирует новую; промпт сохраняется всегда.
 func (b *Builder) article(ctx context.Context, state articleState, staging, structure string) (string, error) {
 	call := b.articleCall(state, structure)
 	if text, found := b.readProduction(state, state.result.ArticlePath); found {
@@ -198,8 +184,6 @@ func (b *Builder) article(ctx context.Context, state articleState, staging, stru
 	return text, writeDemoFile(staging, articleFile, text)
 }
 
-// structureCall собирает вызов стадии structure. Поля даёт задача, если её промпт просит
-// свой набор; иначе — общий набор ниже, тот же, что и был.
 func (b *Builder) structureCall(state articleState) llm.Call {
 	input := state.promptInput()
 	var data any = struct {
@@ -212,7 +196,6 @@ func (b *Builder) structureCall(state articleState) llm.Call {
 	return llm.Call{Stage: "structure", ArticleID: state.result.Article.ID, Data: data}
 }
 
-// articleCall собирает вызов стадии article — тем же способом и по той же причине.
 func (b *Builder) articleCall(state articleState, structure string) llm.Call {
 	input := state.promptInput()
 	var data any = struct {
@@ -231,14 +214,8 @@ func (b *Builder) articleCall(state articleState, structure string) llm.Call {
 	return llm.Call{Stage: "article", ArticleID: state.result.Article.ID, Data: data}
 }
 
-// articleInfo кладёт в DEMO информацию для публикации и возвращает набор метаданных для
-// result.md.
-//
-// Источник выбирается целиком, а не по полям. Есть метаданные в PostgreSQL — берутся они,
-// стадия info не запускается повторно, а сохранённый article_info.txt лишь копируется для
-// справки; возвращается nil, и result.md собирается по данным БД. Метаданных в БД нет —
-// источником становится article_info.txt: переиспользованный с диска или сгенерированный
-// этой же стадией info. Разбирается он целиком, и целиком же уходит в result.md.
+// articleInfo выбирает источник метаданных целиком, а не по полям: есть они в PostgreSQL —
+// возвращается nil, иначе article_info.txt с диска или от стадии info.
 func (b *Builder) articleInfo(ctx context.Context, state articleState, staging, structure, articleText string) (*article.ArticleInfo, error) {
 	saved, found := b.readProduction(state, state.production.ArticleInfoPath)
 	if found {
@@ -257,10 +234,6 @@ func (b *Builder) articleInfo(ctx context.Context, state articleState, staging, 
 		b.logger.Warn("информация для публикации пропущена: статьи нет", "external_id", state.externalID, "stage", "demo_info")
 		return nil, nil
 	}
-	// Стадии info у задачи может не быть вовсе: частые вопросы бывают написаны в самом тексте
-	// и разбираются из него, а TL;DR и время чтения задача не генерирует. Спросить стадию у
-	// такой задачи значит уронить сборку на «LLM stage "info" is not configured» — уже после
-	// оплаченных structure и article.
 	if !b.generator.HasStage(infoStage) {
 		b.logger.Info("информация для публикации пропущена: у задачи нет стадии info",
 			"external_id", state.externalID, "stage", "demo_info")
@@ -287,9 +260,7 @@ func (b *Builder) articleInfo(ctx context.Context, state articleState, staging, 
 	return b.parseDemoMetadata(state, text), nil
 }
 
-// parseDemoMetadata разбирает article_info.txt для result.md. Неразобранный ответ не теряется:
-// он целиком уходит в TL;DR, а причина остаётся в логе статьи — пустой раздел в result.md
-// молча пропускают глазами, а текст не по формату виден сразу.
+// parseDemoMetadata разбирает article_info.txt; неразобранный ответ целиком уходит в TL;DR.
 func (b *Builder) parseDemoMetadata(state articleState, text string) *article.ArticleInfo {
 	parsed, err := article.ParseArticleInfo(text)
 	if err == nil && (parsed.TLDR != "" || parsed.FAQ != "") {
@@ -304,8 +275,7 @@ func (b *Builder) parseDemoMetadata(state articleState, text string) *article.Ar
 	return &article.ArticleInfo{TLDR: strings.TrimSpace(text)}
 }
 
-// mergedPrompt рендерит объединённый промпт fix + перелинковка + HTML. Ревью в него не
-// входит: оно остаётся выше в истории ручного чата.
+// mergedPrompt рендерит объединённый промпт fix + перелинковка + HTML.
 func (b *Builder) mergedPrompt(state articleState, staging string) error {
 	templateText, err := os.ReadFile(b.mergedPromptPath)
 	if err != nil {
@@ -322,8 +292,7 @@ func (b *Builder) mergedPrompt(state articleState, staging string) error {
 	return writeDemoFile(staging, fixLinksHTMLPromptFile, rendered.String())
 }
 
-// resultMarkdown собирает result.md всегда: недостающие поля остаются пустыми. metadata == nil
-// означает, что источником метаданных остаётся PostgreSQL.
+// resultMarkdown собирает result.md всегда; metadata == nil — метаданные из PostgreSQL.
 func (b *Builder) resultMarkdown(ctx context.Context, state articleState, staging, articleText string, metadata *article.ArticleInfo) error {
 	rendered, err := b.result.RenderForDemo(ctx, state.externalID, articleText, metadata)
 	if err != nil {
@@ -332,8 +301,7 @@ func (b *Builder) resultMarkdown(ctx context.Context, state articleState, stagin
 	return writeDemoFile(staging, resultFile, rendered)
 }
 
-// copyPrepare переносит диагностику prepare: без неё по DEMO не понять, из каких исходных
-// данных выросла статья. Отсутствие файлов ошибкой не считается.
+// copyPrepare переносит диагностику prepare; отсутствие файлов не ошибка.
 func (b *Builder) copyPrepare(state articleState, staging string) {
 	source := filepath.Join(b.root, state.directory, prepareFolder)
 	entries, err := os.ReadDir(source)
@@ -368,8 +336,7 @@ func (b *Builder) writePrompt(state articleState, staging, name string, call llm
 	return writeDemoFile(staging, name, prepared.Prompt)
 }
 
-// readProduction читает боевой артефакт статьи. Путь из PostgreSQL проверяется на
-// принадлежность каталогу этой же статьи: чужой артефакт молча подмешивать нельзя.
+// readProduction читает боевой артефакт, только если путь лежит в каталоге этой статьи.
 func (b *Builder) readProduction(state articleState, relativePath string) (string, bool) {
 	if strings.TrimSpace(relativePath) == "" || !b.artifacts.Exists(relativePath) {
 		return "", false

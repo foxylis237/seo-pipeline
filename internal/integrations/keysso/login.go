@@ -18,12 +18,8 @@ const signedInJS = `selectors => !location.pathname.startsWith('/ru/login') &&
 	!document.querySelector(selectors.login) && !!document.querySelector(selectors.search)`
 
 // Login opens the Keys.so login page in a visible browser on the pipeline's persistent profile
-// and waits until a person signs in.
-//
-// The automatic login fills the same form, but Keys.so shows Yandex SmartCaptcha to an account
-// it does not recognize, and the captcha is not solved automatically on purpose. The form is
-// pre-filled with the credentials from .env, so the person only solves the captcha and submits.
-// The profile is not reset: the session saved here is the one every run reuses.
+// and waits until a person signs in. Keys.so shows Yandex SmartCaptcha to an unrecognized
+// account; the form is pre-filled from .env, so the person only solves it. The profile is kept.
 func Login(ctx context.Context, email, password string, logger *slog.Logger) error {
 	loginCtx, cancel := context.WithTimeout(ctx, manualLoginTimeout)
 	defer cancel()
@@ -58,8 +54,7 @@ func Login(ctx context.Context, email, password string, logger *slog.Logger) err
 	return nil
 }
 
-// prefill types a credential into the login form. A missing field is not an error: the page may
-// already show a signed-in account, and the person can always type the value by hand.
+// prefill types a credential into the login form; a missing field is not an error.
 func (s *Service) prefill(selector, value, field string) {
 	if value == "" {
 		return

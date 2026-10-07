@@ -1,9 +1,7 @@
 // Package demo assembles a DEMO folder next to the production artifacts of one article.
 //
-// Демо-сборка — отдельная операция подготовки файлов, а не продолжение боевого пайплайна:
-// она ничего не пишет в PostgreSQL, не меняет статус, current_step и error_message статьи и
-// не трогает боевые артефакты. Всё, что уже сделано, переиспользуется как есть; заново
-// выполняется только то, чего действительно нет.
+// Сборка не пишет в PostgreSQL и не трогает боевые артефакты; заново выполняется только то,
+// чего ещё нет.
 package demo
 
 import (
@@ -20,30 +18,21 @@ import (
 )
 
 const (
-	// FolderName — каталог демо-сборки внутри каталога статьи. Имя берётся из output, а не
-	// повторяется здесь: оттуда же его читает публикация промпта.
+	// FolderName — каталог демо-сборки внутри каталога статьи.
 	FolderName = articleoutput.DemoFolder
-	// FixLinksHTMLPromptFile — объединённый промпт второго сообщения ручного чата. Он
-	// существует только для DEMO и боевые промпты не подменяет. Путь к нему собирается от
-	// каталога общих промптов и приходит в NewBuilder: имени задачи пакет не знает.
+	// FixLinksHTMLPromptFile — объединённый промпт ручного чата относительно каталога общих промптов.
 	FixLinksHTMLPromptFile = "demo/fix_links_html.txt"
 )
 
-// Подпапки DEMO повторяют раскладку боевого каталога статьи: то же имя папки — тот же вид
-// содержимого, отдельную схему запоминать не нужно.
+// Подпапки DEMO повторяют раскладку боевого каталога статьи.
 const (
 	promptsFolder   = articleoutput.PromptsFolder
 	generatedFolder = "generated"
 	prepareFolder   = "prepare"
 )
 
-// Имена файлов внутри DEMO. В корне лежит то, что при ручном прогоне открывают первым:
-// готовый результат и объединённый промпт второго сообщения чата. Всё остальное — по
-// подпапкам боевой раскладки.
-//
-// Промпт статьи лежит в prompts/ ровно потому, что там же он лежит в боевом каталоге:
-// публикация в Google Docs забирает его по одному правилу и для DEMO, и для боевого прогона,
-// а второе имя того же артефакта означало бы, что найдено будет не всегда.
+// Имена файлов внутри DEMO. Промпт статьи лежит в prompts/, как в боевом каталоге:
+// публикация в Google Docs ищет его по одному правилу.
 const (
 	resultFile             = "result.md"
 	fixLinksHTMLPromptFile = "fix_links_html_prompt.txt"
@@ -57,12 +46,10 @@ const (
 	articleInfoFile = generatedFolder + "/article_info.txt"
 )
 
-// infoStage — имя стадии, которая пишет информацию для публикации. Стадия есть не у каждой
-// задачи: страница, где частые вопросы уже написаны в тексте, разбирает их из него сама.
+// infoStage — стадия метаданных публикации; есть не у каждой задачи.
 const infoStage = "info"
 
-// Repository читает сохранённое состояние статьи. Методов записи здесь нет намеренно: demo
-// не имеет права двигать статью по пайплайну.
+// Repository читает сохранённое состояние статьи; методов записи нет — demo не двигает статью.
 type Repository interface {
 	GetResultInput(ctx context.Context, externalID string) (article.ResultInput, error)
 	GetGenerationInput(ctx context.Context, externalID string) (article.GenerationInput, error)
@@ -70,34 +57,22 @@ type Repository interface {
 	GetSavedGenerationInput(ctx context.Context, externalID string) (article.SavedGenerationInput, error)
 }
 
-// Generator рендерит и выполняет настроенные стадии LLM. Реализуется *llm.Router, поэтому
-// demo идёт теми же промптами и той же маршрутизацией, что и боевой прогон.
+// Generator рендерит и выполняет настроенные стадии LLM (реализуется *llm.Router).
 type Generator interface {
 	Prepare(call llm.Call) (llm.PreparedCall, error)
 	Generate(ctx context.Context, call llm.Call) (llm.RoutedResponse, error)
-	// HasStage отвечает, есть ли стадия в схеме задачи. Спрашивается до обращения к модели:
-	// набор стадий у задач разный, и DEMO обязан собраться и у той, чей поток стадию не
-	// вызывает вовсе.
+	// HasStage отвечает, есть ли стадия в схеме задачи; спрашивается до обращения к модели.
 	HasStage(stage string) bool
 }
 
-// PromptData собирает данные промптов тех стадий, которые DEMO выполняет сам.
-//
-// Набор плейсхолдеров шаблона — дело задачи, а не движка: основной промпт pprof_2 просит ещё
-// преподавателя, и общий набор полей даёт «can't evaluate field Teachers» уже после
-// оплаченной стадии structure. Поэтому поля приходит собирать та же задача, чьи это промпты,
-// а demo о них не знает.
-//
-// nil означает общий набор — Title, ключи, LSI и структуру: его просят промпты task_1 и
-// pprof_1, и заводить им реализацию ради повторения того же самого незачем.
+// PromptData собирает данные промптов тех стадий, которые DEMO выполняет сам; набор полей
+// задаёт задача. nil означает общий набор: Title, ключи, LSI и структура.
 type PromptData interface {
 	StructureData(input article.GenerationInput) any
 	ArticleData(input article.GenerationInput, structure string) any
 }
 
-// ResultRenderer собирает result.md из сохранённых данных, не записывая его. metadata == nil
-// означает «взять TL;DR и FAQ из PostgreSQL», иначе они берутся из переданного набора
-// целиком.
+// ResultRenderer собирает result.md, не записывая его; metadata == nil — TL;DR и FAQ из PostgreSQL.
 type ResultRenderer interface {
 	RenderForDemo(ctx context.Context, externalID, articleText string, metadata *article.ArticleInfo) (string, error)
 }
@@ -108,8 +83,7 @@ type Artifacts interface {
 	Exists(relativePath string) bool
 }
 
-// Preparer собирает research статьи, когда его ещё нет. Реализуется существующей командой
-// prepare: собственных интеграций с Keys.so и Arsenkin у demo-сборки нет.
+// Preparer собирает research статьи, когда его ещё нет (реализуется командой prepare).
 type Preparer interface {
 	Prepare(ctx context.Context, externalID string) error
 }
@@ -132,9 +106,7 @@ type Builder struct {
 	logger           *slog.Logger
 }
 
-// NewBuilder собирает сборщик DEMO. mergedPromptPath — путь к объединённому промпту ручного
-// чата; он свой у каждой задачи, поэтому приходит снаружи, а не берётся из константы.
-// promptData — сборщики данных промптов задачи; nil означает общий набор полей.
+// NewBuilder собирает сборщик DEMO; mergedPromptPath — путь к объединённому промпту ручного чата.
 func NewBuilder(root, mergedPromptPath string, repository Repository, artifacts Artifacts, result ResultRenderer, generator Generator, promptData PromptData, preparer Preparer, logger *slog.Logger) *Builder {
 	if logger == nil {
 		logger = slog.New(slog.DiscardHandler)
@@ -146,10 +118,7 @@ func NewBuilder(root, mergedPromptPath string, repository Repository, artifacts 
 	}
 }
 
-// Build пересобирает DEMO статьи целиком, независимо от её статуса и сохранённой ошибки.
-//
-// Ошибка отдельной стадии не отменяет сборку: папка публикуется с тем, что удалось собрать,
-// а сама ошибка возвращается вызывающему — иначе неполный DEMO выглядел бы успешным.
+// Build пересобирает DEMO статьи целиком; ошибка стадии не отменяет сборку, а возвращается.
 func (b *Builder) Build(ctx context.Context, externalID string) error {
 	state, err := b.load(ctx, externalID)
 	if err != nil {
@@ -181,14 +150,11 @@ func (b *Builder) assemble(ctx context.Context, state articleState, staging stri
 	metadata, infoErr := b.articleInfo(ctx, state, staging, structure, articleText)
 	promptErr := b.mergedPrompt(state, staging)
 	resultErr := b.resultMarkdown(ctx, state, staging, articleText, metadata)
-	// researchErr идёт в общий итог, а не прерывает сборку: без research папка выходит
-	// неполной, но result.md и промпты в ней всё равно должны появиться.
+	// Без research сборка не прерывается: result.md и промпты всё равно должны появиться.
 	return errors.Join(state.researchErr, structureErr, articleErr, infoErr, promptErr, resultErr)
 }
 
-// publish заменяет предыдущую папку DEMO собранной. Прошлая версия удаляется только после
-// того, как новая полностью собрана: прерванный прогон не должен оставить без материалов
-// предыдущего.
+// publish заменяет предыдущую папку DEMO собранной; прошлая удаляется только после замены.
 func publish(staging, final string) error {
 	previous := final + ".previous"
 	if err := os.RemoveAll(previous); err != nil {

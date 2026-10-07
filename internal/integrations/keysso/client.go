@@ -27,21 +27,11 @@ const (
 	pageSizeSelector      = `select.per-page-dropdown`
 	keywordsTableSelector = `table:has(th#_word)`
 	keywordsEmptySelector = `table:has(th#_word) tbody tr.p-datatable-emptymessage`
-	// keywordsEmptyInfoSelector — вторая разметка того же ответа «данных нет».
-	//
-	// Пустой результат Keys.so рисует двумя способами: у таблицы PrimeVue это строка
-	// tr.p-datatable-emptymessage внутри tbody, а у vuetable — подпись пагинации над
-	// таблицей со словами «Нет данных», причём в tbody остаётся техническая строка, а
-	// select.per-page-dropdown не появляется вовсе. Вторую разметку проверка не знала, и
-	// окончательный ответ сервиса превращался в таймаут: страница загружена, таблица на
-	// месте, условие ожидания не выполняется до конца бюджета. Цена ошибки не в лишней
-	// минуте — резервный подбор запросов моделью включается только по no_data, а по
-	// таймауту намеренно нет, — поэтому статьи 12, 14 и 15 встали на этапе целиком.
+	// keywordsEmptyInfoSelector — вторая разметка ответа «данных нет»: у vuetable это подпись
+	// пагинации «Нет данных», в tbody остаётся техническая строка, а select.per-page-dropdown нет.
 	keywordsEmptyInfoSelector = `.vuetable-pagination-info`
-	// keywordsEmptySettleMilliseconds — сколько «Нет данных» должно продержаться, прежде чем
-	// считать ответ окончательным. Подпись пагинации живёт на странице и до прихода данных,
-	// а индикатора загрузки у этой разметки нет: поспешный вывод молча подменил бы источник
-	// запросов моделью там, где Keys.so просто отвечал медленно.
+	// keywordsEmptySettleMilliseconds — сколько «Нет данных» должно продержаться: подпись есть
+	// и до прихода данных, а индикатора загрузки у этой разметки нет.
 	keywordsEmptySettleMilliseconds  = 3_000
 	keywordsLoaderSelector           = `.p-datatable-loading-overlay, .p-datatable-loading-icon`
 	cleanupInputSelector             = `textarea.p-inputtextarea`
@@ -49,12 +39,9 @@ const (
 	operationTimeoutMilliseconds     = 30_000
 	longOperationTimeoutMilliseconds = 60_000
 	keywordsTableMaxAttempts         = 3
-	// defaultDebugArtifactsRoot используется, когда каталог не задан вызывающим. Имени задачи
-	// здесь нет намеренно: интеграция не знает, что задач больше одной, — корень ей передают.
-	defaultDebugArtifactsRoot = "output/debug/keysso"
+	defaultDebugArtifactsRoot        = "output/debug/keysso"
 )
 
-// debugArtifactsRoot возвращает каталог диагностики этого прогона.
 func (s *Service) debugArtifactsRoot() string {
 	if root := strings.TrimSpace(s.cfg.DebugDir); root != "" {
 		return root
@@ -69,8 +56,7 @@ type Config struct {
 	Email      string
 	Password   string
 	Headless   bool
-	// DebugDir — корень диагностики этой интеграции. Задаётся вызывающим, чтобы дампы разных
-	// пайплайнов не смешивались; пустое значение включает общий каталог по умолчанию.
+	// DebugDir — корень диагностики интеграции; пустой — общий каталог по умолчанию.
 	DebugDir string
 }
 
@@ -225,11 +211,7 @@ func (s *Service) CollectCleanKeywords(ctx context.Context, referenceURL string)
 	}, nil
 }
 
-// CleanKeywords прогоняет через очистку Keys.so запросы, полученные не от самого Keys.so.
-//
-// Нужен, когда исходных запросов у конкурента не оказалось и их подобрал резервный источник:
-// правила очистки должны остаться ровно одни и те же, независимо от происхождения списка,
-// поэтому здесь открывается та же форма delete-double, а не пишется вторая очистка.
+// CleanKeywords прогоняет через форму delete-double Keys.so запросы, полученные не от Keys.so.
 func (s *Service) CleanKeywords(ctx context.Context, queries []string) (CollectResult, error) {
 	s.startedAt = time.Now()
 	s.collectedCount = len(queries)
@@ -261,38 +243,29 @@ func (s *Service) CleanKeywords(ctx context.Context, queries []string) (CollectR
 	}, nil
 }
 
-// ErrNoRawKeywords — Keys.so дошёл до результата и не нашёл у конкурента ни одного запроса.
-//
-// Это окончательный ответ сервиса, а не техническая неудача: ни повтор, ни другой браузер
-// его не изменят. Ошибка объявлена в публичном виде, потому что только по ней вызывающий
-// может отличить «данных нет» от «интеграция сломалась» — и решить, искать ли запросы в
-// другом источнике.
+// ErrNoRawKeywords — Keys.so дошёл до результата и не нашёл у конкурента ни одного запроса;
+// окончательный ответ сервиса, а не техническая неудача.
 var ErrNoRawKeywords = errors.New("Keys.so вернул пустой список запросов конкурента")
 
-// NoRawKeywords сообщает, что этап закончился отсутствием исходных запросов.
-// Таймауты, отказ авторизации и сломанная навигация сюда не попадают.
+// NoRawKeywords сообщает, что этап закончился отсутствием исходных запросов (не таймаутом и не отказом).
 func NoRawKeywords(err error) bool { return errors.Is(err, ErrNoRawKeywords) }
 
 // keywordsDailyLimitText is the heading Keys.so shows in place of the results once the quota is spent.
 const keywordsDailyLimitText = "Превышен лимит анализируемых доменов"
 
 // ErrDailyLimit — Keys.so refused the analysis: the account spent its daily quota of analyzed
-// domains. Retrying the same day only burns minutes per article, and the model fallback must
-// not start either: the competitor may well have queries, Keys.so just would not show them.
+// domains. Not a reason for the model fallback: the competitor may well have queries.
 var ErrDailyLimit = errors.New("Keys.so: превышен дневной лимит анализируемых доменов, повторить завтра или сменить тариф")
 
-// LoginFailed reports that Keys.so did not let the account in. Every later request needs the
-// session, the duplicate cleanup included, so no other source of queries can finish the stage.
+// LoginFailed reports that Keys.so did not let the account in; without a session even the
+// duplicate cleanup cannot run.
 func LoginFailed(err error) bool {
 	var stageErr *StageError
 	return errors.As(err, &stageErr) && stageErr.Stage == "check_authorization"
 }
 
 // keywordsResultStateJS решает, что показала страница результатов Keys.so: успех, пустой
-// ответ, техработы, ошибку навигации — или ничего из этого, и тогда ждём дальше.
-//
-// Скрипт вынесен константой рядом с селекторами: правило страницы одно, и проверять его
-// тестом по вызову WaitForFunction нечем.
+// ответ, техработы, ошибку навигации — или ничего, и тогда ждём дальше.
 const keywordsResultStateJS = `selectors => {
 			if (location.protocol === 'chrome-error:') return 'navigation_error';
 			if ((document.body?.textContent || '').includes(selectors.dailyLimit)) return 'limit_exceeded';
@@ -322,8 +295,7 @@ const keywordsResultStateJS = `selectors => {
 		}`
 
 // authenticateWithRetries доводит сессию до авторизованного состояния, повторяя только
-// временные отказы. Общая для сбора и для отдельно вызванной очистки: обе открывают
-// страницы Keys.so и обе требуют живой сессии.
+// временные отказы.
 func (s *Service) authenticateWithRetries(ctx context.Context) error {
 	var authenticationErr error
 	for attempt := 1; attempt <= keywordsTableMaxAttempts; attempt++ {
@@ -340,9 +312,7 @@ func (s *Service) authenticateWithRetries(ctx context.Context) error {
 	return s.stageError("check_authorization", authenticationErr)
 }
 
-// start поднимает Playwright и открывает persistent-профиль. Контекст берётся параметром
-// только ради логирования: сам запуск браузера отменяемых операций не содержит, а обе точки
-// входа вызывают start уже после checkContext.
+// start поднимает Playwright и открывает persistent-профиль; ctx нужен только логированию.
 func (s *Service) start(ctx context.Context) error {
 	if err := s.Close(); err != nil {
 		return fmt.Errorf("close previous Keys.so session: %w", err)
@@ -617,9 +587,7 @@ func (s *Service) collectCompetitorQueries(ctx context.Context, referenceURL str
 		return nil, fmt.Errorf("decode competitor queries: %w", err)
 	}
 	if len(queries) == 0 {
-		// Пустая таблица — окончательный ответ Keys.so о конкуренте, а не техническая
-		// неудача: повтор её не изменит. Классифицируем так же, как «Нет данных» на
-		// странице результатов, чтобы вызывающий мог отличить отсутствие данных от отказа.
+		// Пустая таблица — окончательный ответ Keys.so, как «Нет данных» на странице результатов.
 		return nil, &resultError{Kind: resultNoData, Retryable: false,
 			Err: fmt.Errorf("%w: таблица запросов конкурента пуста", ErrNoRawKeywords)}
 	}
@@ -684,8 +652,7 @@ func (s *Service) submitCompetitorSearch(ctx context.Context, referenceURL strin
 }
 
 // resultsMatchReference reports the Keys.so results URL carrying the requested competitor
-// site. A false result means the page shown belongs to some other search — most likely the
-// previous article's one — and the collected queries must not be trusted.
+// site; false means the page belongs to another search, likely the previous article's.
 func resultsMatchReference(resultsURL, referenceURL string) bool {
 	reference, err := url.Parse(strings.TrimSpace(referenceURL))
 	if err != nil {
@@ -1093,8 +1060,6 @@ func resultErrorFields(err error) (string, bool) {
 }
 
 // captureErrorContext сохраняет диагностику неудачной попытки в переданном контексте.
-// Нужен там, где у вызывающего есть ctx; captureError остался обёрткой, поэтому остальные
-// шесть точек вызова не тронуты и ведут себя как раньше.
 func (s *Service) captureErrorContext(ctx context.Context, stage string, attempt, maxAttempts int, err error) error {
 	if err == nil {
 		return nil
@@ -1365,11 +1330,7 @@ func (s *Service) stageError(stage string, err error) error {
 	}
 }
 
-// logContext пишет запись этапа в переданном контексте.
-//
-// Отдельная функция нужна там, где контекст есть на руках: без неё вызывающий с ctx не может
-// залогировать ничего, не потеряв его. Общий log остался обёрткой — переписывать все четыре
-// десятка его вызовов ради этого не требуется, и остальной пакет ведёт себя как раньше.
+// logContext пишет запись этапа в переданном контексте; log — обёртка над ним.
 func (s *Service) logContext(ctx context.Context, level slog.Level, message, stage string, attributes ...any) {
 	duration := time.Duration(0)
 	if !s.startedAt.IsZero() {

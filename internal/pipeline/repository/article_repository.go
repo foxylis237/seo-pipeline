@@ -21,9 +21,7 @@ import (
 type ArticleRepository struct {
 	pool   *pgxpool.Pool
 	logger *slog.Logger
-	// extraInputs — необязательные колонки article_inputs, которые есть у схемы этой задачи.
-	// Пустой список означает только обязательный набор: запросы к остальным колонкам
-	// подставят пустую строку вместо чтения, и разбирается ответ ровно так же.
+	// extraInputs — необязательные колонки article_inputs этой схемы; отсутствующие читаются как пустая строка.
 	extraInputs []string
 	// withoutTLDR — в article_metadata этой задачи нет колонки tldr.
 	withoutTLDR bool
@@ -33,9 +31,7 @@ type ArticleRepository struct {
 func (r *ArticleRepository) GetResultInput(ctx context.Context, externalID string) (article.ResultInput, error) {
 	var input article.ResultInput
 	var rawMetadata string
-	// Необщие колонки дописываются в конец выборки, а не вставляются в середину: базовая
-	// часть запроса и порядок её сканирования остаются теми же, что были до появления задач
-	// со своими колонками.
+	// Необщие колонки дописываются в конец выборки, чтобы порядок базового сканирования не менялся.
 	extraProjection, extraTargets := r.resultInputProjection(&input)
 	query := `
 		SELECT a.id, a.external_id, a.title, COALESCE(i.image_slug, ''),
@@ -263,8 +259,7 @@ func (r *ArticleRepository) GetGenerationInput(ctx context.Context, externalID s
 	return input, nil
 }
 
-// HasPreparedResearch reports whether prepare has persisted the research needed
-// by structure and article generation.
+// HasPreparedResearch reports whether prepare has persisted the research needed by generation.
 func (r *ArticleRepository) HasPreparedResearch(ctx context.Context, externalID string) (bool, error) {
 	var prepared bool
 	err := r.pool.QueryRow(ctx, `
@@ -292,10 +287,6 @@ func NewArticleRepository(pool *pgxpool.Pool, logger ...*slog.Logger) *ArticleRe
 }
 
 // UseExtraInputColumns объявляет необщие колонки article_inputs схемы этой задачи.
-//
-// Вызывается один раз в composition root сразу после конструктора. Отдельный метод, а не
-// параметр конструктора: колонки есть у одной задачи из трёх, и обязательный параметр
-// заставил бы остальных передавать nil на каждом вызове, в том числе в тестах.
 func (r *ArticleRepository) UseExtraInputColumns(names []string) error {
 	if err := ValidateExtraInputColumns(names); err != nil {
 		return err
@@ -305,10 +296,6 @@ func (r *ArticleRepository) UseExtraInputColumns(names []string) error {
 }
 
 // UseMetadataWithoutTLDR объявляет, что в article_metadata схемы этой задачи нет колонки tldr.
-//
-// Отдельный вызов рядом с UseExtraInputColumns и по той же причине: набор колонок у задач
-// разный, и знать о нём репозиторий обязан до первого запроса, а не выяснять из ошибки
-// PostgreSQL посреди прогона.
 func (r *ArticleRepository) UseMetadataWithoutTLDR(withoutTLDR bool) {
 	r.withoutTLDR = withoutTLDR
 }
@@ -397,9 +384,7 @@ type ResetCount struct {
 	Rows  int64
 }
 
-// resetTables перечисляет таблицы, которые очищает Reset, в порядке удаления: от зависимых
-// к articles. Один список обслуживает и подсчёт, и TRUNCATE, поэтому отчёт не может
-// разойтись с тем, что команда действительно удалит.
+// resetTables — таблицы Reset в порядке удаления, от зависимых к articles; общий список для подсчёта и TRUNCATE.
 var resetTables = []string{
 	"article_errors",
 	"article_outputs",
@@ -409,8 +394,7 @@ var resetTables = []string{
 	"articles",
 }
 
-// ResetCounts возвращает число строк в каждой таблице проекта — то, что reset показывает
-// пользователю до подтверждения.
+// ResetCounts возвращает число строк в каждой таблице проекта.
 func (r *ArticleRepository) ResetCounts(ctx context.Context) ([]ResetCount, error) {
 	selects := make([]string, 0, len(resetTables))
 	for _, table := range resetTables {
@@ -452,22 +436,10 @@ func (r *ArticleRepository) Reset(ctx context.Context) error {
 	return nil
 }
 
-// Import atomically inserts a new article and never updates an existing external_id.
-// The boolean reports whether a new article row was added.
-//
-// Входные данные пишутся не только новой статье, но и уже существующей, у которой их нет:
-// после `reset <external_id>` строка articles остаётся, а article_inputs стирается, и без
-// этого повторный импорт молча прошёл бы мимо — статья осталась бы навсегда без входных
-// данных.
-//
-// У существующей строки article_inputs импорт дозаполняет только колонки со значением NULL
-// (coalesceAssignments) и никогда не переписывает заполненные. NULL там означает ровно одно:
-// колонки не было в схеме, когда статью импортировали, — так появилась seo_title у 85 статей
-// pprof_1. Прежнее DO NOTHING оставляло такую колонку пустой навсегда, и добраться до неё
-// можно было только через `reset`, то есть стерев артефакты статьи. Заполненное значение
-// импорт не трогает намеренно: книгу правят по ходу работы, а статья, ушедшая в research или
-// в блог, писалась по данным на момент импорта, и подмена их под ней развела бы артефакты с
-// базой.
+// Import atomically inserts a new article and never updates an existing external_id;
+// the boolean reports whether a new article row was added.
+// article_inputs пишется и существующей статье без них (после reset <id>); у существующей
+// строки дозаполняются только NULL-колонки — пустая строка значением считается.
 func (r *ArticleRepository) Import(ctx context.Context, input article.Input) (article.Article, bool, error) {
 	var selected article.Article
 	inputColumns, inputValues := r.insertInputColumns(input)
@@ -589,9 +561,7 @@ func (r *ArticleRepository) GetArticleByExternalID(ctx context.Context, external
 	return selected, nil
 }
 
-// GetArticleTrace loads the identity of one article by its internal id. It is used by the
-// temporary cross-article diagnostics: every external step re-reads the identity from
-// PostgreSQL instead of trusting the value carried in memory.
+// GetArticleTrace loads the identity of one article by its internal id.
 func (r *ArticleRepository) GetArticleTrace(ctx context.Context, articleID int64) (article.Trace, error) {
 	var trace article.Trace
 	err := r.pool.QueryRow(ctx, `
@@ -611,7 +581,6 @@ func (r *ArticleRepository) GetArticleTrace(ctx context.Context, articleID int64
 }
 
 // ListImportedArticles loads every article together with its imported Excel row.
-// Только чтение: сверка переноса Excel → PostgreSQL ничего не меняет.
 func (r *ArticleRepository) ListImportedArticles(ctx context.Context) ([]article.ImportedArticle, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT a.id, a.external_id, a.title, a.status, a.current_step, a.error_message,
@@ -653,8 +622,7 @@ func (r *ArticleRepository) ListImportedArticles(ctx context.Context) ([]article
 	return imported, nil
 }
 
-// GetArticleInput loads the imported Excel row of one article. It is used by prepare
-// diagnostics to record what the run started from.
+// GetArticleInput loads the imported Excel row of one article.
 func (r *ArticleRepository) GetArticleInput(ctx context.Context, articleID int64) (article.Input, error) {
 	var input article.Input
 	var externalID string
@@ -684,8 +652,7 @@ func (r *ArticleRepository) GetArticleInput(ctx context.Context, articleID int64
 	return input, nil
 }
 
-// GetPendingForOperation returns articles whose persisted state requires the
-// requested operation. Results are stable and sequential by articles.id.
+// GetPendingForOperation returns articles whose persisted state requires the operation, ordered by id.
 func (r *ArticleRepository) GetPendingForOperation(ctx context.Context, operation string) ([]article.Article, error) {
 	var predicate string
 	switch operation {
@@ -968,16 +935,8 @@ func (r *ArticleRepository) SaveHTMLPath(ctx context.Context, articleID int64, h
 	return nil
 }
 
-// GetManualKeywords returns the cleaned queries that were filled in by hand instead of
-// collected from Keys.so, or nil when there are none.
-//
-// Ручное заполнение опознаётся по состоянию, которого сам пайплайн создать не может:
-// SavePreparedResearch пишет очищенные запросы и структуру конкурентов одной транзакцией,
-// а до успеха Arsenkin в article_research не попадает ничего. Значит непустые
-// cleaned_keywords при пустом competitor_structure остаются только после правки руками.
-// Дополнительного флага для этого не нужно, и уже собранная статья не рискует навсегда
-// застрять на устаревших запросах: после успешного прогона competitor_structure непуст,
-// и повторный prepare снова пойдёт в Keys.so.
+// GetManualKeywords returns the cleaned queries filled in by hand, or nil when there are none.
+// Признак — непустые cleaned_keywords при пустом competitor_structure: пайплайн пишет их одной транзакцией.
 func (r *ArticleRepository) GetManualKeywords(ctx context.Context, articleID int64) ([]string, error) {
 	const query = `
 		SELECT cleaned_keywords
@@ -1009,22 +968,8 @@ func (r *ArticleRepository) GetManualKeywords(ctx context.Context, articleID int
 }
 
 // SaveManualKeywords сохраняет вставленную руками колонку запросов вместо первого этапа Keys.so.
-//
-// Запись обязана оставить статью ровно в том состоянии, которое GetManualKeywords считает
-// ручным заполнением: непустые cleaned_keywords при пустом competitor_structure. Поэтому
-// структура конкурентов, частотности Wordstat и LSI обнуляются той же транзакцией. Без этого
-// у уже подготовленной статьи признак не появился бы вовсе, и prepare молча ушёл бы в Keys.so
-// за новыми запросами, оставив вставленные лежать мёртвым грузом.
-//
-// Перезапись безусловная: старые запросы и старое состояние статьи всегда уступают вставке.
-// Статус возвращается к «жду сбора research» (pending + arsenkin_collection), а ошибка
-// снимается — вставка запросов руками это ответ на отказ Keys.so, и оставлять после неё
-// старое сообщение об ошибке значит показывать пользователю снятую беду. Без сброса шага
-// статья, ушедшая дальше по пайплайну, не попала бы в batch-выборку prepare, и вставленные
-// запросы остались бы лежать мёртвым грузом.
-//
-// Сохранённые артефакты генерации команда не трогает: возобновление идёт по ним, а не по
-// статусу, поэтому текст уже написанной статьи заново не собирается — для этого regenerate.
+// Остальной research обнуляется той же транзакцией (иначе GetManualKeywords не узнает вставку),
+// статья возвращается к pending / arsenkin_collection без ошибки; артефакты генерации не трогаются.
 func (r *ArticleRepository) SaveManualKeywords(
 	ctx context.Context,
 	articleID int64,
@@ -1152,11 +1097,7 @@ func (r *ArticleRepository) SavePreparedResearch(
 	return nil
 }
 
-// ResetGenerationState returns one article to the state right after import: пути к
-// сгенерированным файлам и метаданные удаляются, статус и этап сбрасываются.
-//
-// Импортированная строка article_inputs и собранный research не трогаются: пересоздаётся
-// только то, что произвела генерация.
+// ResetGenerationState returns one article to the state right after import; article_inputs и research не трогаются.
 func (r *ArticleRepository) ResetGenerationState(ctx context.Context, articleID int64) error {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -1315,8 +1256,7 @@ func (r *ArticleRepository) ListArticlesWithErrors(ctx context.Context) ([]artic
 	return selected, nil
 }
 
-// ClearArticleErrorForRetry clears only the current blocking error. A failed article
-// is returned to the existing processing state without changing its current step.
+// ClearArticleErrorForRetry clears only the current blocking error, keeping the current step.
 func (r *ArticleRepository) ClearArticleErrorForRetry(ctx context.Context, articleID int64) (bool, error) {
 	result, err := r.pool.Exec(ctx, `
 		UPDATE articles
@@ -1347,11 +1287,7 @@ func safeErrorMessage(err error) string {
 	return message
 }
 
-// classifyErrorOperation определяет, что именно делала статья в момент сбоя.
-//
-// Имя операции не содержит провайдера: одну и ту же стадию выполняет любой из настроенных
-// LLM (Gemini, OpenRouter, DeepSeek Web), и подставлять сюда конкретного было бы враньём —
-// прежние значения gemini_* появлялись даже тогда, когда стадию выполнял другой провайдер.
+// classifyErrorOperation определяет операцию в момент сбоя; провайдера в имени нет — стадию выполняет любой LLM.
 func classifyErrorOperation(step *string, err error) *string {
 	message := strings.ToLower(err.Error())
 	operation := ""

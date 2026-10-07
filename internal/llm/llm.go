@@ -19,37 +19,26 @@ type Request struct {
 	Model       string
 	Temperature float64
 	MaxTokens   int
-	// ArticleID позволяет провайдеру держать один диалог на статью вместо нового на
-	// каждую стадию. Провайдеры без такого режима поле игнорируют.
+	// ArticleID позволяет провайдеру держать один диалог на статью.
 	ArticleID int64
 	// SingleChat включает режим одного диалога на статью. Свойство запроса, а не клиента:
-	// один и тот же браузерный клиент обслуживает обе схемы стадий, и в схеме Gemini этот
-	// режим не нужен.
+	// один браузерный клиент обслуживает обе схемы стадий.
 	SingleChat bool
-	// NewChat требует начать новую беседу даже в режиме одного диалога. Так поток с
-	// несколькими чатами на статью отделяет их друг от друга.
+	// NewChat требует начать новую беседу даже в режиме одного диалога.
 	NewChat bool
-	// Attachments — документы, которые уходят вместе с промптом. Пути приходят из
-	// конфигурации стадии и уже разрешены: провайдер их не ищет, а только прикрепляет.
+	// Attachments — уже разрешённые пути документов, которые уходят вместе с промптом.
 	Attachments []string
-	// Mode — подпись режима ответа в интерфейсе провайдера. Пустое значение означает
-	// «не переключать»; провайдеры без выбора режима поле игнорируют.
+	// Mode — подпись режима ответа в интерфейсе провайдера; пустое — не переключать.
 	Mode string
-	// Search просит включить поиск в интернете, если провайдер это умеет. Пустое значение —
-	// прежнее поведение: модель отвечает из своих знаний.
+	// Search просит включить поиск в интернете, если провайдер это умеет.
 	Search bool
-	// Stage — имя стадии, ради которой сделан запрос. Боевые провайдеры его игнорируют:
-	// им достаточно модели. Значимо оно там, где запрос надо отличить по стадии, а модель
-	// этого больше не даёт — в чате второе и последующие сообщения идут к target, который
-	// ответил на первое, поэтому у всех стадий одного чата модель одна.
+	// Stage — имя стадии запроса. Боевые провайдеры его игнорируют; по модели стадию не
+	// отличить: у всех стадий одного чата модель одна.
 	Stage string
 }
 
 // AttachmentClient — провайдер, умеющий отправить документ вместе с промптом.
-//
-// Стадия с документами не имеет права молча уйти без него: без регламента модель ответит
-// не тем, а по тексту ответа это уже не отличить. Поэтому провайдер без такой поддержки
-// получает стадию с вложениями как ошибку маршрутизации, а не как обычный запрос.
+// Провайдер без этой поддержки получает стадию с вложениями как ошибку маршрутизации.
 type AttachmentClient interface {
 	SupportsAttachments() bool
 }
@@ -79,9 +68,8 @@ const (
 	ErrorTypeCreditsExhausted ErrorType = "credits_exhausted"
 	ErrorTypeUnauthorized     ErrorType = "unauthorized"
 	ErrorTypeProvider         ErrorType = "provider_error"
-	// ErrorTypeOverloaded — провайдер жив и авторизация цела, но обслуживать запрос он
-	// сейчас отказывается («Server is busy» у DeepSeek). От остальных временных отказов
-	// отличается только паузой: повтор через несколько секунд упирается в ту же перегрузку.
+	// ErrorTypeOverloaded — провайдер отказывается обслуживать запрос («Server is busy» у
+	// DeepSeek); повтор через секунды упирается в ту же перегрузку.
 	ErrorTypeOverloaded ErrorType = "overloaded"
 )
 
@@ -168,10 +156,7 @@ type Call struct {
 	Stage     string
 	ArticleID int64
 	Data      any
-	// NewChat просит провайдера начать новую беседу вместо продолжения текущей. Нужен
-	// потокам, у которых чатов на статью несколько: без него провайдер с режимом одного
-	// диалога склеил бы их в один. Стадии task_1 флаг не выставляют, и для них ничего
-	// не меняется.
+	// NewChat просит провайдера начать новую беседу вместо продолжения текущей.
 	NewChat bool
 }
 
@@ -182,8 +167,7 @@ type RoutedResponse struct {
 	Model    string
 }
 
-// PreparedCall contains a rendered stage prompt. Маршрутные поля отсюда убраны: их никто не
-// читал, а держать копию маршрутизации рядом с промптом значит заводить второй её источник.
+// PreparedCall contains a rendered stage prompt.
 type PreparedCall struct {
 	Prompt string
 }
@@ -205,10 +189,6 @@ func NewRouter(cfg config.LLMConfig, clients map[string]Client, logger *slog.Log
 }
 
 // HasStage отвечает, есть ли стадия в схеме этой задачи.
-//
-// Нужен тем, кто обязан обойтись без стадии, которой у задачи может не быть. Схемы стадий у
-// задач разные — набор объявляет профиль, — и спрашивать несуществующую стадию значит упасть
-// на «LLM stage ... is not configured» уже после того, как соседние стадии оплачены.
 func (r *Router) HasStage(name string) bool {
 	_, found := r.config.Stages[name]
 	return found
@@ -240,8 +220,7 @@ func (r *Router) generatePrompt(ctx context.Context, call Call, prompt string) (
 		if !isFallbackEligible(targetErr) || targetIndex == len(stage.Targets)-1 {
 			break
 		}
-		// Логируем провайдера, на которого переходим: до правки в строке стоял тот, что
-		// уже отказал, и по логу было не понять, кто выполнил стадию.
+		// Логируем провайдера, на которого переходим, а не отказавший.
 		next := stage.Targets[targetIndex+1]
 		r.logger.Warn("LLM fallback selected",
 			"article_id", call.ArticleID, "stage", call.Stage,
@@ -257,8 +236,8 @@ func (r *Router) NewStageChatFactory(stages ...string) *StageChatFactory {
 	return &StageChatFactory{router: r, stages: stages}
 }
 
-// NewIsolatedChatFactory — то же самое, но первое сообщение чата просит провайдера начать
-// новую беседу. Нужно там, где чатов на статью несколько и граница между ними значима.
+// NewIsolatedChatFactory — то же, что NewStageChatFactory, но первое сообщение чата
+// просит провайдера начать новую беседу.
 func (r *Router) NewIsolatedChatFactory(stages ...string) *StageChatFactory {
 	return &StageChatFactory{router: r, stages: stages, isolated: true}
 }
@@ -266,8 +245,7 @@ func (r *Router) NewIsolatedChatFactory(stages ...string) *StageChatFactory {
 type StageChatFactory struct {
 	router *Router
 	stages []string
-	// isolated включает NewChat на первом сообщении. По умолчанию выключен: чат task_1
-	// продолжает беседу, начатую предыдущими стадиями статьи.
+	// isolated включает NewChat на первом сообщении.
 	isolated bool
 }
 
@@ -275,9 +253,7 @@ func (f *StageChatFactory) NewChat(_ context.Context, articleID int64) (Chat, er
 	return &stageChat{factory: f, articleID: articleID}, nil
 }
 
-// NewChatWithHistory creates a chat that already contains the previous messages of the same
-// article. Возобновлённая стадия видит тот же контекст, что и продолжение живого чата, и при
-// этом не требует повторного обращения к модели за уже полученным ответом.
+// NewChatWithHistory creates a chat that already contains the previous messages of the same article.
 func (f *StageChatFactory) NewChatWithHistory(_ context.Context, articleID int64, history ...Message) (Chat, error) {
 	return &stageChat{
 		factory: f, articleID: articleID,
@@ -291,14 +267,11 @@ type stageChat struct {
 	factory   *StageChatFactory
 	articleID int64
 	next      int
-	// stageAt — слот стадии для следующего сообщения. Обычно он идёт вровень с next, но
-	// расходится с ним после SkipStage: стадия, которой отвели слоты под продолжения,
-	// снимает неиспользованные, и следующее сообщение уходит со своим именем стадии.
+	// stageAt — слот стадии для следующего сообщения; после SkipStage расходится с next.
 	stageAt int
 	history []Message
 	closed  bool
-	// bound — target, ответивший на первое сообщение чата. Последующие стадии идут к нему же:
-	// продолжение диалога не должно попадать к другой модели, чем его начало.
+	// bound — target, ответивший на первое сообщение; последующие стадии идут к нему же.
 	bound *config.LLMTargetConfig
 }
 type Message struct{ Role, Content string }
@@ -313,8 +286,7 @@ func (c *stageChat) Generate(ctx context.Context, prompt string) (Response, erro
 	var transcript strings.Builder
 	switch {
 	case len(c.history) == 0 || c.keepsContext():
-		// Провайдер, который держит один диалог на статью, уже видит предыдущие стадии как
-		// историю. Повторная склейка транскрипта отправила бы тот же текст второй раз.
+		// Провайдер с одним диалогом на статью уже видит историю; транскрипт не склеиваем.
 		transcript.WriteString(prompt)
 	default:
 		for _, message := range c.history {
@@ -345,14 +317,8 @@ func (c *stageChat) Generate(ctx context.Context, prompt string) (Response, erro
 	return result.Response, nil
 }
 
-// SkipStage снимает неиспользованные слоты названной стадии.
-//
-// Стадии раздаются сообщениям по порядку, а стадия, которая умеет дописывать оборванный
-// ответ, резервирует слоты под продолжения заранее — иначе их негде взять. Не понадобились
-// они почти всегда, и снять их обязана сама стадия: иначе следующее сообщение чата уйдёт с
-// чужим именем — с чужим промптом-регламентом, режимом ответа и сроками.
-//
-// Метод не трогает историю и счётчик сообщений: пропускается слот расписания, а не сообщение.
+// SkipStage снимает неиспользованные слоты названной стадии (зарезервированные под
+// продолжения), не трогая историю и счётчик сообщений.
 func (c *stageChat) SkipStage(stage string) {
 	for c.stageAt < len(c.factory.stages) && c.factory.stages[c.stageAt] == stage {
 		c.stageAt++
@@ -361,7 +327,6 @@ func (c *stageChat) SkipStage(stage string) {
 
 func (c *stageChat) Close() error { c.closed = true; c.history = nil; return nil }
 
-// keepsContext сообщает, хранит ли выбранный провайдер историю диалога на своей стороне.
 func (c *stageChat) keepsContext() bool {
 	if c.bound == nil {
 		return false
@@ -369,8 +334,7 @@ func (c *stageChat) keepsContext() bool {
 	return c.factory.router.config.Providers[c.bound.Provider].SingleChatPerArticle
 }
 
-// generateOnTarget выполняет стадию на заранее выбранном target, без перебора остальных.
-// Повторы внутри самого target сохраняются, fallback на другого провайдера — нет.
+// generateOnTarget выполняет стадию на заранее выбранном target: с повторами, без fallback.
 func (r *Router) generateOnTarget(ctx context.Context, call Call, prompt string, target config.LLMTargetConfig) (RoutedResponse, error) {
 	stage, found := r.config.Stages[call.Stage]
 	if !found {
@@ -384,10 +348,8 @@ func (r *Router) generateTarget(ctx context.Context, call Call, prompt string, s
 	if !found {
 		return RoutedResponse{}, fmt.Errorf("LLM provider %q is not registered", target.Provider)
 	}
-	// Документ стадии разрешается здесь, а не при загрузке конфигурации: файл на диске
-	// живёт своей жизнью, и путь к нему обязан быть свежим на момент запроса. Отказ здесь
-	// окончательный — обычная ошибка, а не StatusError, поэтому ни повтора, ни перехода к
-	// следующему провайдеру не будет: другой провайдер тот же файл тоже не найдёт.
+	// Документ разрешается на момент запроса, а не при загрузке конфигурации. Ошибка —
+	// не StatusError: ни повтора, ни fallback, другой провайдер файл тоже не найдёт.
 	attachments, err := config.ResolveStageAttachments(call.Stage, stage.AttachmentsDir)
 	if err != nil {
 		return RoutedResponse{}, err
@@ -406,8 +368,7 @@ func (r *Router) generateTarget(ctx context.Context, call Call, prompt string, s
 		NewChat: call.NewChat, Attachments: attachments, Mode: stage.Mode, Search: stage.Search,
 		Stage: call.Stage,
 	}
-	// Самоограничение провайдера выдерживается до наложения таймаута стадии: пауза между
-	// запросами — не работа модели, и вычитать её из бюджета генерации нельзя.
+	// Пауза провайдера выдерживается до таймаута стадии: из бюджета генерации её не вычитаем.
 	if pacer, ok := client.(interface {
 		WaitBeforeRequest(context.Context) error
 	}); ok {
@@ -438,10 +399,7 @@ func (r *Router) generateTarget(ctx context.Context, call Call, prompt string, s
 			"remaining_ms", remaining.Milliseconds(), "attempt_timeout_ms", attemptTimeout.Milliseconds(),
 		)
 		started := time.Now()
-		// Попытка ограничена отдельно от стадии: без этого первая же зависшая попытка
-		// забирала весь бюджет, и до повтора дело не доходило. Родителем остаётся stageCtx,
-		// поэтому попытка не может пережить стадию, а без attempt_timeout срок у неё
-		// прежний — весь остаток бюджета.
+		// Попытка ограничена отдельно от стадии, чтобы зависшая не съела бюджет повторов.
 		attemptCtx, cancelAttempt := context.WithTimeout(stageCtx, attemptTimeout)
 		stopHeartbeat := r.startHeartbeat(attemptCtx, call, target.Provider, target.Model, attempt, started)
 		response, requestErr := client.Generate(attemptCtx, request)
@@ -467,19 +425,15 @@ func (r *Router) generateTarget(ctx context.Context, call Call, prompt string, s
 	return RoutedResponse{}, fmt.Errorf("LLM target failed")
 }
 
-// browserProviderType — тип провайдера, работающего через реальный браузер. Его повторы
-// разносятся во времени сильнее остальных: за частоту обращений блокируют аккаунт.
+// browserProviderType — браузерный провайдер; повторы реже: за частоту обращений блокируют аккаунт.
 const browserProviderType = "deepseek_web"
 
-// browserRetryDelays задаёт паузы перед повторами для браузерных провайдеров.
 var browserRetryDelays = []time.Duration{5 * time.Second, 15 * time.Second, 30 * time.Second}
 
-// overloadedRetryDelays задаёт паузы для перегруженного провайдера. Секунды здесь бесполезны:
-// отказ держится минутами, и быстрый повтор только тратит одну из трёх попыток впустую.
+// overloadedRetryDelays — паузы для перегруженного провайдера: отказ держится минутами.
 var overloadedRetryDelays = []time.Duration{time.Minute, 3 * time.Minute, 5 * time.Minute}
 
-// retryDelay возвращает паузу перед следующей попыткой того же target. Вид отказа важнее
-// провайдера: перегрузку пережидают дольше, чем сбой браузера.
+// retryDelay возвращает паузу перед следующей попыткой; вид отказа важнее провайдера.
 func (r *Router) retryDelay(provider string, attempt int, err error) time.Duration {
 	if err != nil && errorTypeOf(err) == ErrorTypeOverloaded {
 		return delayFromTable(overloadedRetryDelays, attempt)
@@ -490,7 +444,6 @@ func (r *Router) retryDelay(provider string, attempt int, err error) time.Durati
 	return r.baseDelay * time.Duration(1<<(attempt-1))
 }
 
-// delayFromTable выбирает паузу по номеру попытки, удерживая номер в границах таблицы.
 func delayFromTable(delays []time.Duration, attempt int) time.Duration {
 	index := attempt - 1
 	if index >= len(delays) {
@@ -509,8 +462,7 @@ func isFallbackEligible(err error) bool {
 	var statusErr *StatusError
 	if errors.As(err, &statusErr) {
 		switch statusErr.Type {
-		// Отказ авторизации и исчерпанная оплата не лечатся повтором у того же провайдера,
-		// но резервный провайдер от них не страдает — переключаемся, если он настроен.
+		// Не лечатся повтором у того же провайдера, но не мешают резервному.
 		case ErrorTypeQuotaExhausted, ErrorTypeRateLimit, ErrorTypeUnauthorized, ErrorTypeCreditsExhausted:
 			return true
 		}
