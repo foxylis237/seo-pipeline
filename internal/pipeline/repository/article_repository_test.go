@@ -125,16 +125,6 @@ func TestArticleRepositoryIdempotency(t *testing.T) {
 	if articles[0].ExternalID != "11" || articles[0].Slug != "new-slug" {
 		t.Fatalf("GetAll() не вернул Excel ID и slug: %+v", articles[0])
 	}
-	if err := repository.MarkArticlePromptBuilt(ctx, arsenkinArticle.ID); err != nil {
-		t.Fatal(err)
-	}
-	var currentStep string
-	if err := pool.QueryRow(ctx, `SELECT current_step FROM articles WHERE id = $1`, arsenkinArticle.ID).Scan(&currentStep); err != nil {
-		t.Fatal(err)
-	}
-	if currentStep != "article_generation" {
-		t.Fatalf("current_step = %q, want article_generation", currentStep)
-	}
 	const articlePath = "12-arsenkin/generated/article.txt"
 	const structurePath = "12-arsenkin/generated/structure.txt"
 	if err := repository.SaveStructurePath(ctx, arsenkinArticle.ID, structurePath); err != nil {
@@ -150,6 +140,7 @@ func TestArticleRepositoryIdempotency(t *testing.T) {
 	if savedStructurePath != structurePath || savedArticlePath != articlePath {
 		t.Fatalf("saved paths = %q, %q", savedStructurePath, savedArticlePath)
 	}
+	var currentStep string
 	if err := pool.QueryRow(ctx, `SELECT current_step FROM articles WHERE id = $1`, arsenkinArticle.ID).Scan(&currentStep); err != nil {
 		t.Fatal(err)
 	}

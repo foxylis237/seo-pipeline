@@ -334,8 +334,7 @@ func placeholders(from, count int) string {
 
 // coalesceAssignments собирает `колонка = COALESCE(article_inputs.колонка, EXCLUDED.колонка)`.
 //
-// Отличие от excludedAssignments — направление: тот перезаписывает, этот дозаполняет. Нужен
-// он ровно одному месту, импорту, и ровно одному случаю: в схеме появилась новая колонка, а
+// Нужен он ровно одному месту, импорту, и ровно одному случаю: в схеме появилась новая колонка, а
 // строки article_inputs уже есть, и в них по этой колонке NULL. Без дозаполнения такая
 // колонка досталась бы только статьям, импортированным после миграции, а всем прежним — лишь
 // через `reset`, то есть ценой стёртых артефактов.
@@ -349,15 +348,6 @@ func coalesceAssignments(table string, columns []string) string {
 	parts := make([]string, 0, len(columns))
 	for _, name := range columns {
 		parts = append(parts, fmt.Sprintf("%s = COALESCE(%s.%s, EXCLUDED.%s)", name, table, name, name))
-	}
-	return strings.Join(parts, ", ")
-}
-
-// excludedAssignments собирает `колонка = EXCLUDED.колонка` для ON CONFLICT DO UPDATE.
-func excludedAssignments(columns []string) string {
-	parts := make([]string, 0, len(columns))
-	for _, name := range columns {
-		parts = append(parts, name+" = EXCLUDED."+name)
 	}
 	return strings.Join(parts, ", ")
 }

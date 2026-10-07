@@ -452,84 +452,6 @@ func (r *ArticleRepository) Reset(ctx context.Context) error {
 	return nil
 }
 
-// Create сохраняет статью и её исходные данные в одной транзакции.
-func (r *ArticleRepository) Create(
-	ctx context.Context,
-	input article.Input,
-) (article.Article, error) {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return article.Article{}, fmt.Errorf("начать транзакцию: %w", err)
-	}
-
-	defer func() {
-		_ = tx.Rollback(ctx)
-	}()
-
-	var created article.Article
-
-	const createArticleQuery = `
-		INSERT INTO articles (
-			external_id,
-			title
-		)
-		VALUES ($1, $2)
-		ON CONFLICT (external_id) DO UPDATE
-		SET
-			title = EXCLUDED.title,
-			updated_at = NOW()
-		RETURNING
-			id,
-			external_id,
-			title,
-			status,
-			current_step,
-			error_message,
-			created_at,
-			updated_at
-	`
-
-	err = tx.QueryRow(
-		ctx,
-		createArticleQuery,
-		fmt.Sprint(input.ExcelID),
-		input.Title,
-	).Scan(
-		&created.ID,
-		&created.ExternalID,
-		&created.Title,
-		&created.Status,
-		&created.CurrentStep,
-		&created.ErrorMessage,
-		&created.CreatedAt,
-		&created.UpdatedAt,
-	)
-	if err != nil {
-		return article.Article{}, fmt.Errorf("сохранить статью: %w", err)
-	}
-
-	// Список колонок собирается из базового набора и необщих колонок задачи: запрос обязан
-	// называть ровно те колонки, которые есть в её схеме PostgreSQL.
-	inputColumns, inputValues := r.insertInputColumns(input)
-	createInputQuery := fmt.Sprintf(`
-		INSERT INTO article_inputs (article_id, %s)
-		VALUES ($1, %s)
-		ON CONFLICT (article_id) DO UPDATE
-		SET %s
-	`, strings.Join(inputColumns, ", "), placeholders(2, len(inputColumns)), excludedAssignments(inputColumns))
-
-	_, err = tx.Exec(ctx, createInputQuery, append([]any{created.ID}, inputValues...)...)
-	if err != nil {
-		return article.Article{}, fmt.Errorf("сохранить входные данные статьи: %w", err)
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return article.Article{}, fmt.Errorf("завершить транзакцию: %w", err)
-	}
-
-	return created, nil
-}
-
 // Import atomically inserts a new article and never updates an existing external_id.
 // The boolean reports whether a new article row was added.
 //
@@ -1042,23 +964,6 @@ func (r *ArticleRepository) SaveHTMLPath(ctx context.Context, articleID int64, h
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("завершить сохранение HTML: %w", err)
-	}
-	return nil
-}
-
-// MarkArticlePromptBuilt переводит статью к генерации после успешной сборки промпта.
-func (r *ArticleRepository) MarkArticlePromptBuilt(ctx context.Context, articleID int64) error {
-	const query = `
-		UPDATE articles
-		SET current_step = 'article_generation', error_message = NULL, updated_at = NOW()
-		WHERE id = $1
-	`
-	result, err := r.pool.Exec(ctx, query, articleID)
-	if err != nil {
-		return fmt.Errorf("обновить этап статьи после сборки промпта: %w", err)
-	}
-	if result.RowsAffected() != 1 {
-		return fmt.Errorf("статья %d не найдена при обновлении этапа", articleID)
 	}
 	return nil
 }
