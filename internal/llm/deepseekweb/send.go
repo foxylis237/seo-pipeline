@@ -6,8 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/foxylis237/seo-pipeline/internal/llm"
 	"github.com/mxschmitt/playwright-go"
+
+	"github.com/foxylis237/seo-pipeline/internal/llm"
 )
 
 const (

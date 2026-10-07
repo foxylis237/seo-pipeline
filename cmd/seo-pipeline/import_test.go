@@ -12,9 +12,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/xuri/excelize/v2"
+
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/article"
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/importer"
-	"github.com/xuri/excelize/v2"
 )
 
 type fakeArticleImporter struct {

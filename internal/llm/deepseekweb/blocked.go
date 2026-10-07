@@ -7,8 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/foxylis237/seo-pipeline/internal/llm"
 	"github.com/mxschmitt/playwright-go"
+
+	"github.com/foxylis237/seo-pipeline/internal/llm"
 )
 
 // blockedStateFileName лежит рядом с профилем, а не в БД: провайдер должен уметь отказать

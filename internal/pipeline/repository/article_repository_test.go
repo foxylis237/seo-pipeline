@@ -14,9 +14,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/foxylis237/seo-pipeline/internal/pipeline/article"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/foxylis237/seo-pipeline/internal/pipeline/article"
 )
 
 func TestArticleRepositoryIdempotency(t *testing.T) {

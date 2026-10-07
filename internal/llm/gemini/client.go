@@ -9,8 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/foxylis237/seo-pipeline/internal/llm"
 	"google.golang.org/genai"
+
+	"github.com/foxylis237/seo-pipeline/internal/llm"
 )
 
 const requestTimeout = 5 * time.Minute

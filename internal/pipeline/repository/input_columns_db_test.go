@@ -10,9 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/foxylis237/seo-pipeline/internal/pipeline/article"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/foxylis237/seo-pipeline/internal/pipeline/article"
 )
 
 // pprof2Columns — набор колонок, который объявляет профиль pprof_2. Дублируется здесь

@@ -10,9 +10,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/foxylis237/seo-pipeline/internal/pipeline/article"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/foxylis237/seo-pipeline/internal/pipeline/article"
 )
 
 // ArticleRepository работает со статьями в PostgreSQL.

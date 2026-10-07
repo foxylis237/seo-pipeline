@@ -5,8 +5,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/foxylis237/seo-pipeline/internal/pipeline/article"
 	"github.com/xuri/excelize/v2"
+
+	"github.com/foxylis237/seo-pipeline/internal/pipeline/article"
 )
 
 const defaultSheetName = "Лист1"
