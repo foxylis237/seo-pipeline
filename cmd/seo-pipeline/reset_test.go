@@ -40,6 +40,7 @@ var (
 	resetOutputDir    = filepath.FromSlash(resetProfile.OutputDir)
 	importReportsDir  = filepath.FromSlash(resetProfile.ImportReportsDir)
 	debugArtifactsDir = filepath.FromSlash(resetProfile.DiagnosticsDir)
+	coverImagesDir    = filepath.Join(filepath.FromSlash(resetProfile.InputDir), articleImagesSubdir)
 )
 
 func mustProfile(name string) tasks.Profile {
@@ -61,6 +62,7 @@ func newResetProject(t *testing.T) {
 		filepath.Join(resetOutputDir, "dry-run"),
 		importReportsDir,
 		filepath.Join(debugArtifactsDir, "keysso"),
+		coverImagesDir,
 	}
 	for _, directory := range directories {
 		if err := os.MkdirAll(directory, 0o755); err != nil {
@@ -73,6 +75,7 @@ func newResetProject(t *testing.T) {
 		filepath.Join(resetOutputDir, "dry-run", "report.json"),
 		filepath.Join(importReportsDir, "latest.json"),
 		filepath.Join(debugArtifactsDir, "keysso", "page.html"),
+		filepath.Join(coverImagesDir, "1.webp"),
 	}
 	for _, file := range files {
 		if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
@@ -86,6 +89,7 @@ func newResetOptions(out io.Writer, in io.Reader, interactive bool) resetOptions
 		OutputDir:        resetOutputDir,
 		ImportReportsDir: importReportsDir,
 		DiagnosticsDir:   debugArtifactsDir,
+		ImagesDir:        coverImagesDir,
 		DatabaseURL:      "postgres://seo:sup3rsecret@localhost:5432/seo?sslmode=disable",
 		Interactive:      interactive,
 		In:               in,
@@ -95,7 +99,7 @@ func newResetOptions(out io.Writer, in io.Reader, interactive bool) resetOptions
 
 func assertResetDirectoriesEmpty(t *testing.T) {
 	t.Helper()
-	for _, directory := range []string{resetOutputDir, importReportsDir, debugArtifactsDir} {
+	for _, directory := range []string{resetOutputDir, importReportsDir, debugArtifactsDir, coverImagesDir} {
 		entries, err := os.ReadDir(directory)
 		if err != nil {
 			t.Fatalf("каталог %s должен остаться на месте: %v", directory, err)

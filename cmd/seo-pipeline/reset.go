@@ -41,7 +41,10 @@ type resetOptions struct {
 	// быть не должно: reset одной задачи не имеет права стирать данные другой.
 	ImportReportsDir string
 	DiagnosticsDir   string
-	DatabaseURL      string
+	// ImagesDir — covers named by external_id; the next batch starts from id 1 again and
+	// would pick up the previous batch's pictures.
+	ImagesDir   string
+	DatabaseURL string
 	// AssumeYes — флаг --yes: подтверждение без вопроса, для автоматизации.
 	AssumeYes bool
 	// Interactive сообщает, что In — терминал. Вычисляется вызывающим, чтобы команда
@@ -195,6 +198,9 @@ func runReset(ctx context.Context, articleRepository resetRepository, options re
 		{label: filepath.ToSlash(outputDir) + "/", path: outputDir},
 		{label: options.ImportReportsDir + "/", path: options.ImportReportsDir},
 		{label: options.DiagnosticsDir + "/", path: options.DiagnosticsDir},
+	}
+	if options.ImagesDir != "" {
+		targets = append(targets, resetTarget{label: options.ImagesDir + "/", path: options.ImagesDir})
 	}
 	for index := range targets {
 		entries, countErr := countDirectoryEntries(targets[index].path)

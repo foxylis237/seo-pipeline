@@ -259,6 +259,7 @@ func main() {
 			OutputDir:        cfg.OutputDir,
 			ImportReportsDir: profile.ImportReportsDir,
 			DiagnosticsDir:   profile.DiagnosticsDir,
+			ImagesDir:        filepath.Join(profile.InputDir, articleImagesSubdir),
 			DatabaseURL:      databaseURL,
 			AssumeYes:        command.AssumeYes,
 			Interactive:      isCharDevice(os.Stdin),
