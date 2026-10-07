@@ -239,9 +239,9 @@ const (
 	// не берёт свой класс.
 	noticeStyle = `<div style="border-left:4px solid #1a3d6d;background:#f5f7fa;padding:14px 18px;margin:22px 0;border-radius:0 8px 8px 0;">`
 	// scrollStyle — обёртка таблицы: широкая таблица обязана прокручиваться внутри себя.
-	// Without max-width the service-page grid column grows to the table width and the
-	// whole page scrolls sideways on a phone.
-	scrollStyle = `<div style="overflow-x:auto;max-width:calc(100vw - 40px);">`
+	// width:0 + min-width:100% keeps the table out of the column's min-content, so a grid
+	// column on a service page cannot grow to the table width at any gutter size.
+	scrollStyle = `<div style="overflow-x:auto;width:0;min-width:100%;">`
 )
 
 var tableBlockRE = regexp.MustCompile(`(?is)<table\b.*?</table>`)
