@@ -6,9 +6,7 @@ import (
 )
 
 // ArticleInfo is publication metadata parsed from the LLM response.
-//
-// Меток здесь нет намеренно: они приходят колонкой tags из Excel и моделью не генерируются
-// (миграция 000003). Стадия info отвечает за TL;DR и FAQ.
+// Меток здесь нет: они приходят колонкой tags из Excel.
 type ArticleInfo struct {
 	TLDR           string
 	FAQ            string
@@ -95,11 +93,7 @@ func parseTolerantArticleInfo(text string) ArticleInfo {
 	current := sectionUnknown
 
 	for _, line := range lines {
-		// Пара «Вопрос: … / Ответ: …» открывает FAQ и без строки-заголовка «FAQ:». Модель
-		// ставит её не всегда: у одной статьи заголовок есть, у соседней вопросы идут сразу,
-		// и тогда весь блок уходил в TL;DR, а FAQ оставался пустым — публикация такую статью
-		// не принимает. Форма записи здесь ровно та же договорённость между стадиями, что и
-		// «H2 - Название» в тексте статьи, и приводит к ней тоже код, а не промпт.
+		// «Вопрос: …» открывает FAQ и без заголовка «FAQ:»: модель его ставит не всегда.
 		if current != sectionFAQ && isFAQQuestionLine(line) {
 			current = sectionFAQ
 			values[current] = append(values[current], line)
@@ -133,9 +127,7 @@ func parseTolerantArticleInfo(text string) ArticleInfo {
 	}
 }
 
-// isFAQQuestionLine сообщает, что строка открывает вопрос FAQ. Проверяется только начало
-// строки: ответ («Ответ:») сам секцию не открывает, иначе оборванный блок без вопроса
-// объявлялся бы разделом.
+// isFAQQuestionLine сообщает, что строка открывает вопрос FAQ; «Ответ:» секцию не открывает.
 func isFAQQuestionLine(line string) bool {
 	trimmed := strings.TrimSpace(line)
 	for strings.HasPrefix(trimmed, "#") {
@@ -158,8 +150,7 @@ func parseInfoHeading(line string) (infoSection, string, bool) {
 	}
 	normalizedName := strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(name), ";", ""))
 	switch normalizedName {
-	// Метки моделью больше не запрашиваются. Заголовок «Метки» в ответе не распознаётся и
-	// уходит в AdditionalInfo — так видно, что промпт разошёлся с контрактом стадии.
+	// «Метки» не распознаются и уходят в AdditionalInfo: так видно расхождение промпта с контрактом.
 	case "TLDR":
 		return sectionTLDR, strings.TrimSpace(inline), true
 	case "FAQ":

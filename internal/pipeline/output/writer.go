@@ -405,8 +405,7 @@ func DirectoryName(externalID, slug string) string {
 	return externalID + "-" + slug
 }
 
-// Paths returns the artifact paths of one article relative to the output root. Exported so
-// that assembling a folder from already produced artifacts does not restate the layout.
+// Paths returns the artifact paths of one article relative to the output root.
 func Paths(externalID, slug string) (ArticlePaths, error) {
 	if err := validatePathPart("external ID", externalID); err != nil {
 		return ArticlePaths{}, err
@@ -440,26 +439,14 @@ func validatePathPart(name, value string) error {
 	return nil
 }
 
-// File — один артефакт, который публикуется вместе с остальными.
-//
-// Путь относителен корня артефактов и называется вызывающим целиком: слоты ArticlePaths
-// описывают этапы генерации статьи, и задаче с другой раскладкой они не подходят. Заводить
-// им по паре Stage/Save на каждый новый файл значило бы учить движок чужим этапам.
+// File — один артефакт с путём относительно корня артефактов, который называет вызывающий.
 type File struct {
 	Path    string
 	Content []byte
 }
 
-// StageFiles готовит к публикации произвольные артефакты одной статьи.
-//
-// Нужен задачам, у которых свой набор файлов и своя таблица: атомарность им нужна та же
-// самая — файлы публикуются переименованием, а строка в базе пишется в том же Commit и
-// откатывает файлы при своей ошибке, — а слоты ArticlePaths им называть нечем. Поэтому
-// Paths у результата остаётся пустым: раскладку знает вызывающий, и второй её копии здесь
-// быть не должно.
-//
-// Каталоги создаются здесь же: os.CreateTemp кладёт временный файл рядом с будущим, и без
-// каталога публикация упала бы на первом артефакте.
+// StageFiles готовит к публикации через Commit произвольные артефакты одной статьи; Paths результата пуст.
+// Каталоги создаются заранее: os.CreateTemp кладёт временный файл рядом с будущим.
 func (w *Writer) StageFiles(files ...File) (*PendingArtifact, error) {
 	if len(files) == 0 {
 		return nil, fmt.Errorf("no artifacts to stage")

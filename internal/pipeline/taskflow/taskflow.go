@@ -1,13 +1,6 @@
-// Package taskflow даёт общий каркас потока генерации задачи.
-//
-// Задача со своим потоком отличается от соседней порядком чатов, набором стадий и промптами.
-// Всё остальное у них одинаково: как открыть диалог, как отрендерить промпт стадии, как
-// проверить ответ на пустоту, как записать ошибку в состояние статьи и как отдать основной
-// промпт в очередь публикации. Раньше это лежало копией в каждом пакете задачи, и правка
-// поведения требовала одинаковой правки в двух местах.
-//
-// Пакет о задачах не знает: имён стадий, порядка сообщений и слотов артефактов здесь нет —
-// их держит поток самой задачи.
+// Package taskflow даёт общий каркас потока генерации задачи: открыть диалог, отрендерить
+// промпт, проверить ответ на пустоту, записать ошибку статьи, отдать промпт в публикацию.
+// Порядок чатов, стадии и слоты артефактов держит поток самой задачи.
 package taskflow
 
 import (
@@ -21,18 +14,16 @@ import (
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/generation"
 )
 
-// completionMarker — маркер конца ответа, который модель ставит по просьбе промпта. В
-// артефакт он не попадает ни у одной задачи.
+// completionMarker — маркер конца ответа, который модель ставит по просьбе промпта; из ответа вырезается.
 const completionMarker = "[[ARTICLE_COMPLETE]]"
 
-// Repository — то, что каркас требует от хранилища. Всё остальное — сохранение путей,
-// метаданных и переходы этапов — остаётся у потока задачи: слоты артефактов у задач разные.
+// Repository — то, что каркас требует от хранилища.
 type Repository interface {
 	GetSavedGenerationInput(ctx context.Context, externalID string) (article.SavedGenerationInput, error)
 	SaveError(ctx context.Context, articleID int64, processingErr error) error
 }
 
-// Writer — то, что каркас требует от файлового слоя: прочитать уже сохранённый артефакт.
+// Writer читает сохранённый артефакт.
 type Writer interface {
 	Read(relativePath string) (string, error)
 }
@@ -42,9 +33,7 @@ type PromptRenderer interface {
 	Prepare(call llm.Call) (llm.PreparedCall, error)
 }
 
-// PromptPublisher выгружает основной промпт наружу. Необязателен: без него поток работает
-// ровно так же. Контракт — вернуть управление сразу и не поднимать свои ошибки в генерацию:
-// за генерацию уже заплачено, и отказ Google не имеет права её уронить.
+// PromptPublisher выгружает основной промпт наружу; возвращает управление сразу и ошибок не поднимает.
 type PromptPublisher interface {
 	PublishArticlePrompt(job generation.ArticlePromptJob)
 }
@@ -62,8 +51,7 @@ func (e *StageError) Error() string {
 }
 func (e *StageError) Unwrap() error { return e.Err }
 
-// Base — общая часть потока задачи. Поток встраивает его и добавляет своё: порядок чатов,
-// данные промптов и слоты, в которые ложатся артефакты.
+// Base — общая часть потока задачи; поток встраивает его.
 type Base struct {
 	repository Repository
 	writer     Writer
@@ -117,7 +105,7 @@ func (b *Base) Answer(ctx context.Context, send Send, prompt, stage string) (str
 	return text, ctx.Err()
 }
 
-// Render собирает промпт стадии и не отдаёт пустой: пустым он доходит до модели молча.
+// Render собирает промпт стадии; пустой промпт — ошибка.
 func (b *Base) Render(stage string, data any) (string, error) {
 	prepared, err := b.prompts.Prepare(llm.Call{Stage: stage, Data: data})
 	if err != nil {
@@ -137,8 +125,7 @@ func (b *Base) PublishPrompt(job generation.ArticlePromptJob) {
 	b.publisher.PublishArticlePrompt(job)
 }
 
-// CloseChat завершает диалог. Отказ провайдера закрыть беседу статью не роняет: артефакты
-// уже сохранены, а незакрытый чат — проблема сессии, а не генерации.
+// CloseChat завершает диалог; отказ закрыть только пишется в лог.
 func (b *Base) CloseChat(chat Chat, logger *slog.Logger, stage string) {
 	if err := chat.Close(); err != nil {
 		logger.Warn("не удалось закрыть чат", "stage", stage, "error", err)
@@ -162,8 +149,7 @@ func (b *Base) SavedStructure(ctx context.Context, externalID string) (string, e
 	return b.writer.Read(path)
 }
 
-// SavedStructurePath возвращает путь структуры и отказывается работать без неё: следующая
-// стадия без структуры собрала бы промпт с пустым разделом и не заметила бы этого.
+// SavedStructurePath возвращает путь структуры; без сохранённой структуры — ошибка.
 func (b *Base) SavedStructurePath(ctx context.Context, externalID string) (string, error) {
 	saved, err := b.repository.GetSavedGenerationInput(ctx, externalID)
 	if err != nil {
@@ -175,11 +161,8 @@ func (b *Base) SavedStructurePath(ctx context.Context, externalID string) (strin
 	return saved.StructurePath, nil
 }
 
-// Fail сохраняет ошибку в состоянии статьи и возвращает её наверх с контекстом стадии.
-//
-// Отменённый контекст в состояние не пишется: это не отказ статьи, а остановка процесса, и
-// сохранять её как ошибку значит на следующем запуске показывать человеку «прогон прерван»
-// вместо настоящей причины.
+// Fail сохраняет ошибку в состоянии статьи и возвращает её с контекстом стадии.
+// При отменённом контексте ошибка не сохраняется: это остановка процесса, а не отказ статьи.
 func (b *Base) Fail(ctx context.Context, logger *slog.Logger, selected article.Article, stage string, err error) error {
 	wrapped := &StageError{ArticleID: selected.ID, ExternalID: selected.ExternalID, Stage: stage, Err: err}
 	if ctx.Err() == nil {
@@ -191,8 +174,7 @@ func (b *Base) Fail(ctx context.Context, logger *slog.Logger, selected article.A
 	return wrapped
 }
 
-// StageFailure собирает ошибку стадии, которой ещё не с чем идти в состояние статьи: статья
-// не прочитана, и её идентичности у потока нет.
+// StageFailure собирает ошибку стадии до того, как статья прочитана.
 func StageFailure(externalID, stage string, err error) error {
 	return &StageError{ExternalID: externalID, Stage: stage, Err: err}
 }

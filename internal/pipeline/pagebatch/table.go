@@ -9,11 +9,7 @@ import (
 	"github.com/xuri/excelize/v2"
 )
 
-// ParseKind — каким разбором прочитан входной файл.
-//
-// Это не деталь реализации, а то, что обязано попасть в лог: у книги с четырьмя колонками и
-// у списка строк правила разные, и молча прочитать идентификатор записи как индекс статьи
-// нельзя — ошибка обнаружится только тем, что проверена чужая страница.
+// ParseKind — каким разбором прочитан входной файл; пишется в лог.
 type ParseKind string
 
 const (
@@ -31,15 +27,8 @@ const (
 	columnTopic      = "topic"
 )
 
-// columnAliases сводит заголовки книги к именам, которыми колонки называет код.
-//
-// Таблицей, а не ветками в чтении строки, — по образцу importer.columnAliases: новая книга
-// добавляет строку в карту, а не правку разбора. Ключи уже приведены к нижнему регистру и
-// обрезаны.
-//
-// «id» отдан индексу статьи, а не записи: в книге он стоит первым столбцом и означает то же,
-// что «индекс», — то, чем статью называют в командах. Идентификатор записи блога называется
-// в заголовке явно, иначе два числа в строке не различить.
+// columnAliases сводит заголовки книги (в нижнем регистре, обрезанные) к каноническим именам колонок.
+// «id» — индекс статьи, а не записи: идентификатор записи называется в заголовке явно.
 var columnAliases = map[string]string{
 	"индекс":      columnExternalID,
 	"номер":       columnExternalID,
@@ -65,16 +54,8 @@ var columnAliases = map[string]string{
 	"тематика": columnTopic,
 }
 
-// ReadTable читает вход задачи, разбирая книгу Excel по колонкам с заголовками.
-//
-// Отличие от ReadSources одно и содержательное: во входном файле может быть четыре значимых
-// колонки — индекс, идентификатор записи, ссылка и тема, — а построчное правило «первое число
-// до первой ссылки» на двух числах подряд ломается: оно возьмёт индексом то, что первым
-// попалось. Поэтому у книги сначала спрашивают заголовки.
-//
-// Заголовков нет или они не опознаны — это не ошибка, а прежний вход: файл из двух колонок
-// обязан читаться как раньше, и разбор откатывается на построчный. Он же остаётся
-// единственным у форматов без колонок — HTML, CSV, текста.
+// ReadTable читает вход, разбирая книгу Excel по заголовкам колонок, а без опознанной шапки и у
+// прочих форматов — построчно. Построчное правило на двух числах подряд (индекс и ID записи) ломается.
 func ReadTable(path string) ([]Source, ParseKind, error) {
 	if !workbookPath(path) {
 		sources, err := ReadSources(path)
@@ -96,10 +77,7 @@ func workbookPath(path string) bool {
 	return strings.HasSuffix(lowered, ".xlsx") || strings.HasSuffix(lowered, ".xlsm")
 }
 
-// parseWorkbookColumns разбирает книгу по заголовкам.
-//
-// Второе возвращаемое значение отвечает, узнала ли шапка себя: без колонок индекса и ссылки
-// это не таблица входа, а обычный список строк, и решать за него разбор не вправе.
+// parseWorkbookColumns разбирает книгу по заголовкам; false — в шапке нет колонок индекса и ссылки.
 func parseWorkbookColumns(path string) ([]Source, bool, error) {
 	book, err := excelize.OpenFile(path)
 	if err != nil {
@@ -135,10 +113,7 @@ func parseWorkbookColumns(path string) ([]Source, bool, error) {
 	return sources, true, nil
 }
 
-// columnIndexes сводит шапку книги к номерам колонок.
-//
-// Повторный заголовок — ошибка, а не последнее выигравшее значение: две колонки «ссылка»
-// означают, что человек не дописал шапку, и угадывать, какая из них настоящая, нельзя.
+// columnIndexes сводит шапку книги к номерам колонок; повторный заголовок — ошибка.
 func columnIndexes(header []string) (map[string]int, error) {
 	indexes := make(map[string]int, len(header))
 	for index, value := range header {
@@ -156,11 +131,7 @@ func columnIndexes(header []string) (map[string]int, error) {
 	return indexes, nil
 }
 
-// sourcesFromRows читает строки книги по уже найденным колонкам.
-//
-// Строгость та же, что у построчного разбора: нераспознанная строка называется в ошибке с
-// номером, а не пропускается молча. Пропущенная статья видна только по её отсутствию в
-// отчётах, и обнаруживается через недели.
+// sourcesFromRows читает строки книги по найденным колонкам; нераспознанная строка — ошибка с номером.
 func sourcesFromRows(book *excelize.File, sheet string, rows [][]string, indexes map[string]int) ([]Source, error) {
 	sources := make([]Source, 0, len(rows)-1)
 	seen := make(map[string]int, len(rows))
@@ -226,8 +197,7 @@ func sourcesFromRows(book *excelize.File, sheet string, rows [][]string, indexes
 	return sources, nil
 }
 
-// parsePostID читает идентификатор записи. Пустая ячейка — законное состояние: тогда запись
-// ищут по слагу, как раньше.
+// parsePostID читает идентификатор записи; пустая ячейка даёт ноль.
 func parsePostID(value string) (int64, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -243,10 +213,7 @@ func parsePostID(value string) (int64, error) {
 	return postID, nil
 }
 
-// cellURL берёт адрес из ячейки ссылки: сначала текст, потом гиперссылку под ним.
-//
-// Порядок такой потому, что в книге адрес нередко спрятан под названием статьи, и тогда в
-// тексте ячейки ссылки нет вовсе.
+// cellURL берёт адрес из текста ячейки, а без него — из гиперссылки под ним.
 func cellURL(book *excelize.File, sheet string, row []string, rowIndex, columnIndex int) string {
 	if address := urlPattern.FindString(cell(row, columnIndex)); address != "" {
 		return strings.TrimRight(address, ".,;")

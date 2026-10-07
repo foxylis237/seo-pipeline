@@ -1,10 +1,7 @@
 package article
 
-// Trace is the identity of one article read straight from PostgreSQL.
-//
-// It exists only for diagnostics: every external step of the pipeline reads it before and
-// after the call, so a mismatch between the article being processed and the data it receives
-// becomes visible in the logs instead of silently reaching article_research.
+// Trace is the identity of one article read straight from PostgreSQL, logged around external
+// steps so a mismatch between the article and the data it receives shows up in the logs.
 type Trace struct {
 	ArticleID    int64
 	ExternalID   string

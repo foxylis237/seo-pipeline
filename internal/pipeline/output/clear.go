@@ -9,21 +9,12 @@ import (
 	"strings"
 )
 
-// clearKeepsSubdirectories перечисляет то, что переживает очистку статьи. Список пуст: цель
-// команды — состояние «статья не генерировалась», и уцелевшие логи ей противоречат. Строка
-// вида status=completed в логе очищенной статьи — уже неправда, и прочитавший её получает
-// неверную картину вместо истории.
-//
-// Список, а не константа, намеренно: вернуть логи — это одна строка здесь, без правки логики.
+// clearKeepsSubdirectories перечисляет то, что переживает очистку статьи; пуст — логи
+// очищенной статьи с status=completed были бы неправдой.
 var clearKeepsSubdirectories = []string{}
 
-// findArticleDirectoryForClear ищет каталог статьи по external_id и отличает «не найден» от
-// ошибки. Отдельный поиск, а не resolveArticleDirectory: тому отсутствие каталога — ошибка,
-// потому что он обслуживает этапы, которым есть что писать. Очистке отсутствие каталога —
-// штатный случай, и менять общий резолвер ради неё нельзя: на нём висят все остальные этапы.
-//
-// Несколько каталогов на один external_id остаются ошибкой и здесь: гадать нельзя, стереть
-// чужой каталог — ровно та потеря данных, от которой команда должна защищать.
+// findArticleDirectoryForClear ищет каталог статьи по external_id; в отличие от
+// resolveArticleDirectory отсутствие каталога не ошибка, а несколько каталогов — ошибка.
 func (w *Writer) findArticleDirectoryForClear(externalID string) (string, bool, error) {
 	if err := validatePathPart("external ID", externalID); err != nil {
 		return "", false, err
@@ -53,8 +44,7 @@ func (w *Writer) findArticleDirectoryForClear(externalID string) (string, bool, 
 	}
 }
 
-// clearableEntries возвращает элементы верхнего уровня каталога статьи, которые подлежат
-// удалению, — то есть всё, кроме сохраняемого.
+// clearableEntries возвращает элементы верхнего уровня каталога статьи, кроме сохраняемых.
 func clearableEntries(root string) ([]string, error) {
 	entries, err := os.ReadDir(root)
 	if err != nil {
@@ -78,16 +68,9 @@ func clearableEntries(root string) ([]string, error) {
 	return names, nil
 }
 
-// ClearArticleArtifacts удаляет с диска всё, что статья произвела после импорта, включая
-// опустевший каталог статьи. Возвращает удалённые пути относительно корня вывода.
-//
-// Удаляется всё лишнее, а не перечисленный список артефактов: в каталоге статьи не лежит
-// ничего, кроме произведённого пайплайном, а список пришлось бы дополнять при каждом новом
-// этапе — и он молча отставал бы. ResetGeneratedArtifacts работает наоборот, по списку, но у
-// него другая задача: сохранить research и отдать статью в regenerate.
-//
-// Отсутствие каталога — не ошибка: статью могли импортировать и ни разу не запускать, и это
-// ровно то состояние, к которому команда ведёт. Очистка идемпотентна.
+// ClearArticleArtifacts удаляет всё содержимое каталога статьи и сам опустевший каталог,
+// возвращая удалённые пути относительно корня вывода; отсутствие каталога — не ошибка.
+// Удаляется всё, а не список артефактов: список отставал бы от новых этапов.
 func (w *Writer) ClearArticleArtifacts(externalID string) ([]string, error) {
 	directory, found, err := w.findArticleDirectoryForClear(externalID)
 	if err != nil || !found {
@@ -111,23 +94,19 @@ func (w *Writer) ClearArticleArtifacts(externalID string) ([]string, error) {
 		removed = append(removed, relativePath)
 	}
 
-	// Когда не сохраняется ничего, пустой каталог статьи — такой же след прогона, как его
-	// содержимое: у ни разу не запускавшейся статьи каталога нет вовсе. Удаляется только
-	// опустевший: os.Remove на непустом откажет и не унесёт то, что уцелело после сбоя.
+	// os.Remove, а не RemoveAll: на непустом откажет и не унесёт уцелевшее после сбоя.
 	if len(clearKeepsSubdirectories) == 0 && len(failures) == 0 {
 		if removeErr := os.Remove(root); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
 			failures = append(failures, fmt.Errorf("удалить каталог статьи %s: %w", directory, removeErr))
 		}
 	}
 
-	// Удалённое возвращается вместе с ошибкой: вызывающий обязан знать, что часть файлов уже
-	// исчезла, даже если очистка не доведена до конца.
+	// Удалённое возвращается и вместе с ошибкой: часть файлов уже исчезла.
 	return removed, errors.Join(failures...)
 }
 
-// CountArticleArtifacts считает элементы верхнего уровня каталога статьи, которые удалит
-// ClearArticleArtifacts, и возвращает сам каталог для отчёта. Пустое имя означает, что
-// каталога у статьи ещё нет.
+// CountArticleArtifacts считает, сколько элементов удалит ClearArticleArtifacts, и возвращает
+// каталог статьи; пустое имя — каталога ещё нет.
 func (w *Writer) CountArticleArtifacts(externalID string) (string, int, error) {
 	directory, found, err := w.findArticleDirectoryForClear(externalID)
 	if err != nil || !found {
@@ -140,8 +119,7 @@ func (w *Writer) CountArticleArtifacts(externalID string) (string, int, error) {
 	return directory, len(names), nil
 }
 
-// ClearKeepsDescription перечисляет сохраняемые подкаталоги для отчёта команды. Пустая строка
-// означает, что от статьи на диске не остаётся ничего.
+// ClearKeepsDescription перечисляет сохраняемые подкаталоги для отчёта; пустая строка — не сохраняется ничего.
 func ClearKeepsDescription() string {
 	if len(clearKeepsSubdirectories) == 0 {
 		return ""

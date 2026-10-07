@@ -15,8 +15,7 @@ const (
 	LogsSubdirectory    = "logs"
 )
 
-// Root returns the configured output root. Диагностика пишет свои файлы сама,
-// но раскладку каталогов статьи задаёт только Writer.
+// Root returns the configured output root.
 func (w *Writer) Root() string { return w.root }
 
 // ArticleDirectory returns the article directory name relative to the output root.
@@ -56,15 +55,13 @@ func (w *Writer) resolveArticleDirectory(externalID, slug string) (string, error
 	case 0:
 		return "", fmt.Errorf("каталог статьи external_id %q не найден в %s", externalID, w.root)
 	default:
-		// Два каталога на один external_id — обычно из-за смены slug. Гадать нельзя:
-		// запись в чужой каталог и есть та самая путаница между статьями.
+		// Обычно из-за смены slug; гадать нельзя — запись ушла бы в чужой каталог.
 		return "", fmt.Errorf("для external_id %q найдено несколько каталогов статьи: %s", externalID, strings.Join(matches, ", "))
 	}
 }
 
 // SaveDiagnostics atomically writes one JSON diagnostics file into a subdirectory of the
-// article directory and returns its path relative to the output root. Adding a new
-// diagnostics file needs no change here: it is just another name.
+// article directory and returns its path relative to the output root.
 func (w *Writer) SaveDiagnostics(externalID, slug, subdirectory, name string, payload any) (string, error) {
 	directory, err := w.ArticleDirectory(externalID, slug)
 	if err != nil {
@@ -78,11 +75,7 @@ func (w *Writer) SaveDiagnostics(externalID, slug, subdirectory, name string, pa
 }
 
 // SaveDiagnosticsText atomically writes one plain-text diagnostics file into a subdirectory of
-// the article directory and returns its path relative to the output root.
-//
-// Дамп сырого ответа модели — не артефакт статьи: он ничего не публикует в БД и живёт вне
-// пары «файл + статус». Пустой slug означает «найти каталог статьи по external_id»: на стадии
-// падения каталог уже существует.
+// the article directory; an empty slug resolves the existing directory by external_id.
 func (w *Writer) SaveDiagnosticsText(externalID, slug, subdirectory, name, content string) (string, error) {
 	directory, err := w.resolveArticleDirectory(externalID, slug)
 	if err != nil {
@@ -113,11 +106,7 @@ func (w *Writer) saveDiagnosticsFile(directory, subdirectory, name string, data 
 }
 
 // ResetDiagnostics removes the diagnostics of the previous run from one subdirectory of the
-// article directory. Только этот подкаталог: логи, промпты и сгенерированные файлы статьи
-// живут рядом и переживают перезапуск.
-//
-// Иначе неуспешный прогон оставляет файлы предыдущего, и при разборе они выглядят как
-// свежие — именно на этом легко ошибиться в диагнозе.
+// article directory, so stale files are not mistaken for fresh ones.
 func (w *Writer) ResetDiagnostics(externalID, slug, subdirectory string) error {
 	directory, err := w.ArticleDirectory(externalID, slug)
 	if err != nil {
@@ -133,8 +122,7 @@ func (w *Writer) ResetDiagnostics(externalID, slug, subdirectory string) error {
 	return nil
 }
 
-// generatedArtifacts перечисляет то, что производит генерация: подкаталоги и отдельные файлы
-// внутри каталога статьи. Диагностика prepare и логи сюда не входят намеренно.
+// generatedArtifacts перечисляет то, что производит генерация, без prepare/ и logs/.
 var generatedArtifacts = struct {
 	Directories []string
 	Files       []string
@@ -143,11 +131,8 @@ var generatedArtifacts = struct {
 	Files:       []string{"article.html", "result.md"},
 }
 
-// ResetGeneratedArtifacts removes the generated results of one article and returns the paths
-// it deleted, relative to the output root.
-//
-// Сохраняются prepare/ и logs/: результаты Keys.so и Arsenkin и история прогонов переживают
-// пересоздание статьи.
+// ResetGeneratedArtifacts removes the generated results of one article, keeping prepare/ and
+// logs/, and returns the deleted paths relative to the output root.
 func (w *Writer) ResetGeneratedArtifacts(externalID, slug string) ([]string, error) {
 	directory, err := w.resolveArticleDirectory(externalID, slug)
 	if err != nil {
@@ -171,10 +156,8 @@ func (w *Writer) ResetGeneratedArtifacts(externalID, slug string) ([]string, err
 	return removed, nil
 }
 
-// OpenArticleLog opens the append-only stage log of one article, creating the directory.
-// An empty slug means "resolve the existing article directory by external_id", which is what
-// every stage after prepare needs: the directory is already there with the artifacts in it.
-// The caller owns the returned file and must close it.
+// OpenArticleLog opens the append-only stage log of one article; an empty slug resolves the
+// existing directory by external_id. The caller must close the returned file.
 func (w *Writer) OpenArticleLog(externalID, slug, name string) (*os.File, string, error) {
 	directory, err := w.resolveArticleDirectory(externalID, slug)
 	if err != nil {
