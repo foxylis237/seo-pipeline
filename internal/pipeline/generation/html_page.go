@@ -70,10 +70,6 @@ type HTMLPageRequest struct {
 	Send     HTMLMessage
 	Continue HTMLMessage
 	Logger   *slog.Logger
-	// Complete отвечает, дошёл ли ответ до конца. nil — правило по умолчанию: последний
-	// абзац исходного текста обязан найтись в разметке (ValidateHTMLCoversPage).
-	// Ошибка своего правила оборачивает ErrHTMLIncomplete — по ней начинается продолжение чата.
-	Complete func(markup string) error
 	// AcceptIncomplete снимает отказ: не дописанная и после продолжений страница возвращается
 	// с предупреждением в логе, а не ошибкой.
 	//
@@ -105,11 +101,7 @@ func BuildHTMLPage(ctx context.Context, request HTMLPageRequest) (string, error)
 	if err != nil {
 		return "", err
 	}
-	complete := request.Complete
-	if complete == nil {
-		complete = func(markup string) error { return ValidateHTMLCoversPage(request.Page, markup) }
-	}
-	coverErr := complete(page)
+	coverErr := ValidateHTMLCoversPage(request.Page, page)
 	for attempt := 1; coverErr != nil && attempt <= htmlContinuations; attempt++ {
 		if !errors.Is(coverErr, ErrHTMLIncomplete) || request.Continue == nil {
 			break
@@ -129,7 +121,7 @@ func BuildHTMLPage(ctx context.Context, request HTMLPageRequest) (string, error)
 		if partErr != nil {
 			return "", partErr
 		}
-		coverErr = complete(page)
+		coverErr = ValidateHTMLCoversPage(request.Page, page)
 		if coverErr == nil {
 			logger.Info("страница дописана после обрыва",
 				"stage", "html_generation", "attempt", attempt, "html_runes", len([]rune(page)))

@@ -46,7 +46,6 @@ var (
 	// доход «от 70 000 до 100 000 ₽» страницы 3 объявлялся ценой курса мимо книги.
 	factRowRE  = regexp.MustCompile(`(?is)<tr[\s>].*?</tr>`)
 	factCellRE = regexp.MustCompile(`(?i)<t[dh][\s>]`)
-	factTagRE  = regexp.MustCompile(`(?s)<[^>]+>`)
 )
 
 // ProgramFacts — программа так, как её назвала книга импорта: числа и две формулировки,
