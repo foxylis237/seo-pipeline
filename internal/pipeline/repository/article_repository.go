@@ -9,6 +9,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -1494,7 +1495,14 @@ func classifyErrorOperation(step *string, err error) *string {
 
 func isRetryableError(err error) bool {
 	var networkErr net.Error
-	if errors.As(err, &networkErr) && (networkErr.Timeout() || networkErr.Temporary()) {
+	if errors.As(err, &networkErr) && networkErr.Timeout() {
+		return true
+	}
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) && dnsErr.IsTemporary {
+		return true
+	}
+	if errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.ECONNABORTED) || errors.Is(err, syscall.ECONNREFUSED) {
 		return true
 	}
 	message := strings.ToLower(err.Error())
