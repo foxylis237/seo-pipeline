@@ -292,3 +292,19 @@ func openAICompatibleTestClient(t *testing.T, status int, body string) *OpenAICo
 func discardLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
+
+func TestOpenAICompatibleClientOwnsHTTPClient(t *testing.T) {
+	client, err := NewOpenAICompatibleClient("https://example.test/v1", "key", "openai", slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if client.httpClient == http.DefaultClient {
+		t.Fatal("client shares http.DefaultClient")
+	}
+	if client.httpClient.Timeout != openAIRequestTimeout {
+		t.Fatalf("timeout = %s, want %s", client.httpClient.Timeout, openAIRequestTimeout)
+	}
+	if err := client.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+}

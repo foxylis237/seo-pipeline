@@ -37,10 +37,24 @@ func NewOpenAICompatibleClient(baseURL, apiKey, provider string, logger *slog.Lo
 	if logger == nil {
 		return nil, fmt.Errorf("logger is nil")
 	}
+	defaultTransport, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		return nil, fmt.Errorf("http.DefaultTransport is %T, not *http.Transport", http.DefaultTransport)
+	}
+	httpClient := &http.Client{Transport: defaultTransport.Clone(), Timeout: openAIRequestTimeout}
 	return &OpenAICompatibleClient{
 		baseURL: strings.TrimRight(baseURL, "/"), apiKey: apiKey,
-		provider: provider, httpClient: http.DefaultClient, logger: logger,
+		provider: provider, httpClient: httpClient, logger: logger,
 	}, nil
+}
+
+// openAIRequestTimeout is a backstop above the longest stage budget (900s); the attempt
+// context is what normally ends a request.
+const openAIRequestTimeout = 15 * time.Minute
+
+func (c *OpenAICompatibleClient) Close() error {
+	c.httpClient.CloseIdleConnections()
+	return nil
 }
 
 type chatCompletionRequest struct {

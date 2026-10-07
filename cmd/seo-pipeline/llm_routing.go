@@ -306,7 +306,7 @@ func newLLMClient(ctx context.Context, name string, provider config.LLMProviderC
 		if err != nil {
 			return nil, nil, err
 		}
-		return client, nil, nil
+		return client, client.Close, nil
 	case "deepseek_web":
 		headless := true
 		if provider.Headless != nil {
