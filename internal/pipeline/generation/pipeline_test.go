@@ -276,96 +276,21 @@ func TestPipelineDoesNotSaveContextCancellationAsArticleError(t *testing.T) {
 	}
 }
 
-func TestDemoGenerateUsesOneChatSkipsHTMLAndKeepsMetadataStage(t *testing.T) {
-	input := article.GenerationInput{Article: article.Article{ID: 7, ExternalID: "37", Title: "Тема", Slug: "tema"}}
-	repository := &fakePipelineRepository{input: input}
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	client := successfulPipelineClient()
-	chatFactory := successfulChatFactory()
-	builder := newFakeResultBuilder(t, nil)
-	pipeline := NewPipeline(repository, testGenerationRouter(client, logger), chatFactory, articleoutput.NewWriter(t.TempDir()), logger, builder)
-
-	output, err := pipeline.RunDemoByExternalID(context.Background(), "37")
+func TestRunArticleSavesUnrecognizedInfoWithoutFailing(t *testing.T) {
+	writer := articleoutput.NewWriter(t.TempDir())
+	paths, err := writer.SaveStructure("37", "tema", "structure prompt", "structure")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if chatFactory.chats != 0 {
-		t.Fatalf("chats=%d, ожидались отдельные вызовы роутера", chatFactory.chats)
-	}
-	if strings.Join(client.calls, ",") != "structure,article,info" || repository.reviewPath != "" || repository.htmlPath != "" {
-		t.Fatalf("demo stages: calls=%v review=%q html=%q", client.calls, repository.reviewPath, repository.htmlPath)
-	}
-	if !repository.demoCompleted || repository.completionCalls != 1 || repository.articleInfo == "" || builder.calls != 1 || output.Paths.ResultPath == "" {
-		t.Fatalf("demo completion: completed=%t completion_calls=%d result_calls=%d paths=%+v", repository.demoCompleted, repository.completionCalls, builder.calls, output.Paths)
-	}
-	if len(repository.begunStages) != 1 || repository.begunStages[0] != "article" {
-		t.Fatalf("demo begun stages = %v", repository.begunStages)
-	}
-}
-
-func TestDemoGenerateResumesPersistedStages(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	input := article.GenerationInput{Article: article.Article{ID: 7, ExternalID: "37", Title: "Тема", Slug: "tema", Status: "processing"}}
-
-	t.Run("article exists builds only result", func(t *testing.T) {
-		repository := &fakePipelineRepository{input: input, savedInput: article.SavedGenerationInput{
-			Article: input.Article, StructurePath: "37-tema/generated/structure.txt", ArticlePath: "37-tema/generated/article.txt",
-		}}
-		client := successfulPipelineClient()
-		chatFactory := successfulChatFactory()
-		builder := newFakeResultBuilder(t, nil)
-		pipeline := NewPipeline(repository, testGenerationRouter(client, logger), chatFactory, articleoutput.NewWriter(t.TempDir()), logger, builder)
-
-		if _, err := pipeline.RunDemoByExternalID(context.Background(), "37"); err != nil {
-			t.Fatal(err)
-		}
-		if len(client.calls) != 0 || chatFactory.chats != 0 || builder.calls != 1 || repository.completionCalls != 1 {
-			t.Fatalf("calls=%v chats=%d result=%d complete=%d", client.calls, chatFactory.chats, builder.calls, repository.completionCalls)
-		}
-	})
-
-	t.Run("completed skips every stage", func(t *testing.T) {
-		completed := input
-		completed.Article.Status = "completed"
-		repository := &fakePipelineRepository{input: completed, savedInput: article.SavedGenerationInput{Article: completed.Article}}
-		client := successfulPipelineClient()
-		chatFactory := successfulChatFactory()
-		builder := newFakeResultBuilder(t, nil)
-		pipeline := NewPipeline(repository, testGenerationRouter(client, logger), chatFactory, articleoutput.NewWriter(t.TempDir()), logger, builder)
-
-		if _, err := pipeline.RunDemoByExternalID(context.Background(), "37"); err != nil {
-			t.Fatal(err)
-		}
-		if len(client.calls) != 0 || chatFactory.chats != 0 || builder.calls != 0 || repository.completionCalls != 0 {
-			t.Fatalf("calls=%v chats=%d result=%d complete=%d", client.calls, chatFactory.chats, builder.calls, repository.completionCalls)
-		}
-	})
-}
-
-func TestDemoResultErrorDoesNotCompleteFlow(t *testing.T) {
-	input := article.GenerationInput{Article: article.Article{ID: 7, ExternalID: "37", Title: "Тема", Slug: "tema"}}
-	repository := &fakePipelineRepository{input: input}
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	builder := newFakeResultBuilder(t, errors.New("result write failed"))
-	pipeline := NewPipeline(repository, testGenerationRouter(successfulPipelineClient(), logger), successfulChatFactory(), articleoutput.NewWriter(t.TempDir()), logger, builder)
-
-	_, err := pipeline.RunDemoByExternalID(context.Background(), "37")
-	if err == nil || repository.demoCompleted || repository.savedError == nil {
-		t.Fatalf("err=%v completed=%t saved_error=%v", err, repository.demoCompleted, repository.savedError)
-	}
-}
-
-func TestDemoUnrecognizedInfoIsSavedAndDoesNotFail(t *testing.T) {
-	input := article.GenerationInput{Article: article.Article{ID: 7, ExternalID: "37", Title: "Тема", Slug: "tema"}}
-	repository := &fakePipelineRepository{input: input}
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	repository := &fakePipelineRepository{input: pipelineTestInput(), savedInput: savedPipelineInput(paths)}
 	client := successfulPipelineClient()
 	client.responses["info"] = llm.Response{Text: "неверный info"}
-	pipeline := NewPipeline(repository, testGenerationRouter(client, logger), successfulChatFactory(), articleoutput.NewWriter(t.TempDir()), logger, newFakeResultBuilder(t, nil))
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	pipeline := NewPipeline(repository, testGenerationRouter(client, logger), successfulChatFactory(), writer, logger)
 
-	_, err := pipeline.RunDemoByExternalID(context.Background(), "37")
-	if err != nil || !repository.demoCompleted || repository.savedError != nil || repository.articleInfo != "неверный info" {
-		t.Fatalf("err=%v completed=%t saved_info=%q saved_error=%v", err, repository.demoCompleted, repository.articleInfo, repository.savedError)
+	_, err = pipeline.RunArticleByExternalID(context.Background(), "37")
+	if err != nil || repository.savedError != nil || repository.articleInfo != "неверный info" {
+		t.Fatalf("err=%v saved_info=%q saved_error=%v", err, repository.articleInfo, repository.savedError)
 	}
 }
 
