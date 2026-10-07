@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/mxschmitt/playwright-go"
@@ -20,6 +21,7 @@ const (
 	homeURL               = "https://www.keys.so/ru/"
 	cleanupURL            = "https://www.keys.so/ru/tools/delete-double"
 	profilePath           = "data/keysso-browser-profile"
+	lockFilePath          = profilePath + "/.seo-pipeline.lock"
 	emailSelector         = `input[name="email"]`
 	passwordSelector      = `input[name="password"]`
 	loginLinkSelector     = `a[href="/ru/login"]`
@@ -87,6 +89,8 @@ type Service struct {
 	cfg    Config
 	logger *slog.Logger
 
+	// profile holds the flock: two processes on one Chromium profile corrupt it.
+	profile        *os.File
 	pw             *playwright.Playwright
 	browserContext playwright.BrowserContext
 	page           playwright.Page
@@ -325,8 +329,12 @@ func (s *Service) start(ctx context.Context) error {
 	if err := os.Chmod(profilePath, 0o700); err != nil {
 		return fmt.Errorf("protect persistent browser profile: %w", err)
 	}
+	if err := s.lockProfile(); err != nil {
+		return err
+	}
 	pw, err := playwright.Run()
 	if err != nil {
+		_ = s.releaseProfile()
 		return fmt.Errorf("start Playwright: %w", err)
 	}
 	browserContext, err := pw.Chromium.LaunchPersistentContext(
@@ -337,6 +345,7 @@ func (s *Service) start(ctx context.Context) error {
 	)
 	if err != nil {
 		_ = pw.Stop()
+		_ = s.releaseProfile()
 		return fmt.Errorf("launch Chromium with persistent profile: %w", err)
 	}
 	pages := browserContext.Pages()
@@ -348,6 +357,7 @@ func (s *Service) start(ctx context.Context) error {
 		if err != nil {
 			_ = browserContext.Close()
 			_ = pw.Stop()
+			_ = s.releaseProfile()
 			return fmt.Errorf("create Keys.so page: %w", err)
 		}
 	}
@@ -1371,9 +1381,38 @@ func (s *Service) Close() error {
 			closeErr = fmt.Errorf("stop Playwright: %w", err)
 		}
 	}
+	if err := s.releaseProfile(); err != nil && closeErr == nil {
+		closeErr = fmt.Errorf("release browser profile lock: %w", err)
+	}
 	s.page = nil
 	s.browserContext = nil
 	s.pw = nil
+	return closeErr
+}
+
+func (s *Service) lockProfile() error {
+	profile, err := os.OpenFile(lockFilePath, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return fmt.Errorf("open browser profile lock: %w", err)
+	}
+	if err := syscall.Flock(int(profile.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		_ = profile.Close()
+		return fmt.Errorf("persistent browser profile is already used by another process: %w", err)
+	}
+	s.profile = profile
+	return nil
+}
+
+func (s *Service) releaseProfile() error {
+	if s.profile == nil {
+		return nil
+	}
+	err := syscall.Flock(int(s.profile.Fd()), syscall.LOCK_UN)
+	closeErr := s.profile.Close()
+	s.profile = nil
+	if err != nil {
+		return err
+	}
 	return closeErr
 }
 
