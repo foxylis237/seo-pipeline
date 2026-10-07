@@ -177,32 +177,6 @@ func (r *ArticleRepository) CompleteGeneration(ctx context.Context, articleID in
 	return nil
 }
 
-// SaveDemoArticleInfo atomically persists the article path and parsed info after
-// both responses from the shared LLM chat have succeeded.
-func (r *ArticleRepository) SaveDemoArticleInfo(ctx context.Context, articleID int64, articlePath, rawText string, info article.ArticleInfo) error {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("начать сохранение demo-этапа: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO article_outputs (article_id, article_path, updated_at)
-		VALUES ($1, $2, NOW())
-		ON CONFLICT (article_id) DO UPDATE
-		SET article_path = EXCLUDED.article_path, updated_at = NOW()
-	`, articleID, articlePath); err != nil {
-		return fmt.Errorf("сохранить путь demo-статьи: %w", err)
-	}
-	metadataQuery, metadataArgs := r.articleMetadataUpsert(articleID, rawText, info)
-	if _, err := tx.Exec(ctx, metadataQuery, metadataArgs...); err != nil {
-		return fmt.Errorf("сохранить информацию demo-статьи: %w", err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("завершить сохранение demo-этапа: %w", err)
-	}
-	return nil
-}
-
 // GetSavedGenerationInput loads only persisted artifacts needed to resume generation.
 func (r *ArticleRepository) GetSavedGenerationInput(ctx context.Context, externalID string) (article.SavedGenerationInput, error) {
 	query := `

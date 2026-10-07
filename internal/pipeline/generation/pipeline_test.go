@@ -153,13 +153,8 @@ type fakePipelineRepository struct {
 	generationBegun    bool
 	begunStages        []string
 	demoCompleted      bool
-	demoStateSaved     bool
 	completionCalls    int
 	trace              article.Trace
-}
-
-func (r *fakePipelineRepository) GetDemoGenerationInput(_ context.Context, _ string) (article.GenerationInput, error) {
-	return r.input, nil
 }
 
 func (r *fakePipelineRepository) CompleteGeneration(_ context.Context, _ int64) error {
@@ -211,13 +206,6 @@ func (r *fakePipelineRepository) SaveReviewPath(_ context.Context, _ int64, path
 
 func (r *fakePipelineRepository) SaveArticleInfo(_ context.Context, _ int64, rawText string, _ article.ArticleInfo) error {
 	r.articleInfo = rawText
-	return nil
-}
-
-func (r *fakePipelineRepository) SaveDemoArticleInfo(_ context.Context, _ int64, articlePath, rawText string, _ article.ArticleInfo) error {
-	r.articlePath = articlePath
-	r.articleInfo = rawText
-	r.demoStateSaved = true
 	return nil
 }
 

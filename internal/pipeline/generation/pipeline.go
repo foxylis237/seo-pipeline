@@ -23,12 +23,10 @@ type PipelineRepository interface {
 	BeginGenerationStage(ctx context.Context, articleID int64, stage string) error
 	SaveGenerationPaths(ctx context.Context, articleID int64, structurePath, articlePath string) error
 	SaveArticleInfo(ctx context.Context, articleID int64, rawText string, info article.ArticleInfo) error
-	SaveDemoArticleInfo(ctx context.Context, articleID int64, articlePath, rawText string, info article.ArticleInfo) error
 	SaveReviewPath(ctx context.Context, articleID int64, reviewPath string) error
 	SaveFixedArticlePath(ctx context.Context, articleID int64, fixedArticlePath string) error
 	SaveHTMLPath(ctx context.Context, articleID int64, htmlPath string) error
 	SaveError(ctx context.Context, articleID int64, processingErr error) error
-	GetDemoGenerationInput(ctx context.Context, externalID string) (article.GenerationInput, error)
 	CompleteGeneration(ctx context.Context, articleID int64) error
 	GetArticleTrace(ctx context.Context, articleID int64) (article.Trace, error)
 }
@@ -41,7 +39,6 @@ type ResultBuilder interface {
 type PipelineWriter interface {
 	StructureWriter
 	StageArticle(externalID, slug, prompt, text, model string) (*articleoutput.PendingArtifact, error)
-	StageArticleInfo(externalID, slug, prompt, info string) (*articleoutput.PendingArtifact, error)
 	StageReview(externalID, slug, prompt, review string) (*articleoutput.PendingArtifact, error)
 	StageFixedArticle(externalID, slug, prompt, article string) (*articleoutput.PendingArtifact, error)
 	StageHTML(externalID, slug, prompt, html string) (*articleoutput.PendingArtifact, error)
@@ -124,7 +121,7 @@ func (p *Pipeline) Run(ctx context.Context, input article.GenerationInput) (Pipe
 		return PipelineOutput{}, p.fail(ctx, logger, input, "structure_generation", err)
 	}
 
-	articleOutput, err := p.runArticleAndInfo(ctx, input, structureOutput.Structure, structureOutput.Paths.StructurePath, false)
+	articleOutput, err := p.runArticleAndInfo(ctx, input, structureOutput.Structure, structureOutput.Paths.StructurePath)
 	if err != nil {
 		return PipelineOutput{}, err
 	}
@@ -174,7 +171,7 @@ type articleStageOutput struct {
 	Info string
 }
 
-func (p *Pipeline) runArticleAndInfo(ctx context.Context, input article.GenerationInput, structure, structurePath string, atomicDemo bool) (output articleStageOutput, returnErr error) {
+func (p *Pipeline) runArticleAndInfo(ctx context.Context, input article.GenerationInput, structure, structurePath string) (output articleStageOutput, returnErr error) {
 	started := time.Now()
 	logger := p.stageLogger(input)
 	if err := ctx.Err(); err != nil {
@@ -216,12 +213,10 @@ func (p *Pipeline) runArticleAndInfo(ctx context.Context, input article.Generati
 	}
 	defer articlePending.Abort()
 	paths := articlePending.Paths
-	if !atomicDemo {
-		if err := articleoutput.Commit(func() error {
-			return p.repository.SaveGenerationPaths(ctx, input.Article.ID, structurePath, paths.ArticlePath)
-		}, articlePending); err != nil {
-			return articleStageOutput{}, p.fail(ctx, logger, input, "save_article_path", err)
-		}
+	if err := articleoutput.Commit(func() error {
+		return p.repository.SaveGenerationPaths(ctx, input.Article.ID, structurePath, paths.ArticlePath)
+	}, articlePending); err != nil {
+		return articleStageOutput{}, p.fail(ctx, logger, input, "save_article_path", err)
 	}
 	logger.Info("article saved", "stage", "article_generation", "model", articleResult.Model, "result_path", paths.ArticlePath)
 	// Промпт статьи уже опубликован на диске и записан в состояние, поэтому его можно
@@ -280,21 +275,7 @@ func (p *Pipeline) runArticleAndInfo(ctx context.Context, input article.Generati
 	} else {
 		logger.Info("article info parsed", "stage", "info")
 	}
-	if atomicDemo {
-		infoPending, stageErr := p.writer.StageArticleInfo(input.Article.ExternalID, input.Article.Slug, infoResult.Prompt, articleInfo)
-		err = stageErr
-		if err != nil {
-			return articleStageOutput{}, p.fail(ctx, logger, input, "save_article_info_files", err)
-		}
-		defer infoPending.Abort()
-		paths = infoPending.Paths
-		err = articleoutput.Commit(func() error {
-			return p.repository.SaveDemoArticleInfo(ctx, input.Article.ID, paths.ArticlePath, articleInfo, parsedInfo)
-		}, articlePending, infoPending)
-	} else {
-		err = p.repository.SaveArticleInfo(ctx, input.Article.ID, articleInfo, parsedInfo)
-	}
-	if err != nil {
+	if err := p.repository.SaveArticleInfo(ctx, input.Article.ID, articleInfo, parsedInfo); err != nil {
 		return articleStageOutput{}, p.fail(ctx, logger, input, "save_article_info_state", err)
 	}
 	logger.Info("article info saved", "stage", "info")
@@ -522,7 +503,7 @@ func (p *Pipeline) RunArticleByExternalID(ctx context.Context, externalID string
 	if err := p.repository.BeginGenerationStage(ctx, input.Article.ID, "article"); err != nil {
 		return PipelineOutput{}, p.fail(ctx, p.stageLogger(input), input, "begin_article", err)
 	}
-	output, err := p.runArticleAndInfo(ctx, input, structure, saved.StructurePath, false)
+	output, err := p.runArticleAndInfo(ctx, input, structure, saved.StructurePath)
 	return PipelineOutput{Paths: output.Paths}, err
 }
 
