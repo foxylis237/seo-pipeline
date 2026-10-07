@@ -141,10 +141,10 @@ const (
 	headCellStyle   = `padding:11px 14px;border-bottom:2px solid #ff7500;font-weight:700;color:#16202b;text-align:left;`
 	firstCellStyle  = `padding:11px 14px;border-bottom:1px solid #edf1f5;font-weight:700;color:#16202b;`
 	cellStyle       = `padding:11px 14px;border-bottom:1px solid #edf1f5;color:#2d3a47;`
-	tableWrapPrefix = `<figure class="wp-block-table"><div style="overflow-x:auto;">`
+	tableWrapPrefix = `<figure class="wp-block-table"><div style="overflow-x:auto;width:0;min-width:100%;">`
 	// Обёртка таблицы плюсов и минусов: та же, плюс метка, по которой видно, что первая
 	// колонка не жирная намеренно.
-	prosConsWrapPrefix = `<figure class="wp-block-table sp-proscons"><div style="overflow-x:auto;">`
+	prosConsWrapPrefix = `<figure class="wp-block-table sp-proscons"><div style="overflow-x:auto;width:0;min-width:100%;">`
 	tableWrapSuffix    = `</div></figure>`
 )
 
