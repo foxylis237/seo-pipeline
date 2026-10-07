@@ -21,7 +21,7 @@ func TestDeepSeekOverlaySwitchesEveryStageToOneProvider(t *testing.T) {
 	// ни одной стадией, поэтому и требовать его учётные данные нельзя.
 	t.Setenv("GEMINI_MODEL", "gemini-2.5-flash")
 
-	cfg, err := LoadLLMConfigWithOverlay("config/config.yaml", "config/config.deepseek.yaml", true)
+	cfg, err := LoadLLMConfigWithOverlayForStages("config/config.yaml", "config/config.deepseek.yaml", nil, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,11 +59,11 @@ func TestDeepSeekOverlayKeepsBaseTimeoutsAndLimits(t *testing.T) {
 	t.Setenv("GEMINI_API_KEY", "test-gemini")
 	t.Setenv("GEMINI_MODEL", "gemini-2.5-flash")
 
-	base, err := LoadLLMConfig("config/config.yaml")
+	base, err := LoadLLMConfigForStages("config/config.yaml", nil, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	overlaid, err := LoadLLMConfigWithOverlay("config/config.yaml", "config/config.deepseek.yaml", true)
+	overlaid, err := LoadLLMConfigWithOverlayForStages("config/config.yaml", "config/config.deepseek.yaml", nil, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func TestBaseConfigKeepsSingleChatDisabled(t *testing.T) {
 	t.Setenv("GEMINI_API_KEY", "test-gemini")
 	t.Setenv("GEMINI_MODEL", "gemini-2.5-flash")
 
-	cfg, err := LoadLLMConfig("config/config.yaml")
+	cfg, err := LoadLLMConfigForStages("config/config.yaml", nil, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +154,7 @@ func TestMergeAddsStageMissingInBase(t *testing.T) {
 
 func TestOverlayFailsOnMissingFile(t *testing.T) {
 	t.Chdir(projectRootDir(t))
-	if _, err := LoadLLMConfigWithOverlay("config/config.yaml", "config/нет-такого.yaml", true); err == nil {
+	if _, err := LoadLLMConfigWithOverlayForStages("config/config.yaml", "config/нет-такого.yaml", nil, true); err == nil {
 		t.Fatal("отсутствующий overlay не вызвал ошибку")
 	}
 }
@@ -163,7 +163,7 @@ func TestBaseTimeoutsAreRealDurations(t *testing.T) {
 	t.Chdir(projectRootDir(t))
 	t.Setenv("GEMINI_API_KEY", "test-gemini")
 	t.Setenv("GEMINI_MODEL", "gemini-2.5-flash")
-	cfg, err := LoadLLMConfig("config/config.yaml")
+	cfg, err := LoadLLMConfigForStages("config/config.yaml", nil, true)
 	if err != nil {
 		t.Fatal(err)
 	}

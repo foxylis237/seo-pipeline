@@ -21,7 +21,7 @@ func TestDeepSeekArticlePromptContainsGeneratedStructure(t *testing.T) {
 	t.Chdir(root)
 	t.Setenv("GEMINI_MODEL", "gemini-2.5-flash")
 
-	cfg, err := config.LoadLLMConfigWithOverlay("config/config.yaml", "config/config.deepseek.yaml", true)
+	cfg, err := config.LoadLLMConfigWithOverlayForStages("config/config.yaml", "config/config.deepseek.yaml", nil, true)
 	if err != nil {
 		t.Fatal(err)
 	}

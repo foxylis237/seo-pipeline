@@ -24,10 +24,10 @@ func TestKeywordsPromptRendersArticleName(t *testing.T) {
 
 	for name, path := range map[string]func() (config.LLMConfig, error){
 		"схема Gemini": func() (config.LLMConfig, error) {
-			return config.LoadLLMConfig("config/config.yaml")
+			return config.LoadLLMConfigForStages("config/config.yaml", nil, true)
 		},
 		"схема DeepSeek-only": func() (config.LLMConfig, error) {
-			return config.LoadLLMConfigWithOverlay("config/config.yaml", "config/config.deepseek.yaml", true)
+			return config.LoadLLMConfigWithOverlayForStages("config/config.yaml", "config/config.deepseek.yaml", nil, true)
 		},
 	} {
 		t.Run(name, func(t *testing.T) {

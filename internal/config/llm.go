@@ -108,15 +108,6 @@ type LLMTargetConfig struct {
 	Model    string `yaml:"model"`
 }
 
-func LoadLLMConfig(path string) (LLMConfig, error) {
-	return loadLLMConfig(path, requiredLLMStages, true)
-}
-
-// LoadLLMConfigForDryRun loads prompt templates without requiring provider credentials.
-func LoadLLMConfigForDryRun(path string) (LLMConfig, error) {
-	return loadLLMConfig(path, requiredLLMStages, false)
-}
-
 // LoadLLMConfigForStages проверяет схему по набору стадий самой задачи.
 //
 // Набор приходит снаружи, потому что он у задач разный: task_1 генерирует статью шестью
@@ -144,17 +135,11 @@ func LoadLLMProviderConfig(path, name string) (LLMProviderConfig, error) {
 	return normalizeLLMProvider(name, provider)
 }
 
-// LoadLLMConfigWithOverlay накладывает файл отличий на базовую конфигурацию.
+// LoadLLMConfigWithOverlayForStages накладывает файл отличий на базовую конфигурацию и
+// проверяет схему по набору стадий задачи. Пустой набор означает набор task_1.
 //
 // Overlay перечисляет только то, что меняется: путь к промпту, targets, флаг провайдера.
-// Всё остальное — таймауты, температуры, max_tokens — остаётся в одном месте, в базовом
-// файле, и не расходится между режимами.
-func LoadLLMConfigWithOverlay(basePath, overlayPath string, requireCredentials bool) (LLMConfig, error) {
-	return LoadLLMConfigWithOverlayForStages(basePath, overlayPath, requiredLLMStages, requireCredentials)
-}
-
-// LoadLLMConfigWithOverlayForStages накладывает overlay и проверяет схему по набору стадий
-// задачи. Пустой набор означает набор task_1.
+// Всё остальное остаётся в базовом файле.
 func LoadLLMConfigWithOverlayForStages(basePath, overlayPath string, stages []string, requireCredentials bool) (LLMConfig, error) {
 	base, err := readLLMFile(basePath)
 	if err != nil {

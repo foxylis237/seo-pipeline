@@ -22,7 +22,7 @@ func TestProjectLLMStageTimeouts(t *testing.T) {
 	t.Setenv("OPENROUTER_API_KEY", "test-openrouter")
 	t.Setenv("OPENROUTER_MODEL", "nvidia/test-free")
 	t.Setenv("GROQ_API_KEY", "test-groq")
-	cfg, err := LoadLLMConfig("config/config.yaml")
+	cfg, err := LoadLLMConfigForStages("config/config.yaml", nil, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func TestProjectLLMStageTimeouts(t *testing.T) {
 func TestLoadLLMConfig(t *testing.T) {
 	path := writeLLMTestConfig(t, "gemini", "TEST_GEMINI_KEY", "")
 	t.Setenv("TEST_GEMINI_KEY", "test-value")
-	cfg, err := LoadLLMConfig(path)
+	cfg, err := LoadLLMConfigForStages(path, nil, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func TestLoadLLMConfig(t *testing.T) {
 func TestStageAttemptTimeout(t *testing.T) {
 	t.Setenv("TEST_GEMINI_KEY", "test-value")
 
-	cfg, err := LoadLLMConfig(writeLLMTestConfig(t, "gemini", "TEST_GEMINI_KEY", ""))
+	cfg, err := LoadLLMConfigForStages(writeLLMTestConfig(t, "gemini", "TEST_GEMINI_KEY", ""), nil, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,13 +117,13 @@ func LoadLLMConfigWithStageLines(t *testing.T, extra map[string]string) (LLMConf
 	if err := os.WriteFile(configPath, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	return LoadLLMConfig(configPath)
+	return LoadLLMConfigForStages(configPath, nil, true)
 }
 
 func TestLoadLLMConfigRejectsUnknownProvider(t *testing.T) {
 	path := writeLLMTestConfig(t, "missing", "TEST_GEMINI_KEY", "")
 	t.Setenv("TEST_GEMINI_KEY", "test-value")
-	_, err := LoadLLMConfig(path)
+	_, err := LoadLLMConfigForStages(path, nil, true)
 	if err == nil || !strings.Contains(err.Error(), `stage "structure" target 0 references unknown provider "missing"`) || !strings.Contains(err.Error(), "available providers: gemini") {
 		t.Fatalf("error = %v", err)
 	}
@@ -252,7 +252,7 @@ func testLLMConfig(prompt, provider, structureModel, otherModel string) LLMConfi
 func TestLoadLLMConfigRejectsMissingEnvironment(t *testing.T) {
 	path := writeLLMTestConfig(t, "gemini", "MISSING_LLM_TEST_KEY", "")
 	_ = os.Unsetenv("MISSING_LLM_TEST_KEY")
-	_, err := LoadLLMConfig(path)
+	_, err := LoadLLMConfigForStages(path, nil, true)
 	if err == nil || !strings.Contains(err.Error(), "MISSING_LLM_TEST_KEY") {
 		t.Fatalf("error = %v", err)
 	}
@@ -261,7 +261,7 @@ func TestLoadLLMConfigRejectsMissingEnvironment(t *testing.T) {
 func TestLoadLLMConfigForDryRunDoesNotRequireProviderCredentials(t *testing.T) {
 	path := writeLLMTestConfig(t, "gemini", "MISSING_DRY_RUN_KEY", "")
 	_ = os.Unsetenv("MISSING_DRY_RUN_KEY")
-	cfg, err := LoadLLMConfigForDryRun(path)
+	cfg, err := LoadLLMConfigForStages(path, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -314,7 +314,7 @@ func TestDeepSeekWebDoesNotRequireAPICredentials(t *testing.T) {
 func TestLoadLLMConfigRejectsMissingPrompt(t *testing.T) {
 	path := writeLLMTestConfig(t, "gemini", "TEST_GEMINI_KEY", filepath.Join(t.TempDir(), "missing.txt"))
 	t.Setenv("TEST_GEMINI_KEY", "test-value")
-	_, err := LoadLLMConfig(path)
+	_, err := LoadLLMConfigForStages(path, nil, true)
 	if err == nil || !strings.Contains(err.Error(), `stage "structure" prompt`) {
 		t.Fatalf("error = %v", err)
 	}
@@ -358,7 +358,7 @@ func TestTask1StageProvidersMatchConfiguredScheme(t *testing.T) {
 	t.Setenv("GEMINI_MODEL", "gemini-2.5-flash")
 	t.Setenv("OPENROUTER_API_KEY", "test-openrouter")
 	t.Setenv("OPENROUTER_MODEL", "openrouter-model")
-	config, err := LoadLLMConfig("config/config.yaml")
+	config, err := LoadLLMConfigForStages("config/config.yaml", nil, true)
 	if err != nil {
 		t.Fatal(err)
 	}
