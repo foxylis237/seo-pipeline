@@ -183,7 +183,7 @@ func ReadRows(path string) ([]Row, error) {
 // Ключи — уже приведённые к нижнему регистру и обрезанные заголовки.
 var columnAliases = map[string]string{
 	// Старая опечатка в таблице task_1.
-	"referense_url": "reference_url",
+	"referense_url": "reference_url", //nolint:misspell // заголовок колонки в книге
 	// Книга pprof_2 называет slug и преподавателей по-своему. Значение колонок то же самое,
 	// расходятся только заголовки: слаг картинки там slug, преподаватели — teachers, а не
 	// authors. Колонка service_name у неё своя и с article_name не путается: в книге есть обе,

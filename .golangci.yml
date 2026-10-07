@@ -45,6 +45,9 @@ linters:
       check-type-assertions: true
     misspell:
       locale: US
+      ignore-rules:
+        - neighbour
+        - neighbours
 
   exclusions:
     generated: lax
