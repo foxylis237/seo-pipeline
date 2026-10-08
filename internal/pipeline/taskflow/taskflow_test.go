@@ -138,3 +138,6 @@ func TestSavedStructureReadsSavedFile(t *testing.T) {
 		t.Fatalf("SavedStructure() = %q", structure)
 	}
 }
+
+// The repository classifies article errors through this method.
+var _ interface{ FailedStage() string } = (*StageError)(nil)

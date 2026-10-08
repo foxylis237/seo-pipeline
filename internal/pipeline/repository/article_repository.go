@@ -1287,34 +1287,45 @@ func safeErrorMessage(err error) string {
 	return message
 }
 
+// serviceFailure is an error of an external SEO service (Keys.so, Arsenkin).
+type serviceFailure interface{ FailedService() string }
+
+// stageFailure is an error that knows the pipeline stage it came from.
+type stageFailure interface{ FailedStage() string }
+
+var serviceOperations = map[string]string{
+	"keysso":   "keysso_collect_keywords",
+	"arsenkin": "arsenkin_request",
+}
+
+var stageOperations = map[string]string{
+	"save_structure":       "write_structure_file",
+	"save_article":         "write_article_file",
+	"save_article_info":    "write_article_file",
+	"save_article_state":   "write_article_file",
+	"result_generation":    "write_result_file",
+	"structure_generation": "llm_structure_generation",
+	"article_generation":   "llm_article_generation",
+	"metadata_generation":  "llm_metadata_generation",
+	"metadata_parsing":     "llm_metadata_generation",
+	"article_review":       "llm_article_review",
+	"article_fix":          "llm_article_fix",
+	"html_generation":      "llm_html_generation",
+	"validate_html":        "llm_html_generation",
+}
+
 // classifyErrorOperation определяет операцию в момент сбоя; провайдера в имени нет — стадию выполняет любой LLM.
 func classifyErrorOperation(step *string, err error) *string {
-	message := strings.ToLower(err.Error())
+	var service serviceFailure
+	var stage stageFailure
 	operation := ""
 	switch {
-	case strings.Contains(message, "keys.so"):
-		operation = "keysso_collect_keywords"
-	case strings.Contains(message, "arsenkin"):
-		operation = "arsenkin_request"
-	case strings.Contains(message, "save_structure") || strings.Contains(message, "сохранить структуру"):
-		operation = "write_structure_file"
-	case strings.Contains(message, "save_article") || strings.Contains(message, "сохранить статью"):
-		operation = "write_article_file"
-	case strings.Contains(message, "result_generation") || strings.Contains(message, "result.md"):
-		operation = "write_result_file"
-	case strings.Contains(message, "stage=structure_generation"):
-		operation = "llm_structure_generation"
-	case strings.Contains(message, "stage=article_generation"):
-		operation = "llm_article_generation"
-	case strings.Contains(message, "stage=metadata_generation") || strings.Contains(message, "stage=metadata_parsing"):
-		operation = "llm_metadata_generation"
-	case strings.Contains(message, "stage=article_review"):
-		operation = "llm_article_review"
-	case strings.Contains(message, "stage=article_fix"):
-		operation = "llm_article_fix"
-	case strings.Contains(message, "stage=html_generation") || strings.Contains(message, "stage=validate_html"):
-		operation = "llm_html_generation"
-	case step != nil:
+	case errors.As(err, &service):
+		operation = serviceOperations[service.FailedService()]
+	case errors.As(err, &stage):
+		operation = stageOperations[stage.FailedStage()]
+	}
+	if operation == "" && step != nil {
 		switch *step {
 		case "structure_generation":
 			operation = "llm_structure_generation"

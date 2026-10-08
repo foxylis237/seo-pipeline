@@ -122,6 +122,9 @@ func (e *StageError) Error() string {
 }
 func (e *StageError) Unwrap() error { return e.Err }
 
+// FailedService names the service for error classification.
+func (e *StageError) FailedService() string { return "arsenkin" }
+
 type Service struct {
 	cfg       Config
 	logger    *slog.Logger

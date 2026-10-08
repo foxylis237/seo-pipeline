@@ -84,6 +84,9 @@ func (e *StageError) Error() string {
 
 func (e *StageError) Unwrap() error { return e.Err }
 
+// FailedService names the service for error classification.
+func (e *StageError) FailedService() string { return "keysso" }
+
 // Service управляет браузерной автоматизацией Keys.so.
 type Service struct {
 	cfg    Config

@@ -819,3 +819,6 @@ func TestResumedFixContinuesReviewChatWithoutExtraCall(t *testing.T) {
 		t.Fatalf("лишние вызовы роутера: %v", client.calls)
 	}
 }
+
+// The repository classifies article errors through this method.
+var _ interface{ FailedStage() string } = (*StageError)(nil)

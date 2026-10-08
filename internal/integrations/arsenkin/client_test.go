@@ -870,3 +870,6 @@ func TestWaitWordstatTaskCreatedPacesReloads(t *testing.T) {
 		t.Fatal("между перезагрузками не было паузы")
 	}
 }
+
+// The repository classifies article errors through this method.
+var _ interface{ FailedService() string } = (*StageError)(nil)

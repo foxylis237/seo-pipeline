@@ -1222,8 +1222,27 @@ func TestGetArticleTraceReadsIdentityOfRequestedArticle(t *testing.T) {
 	}
 }
 
+type fakeStageError struct {
+	stage string
+	err   error
+}
+
+func (e *fakeStageError) Error() string       { return "stage=" + e.stage + ": " + e.err.Error() }
+func (e *fakeStageError) Unwrap() error       { return e.err }
+func (e *fakeStageError) FailedStage() string { return e.stage }
+
+type fakeServiceError struct {
+	service string
+	err     error
+}
+
+func (e *fakeServiceError) Error() string         { return e.service + ": " + e.err.Error() }
+func (e *fakeServiceError) Unwrap() error         { return e.err }
+func (e *fakeServiceError) FailedService() string { return e.service }
+
 func TestClassifyErrorOperationIsProviderNeutral(t *testing.T) {
 	step := func(value string) *string { return &value }
+	stageErr := func(stage, message string) error { return &fakeStageError{stage: stage, err: errors.New(message)} }
 	tests := []struct {
 		name string
 		step *string
@@ -1233,38 +1252,62 @@ func TestClassifyErrorOperationIsProviderNeutral(t *testing.T) {
 		{
 			name: "DeepSeek на стадии html",
 			step: step("html_generation"),
-			err:  errors.New(`article_id=1 external_id=37 stage=validate_html: перед HTML обнаружен поясняющий текст`),
+			err:  stageErr("validate_html", "перед HTML обнаружен поясняющий текст"),
 			want: "llm_html_generation",
 		},
 		{
-			name: "OpenRouter на стадии article",
+			name: "OpenRouter на стадии article, стадия внутри обёртки",
 			step: step("article_generation"),
-			err:  errors.New(`LLM stage "article" provider "openrouter": stage=article_generation: rate limit`),
+			err:  fmt.Errorf(`LLM stage "article" provider "openrouter": %w`, stageErr("article_generation", "rate limit")),
 			want: "llm_article_generation",
 		},
 		{
 			name: "Gemini на стадии structure",
 			step: step("structure_generation"),
-			err:  errors.New(`stage=structure_generation: provider gemini failed`),
+			err:  stageErr("structure_generation", "provider gemini failed"),
 			want: "llm_structure_generation",
 		},
 		{
-			name: "по этапу, когда в сообщении стадии нет",
+			name: "запись статьи по стадии, а не по этапу",
+			step: step("article_generation"),
+			err:  stageErr("save_article_state", "disk full"),
+			want: "write_article_file",
+		},
+		{
+			name: "по этапу, когда стадии нет",
 			step: step("metadata_generation"),
 			err:  errors.New("provider deepseek_web: browser closed"),
 			want: "llm_metadata_generation",
 		},
 		{
+			name: "по этапу, когда стадия неизвестна",
+			step: step("html_generation"),
+			err:  stageErr("load_article_data", "no rows"),
+			want: "llm_html_generation",
+		},
+		{
+			name: "текст ошибки не классифицирует",
+			step: step("html_generation"),
+			err:  errors.New("stage=article_review: Keys.so timeout"),
+			want: "llm_html_generation",
+		},
+		{
 			name: "Keys.so остаётся собой",
 			step: step("arsenkin_collection"),
-			err:  errors.New(`Keys.so stage=collect current_url="": timeout`),
+			err:  &fakeServiceError{service: "keysso", err: errors.New("timeout")},
 			want: "keysso_collect_keywords",
 		},
 		{
 			name: "Arsenkin остаётся собой",
 			step: step("arsenkin_collection"),
-			err:  errors.New("Arsenkin article_id=1 stage=wordstat: timeout"),
+			err:  &fakeServiceError{service: "arsenkin", err: errors.New("timeout")},
 			want: "arsenkin_request",
+		},
+		{
+			name: "Keys.so внутри стадии",
+			step: step("structure_generation"),
+			err:  &fakeStageError{stage: "structure_generation", err: &fakeServiceError{service: "keysso", err: errors.New("timeout")}},
+			want: "keysso_collect_keywords",
 		},
 		{
 			name: "сборка result.md",
@@ -1287,8 +1330,8 @@ func TestClassifyErrorOperationIsProviderNeutral(t *testing.T) {
 			}
 		})
 	}
-	if classifyErrorOperation(nil, errors.New("неизвестный сбой")) != nil {
-		t.Fatal("неизвестная ошибка должна оставаться без операции")
+	if classifyErrorOperation(nil, errors.New("Keys.so stage=structure_generation: сбой")) != nil {
+		t.Fatal("ошибка без типа и без этапа должна оставаться без операции")
 	}
 }
 

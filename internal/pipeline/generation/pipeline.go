@@ -61,6 +61,9 @@ func (e *StageError) Error() string {
 }
 func (e *StageError) Unwrap() error { return e.Err }
 
+// FailedStage names the stage for error classification.
+func (e *StageError) FailedStage() string { return e.Stage }
+
 // Pipeline orchestrates all currently implemented generation stages.
 type Pipeline struct {
 	repository       PipelineRepository

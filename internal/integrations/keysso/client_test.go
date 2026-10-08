@@ -285,3 +285,6 @@ func TestDailyLimitStopsWithoutRetryAndWithoutFallback(t *testing.T) {
 		t.Fatal("исчерпанный лимит опознан как отсутствие запросов у конкурента")
 	}
 }
+
+// The repository classifies article errors through this method.
+var _ interface{ FailedService() string } = (*StageError)(nil)
