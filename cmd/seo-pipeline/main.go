@@ -32,6 +32,9 @@ import (
 	"github.com/foxylis237/seo-pipeline/internal/tasks/task1"
 )
 
+// version is set by the Makefile through -ldflags "-X main.version=...".
+var version = "dev"
+
 func main() {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -175,7 +178,7 @@ func main() {
 	}
 	var logRouter *diagnostics.ArticleLogRouter
 	if isArticleOperation(command.Name) {
-		logRouter = diagnostics.NewArticleLogRouter(writer, command.Name, newHandler)
+		logRouter = diagnostics.NewArticleLogRouter(writer, command.Name, version, newHandler)
 	}
 	defer func() {
 		if closeErr := logRouter.Close(); closeErr != nil {

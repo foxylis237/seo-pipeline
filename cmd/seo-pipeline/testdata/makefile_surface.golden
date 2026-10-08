@@ -127,10 +127,10 @@ make login
   | make login deepseek
   exit 2
 make login deepseek
-  | run ./cmd/seo-pipeline login deepseek
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline login deepseek
   exit 0
 make login deepseek extra
-  | run ./cmd/seo-pipeline login deepseek
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline login deepseek
   | Unknown command: extra
   | 
   | Run make help to see available commands.
@@ -141,7 +141,7 @@ make unknown-target
   | Run make help to see available commands.
   exit 2
 make build
-  | build -o bin/seo-pipeline ./cmd/seo-pipeline
+  | build -ldflags -X main.version=snapshot -o bin/seo-pipeline ./cmd/seo-pipeline
   exit 0
 make test
   | test ./...
@@ -150,11 +150,11 @@ make lint
   | run ./...
   exit 0
 make snapshot-save
-  | build -o bin/seo-pipeline ./cmd/seo-pipeline
+  | build -ldflags -X main.version=snapshot -o bin/seo-pipeline ./cmd/seo-pipeline
   | test ./cmd/seo-pipeline -run ^TestLive -count=1
   exit 0
 make snapshot-check
-  | build -o bin/seo-pipeline ./cmd/seo-pipeline
+  | build -ldflags -X main.version=snapshot -o bin/seo-pipeline ./cmd/seo-pipeline
   | test ./cmd/seo-pipeline -run ^TestLive -count=1
   exit 0
 make task-1
@@ -193,19 +193,19 @@ make task-1 run 37 38
   | make task-1 run 37
   exit 2
 make task-1 run plan
-  | run ./cmd/seo-pipeline task-1 run --plan
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 run --plan
   exit 0
 make task-1 run plan 5
-  | run ./cmd/seo-pipeline task-1 run --plan 5
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 run --plan 5
   exit 0
 make task-1 publish plan
-  | run ./cmd/seo-pipeline task-1 publish --plan
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 publish --plan
   exit 0
 make task-1 publish plan 5
-  | run ./cmd/seo-pipeline task-1 publish --plan 5
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 publish --plan 5
   exit 0
 make task-1 mark-published 16 21593
-  | run ./cmd/seo-pipeline task-1 mark-published 16 21593
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 mark-published 16 21593
   exit 0
 make task-1 mark-published 16 x
   | wordpress_post_id must be a positive integer.
@@ -236,52 +236,52 @@ make task-1 google-login 1
   | make task-1 google-login
   exit 2
 make task-1 import
-  | run ./cmd/seo-pipeline task-1 import
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 import
   exit 0
 make task-1 import 37
-  | run ./cmd/seo-pipeline task-1 import 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 import 37
   exit 0
 make task-1 import-check
-  | run ./cmd/seo-pipeline task-1 import-check
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 import-check
   exit 0
 make task-1 import-check 37
-  | run ./cmd/seo-pipeline task-1 import-check 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 import-check 37
   exit 0
 make task-1 errors
-  | run ./cmd/seo-pipeline task-1 errors
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 errors
   exit 0
 make task-1 errors 37
-  | run ./cmd/seo-pipeline task-1 errors 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 errors 37
   exit 0
 make task-1 keywords
-  | run ./cmd/seo-pipeline task-1 keywords
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 keywords
   exit 0
 make task-1 keywords 37
-  | run ./cmd/seo-pipeline task-1 keywords 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 keywords 37
   exit 0
 make task-1 retry
-  | run ./cmd/seo-pipeline task-1 retry
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 retry
   exit 0
 make task-1 retry 37
-  | run ./cmd/seo-pipeline task-1 retry 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 retry 37
   exit 0
 make task-1 run
-  | run ./cmd/seo-pipeline task-1 run
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 run
   exit 0
 make task-1 run 37
-  | run ./cmd/seo-pipeline task-1 run 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 run 37
   exit 0
 make task-1 regenerate
-  | run ./cmd/seo-pipeline task-1 regenerate
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 regenerate
   exit 0
 make task-1 regenerate 37
-  | run ./cmd/seo-pipeline task-1 regenerate 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 regenerate 37
   exit 0
 make task-1 dry-run
   | up -d --wait postgres-dry-run
   | test ./...
   | vet ./...
-  | run ./cmd/seo-pipeline task-1 run --dry-run
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 run --dry-run
   exit 0
 make task-1 dry-run 37
   | dry-run does not accept arguments.
@@ -291,79 +291,79 @@ make task-1 dry-run 37
   | make task-1 dry-run
   exit 2
 make task-1 prepare
-  | run ./cmd/seo-pipeline task-1 prepare
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 prepare
   exit 0
 make task-1 prepare 37
-  | run ./cmd/seo-pipeline task-1 prepare 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 prepare 37
   exit 0
 make task-1 generate
-  | run ./cmd/seo-pipeline task-1 generate
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 generate
   exit 0
 make task-1 generate 37
-  | run ./cmd/seo-pipeline task-1 generate 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 generate 37
   exit 0
 make task-1 demo-generate
-  | run ./cmd/seo-pipeline task-1 demo-generate
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 demo-generate
   exit 0
 make task-1 demo-generate 37
-  | run ./cmd/seo-pipeline task-1 demo-generate 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 demo-generate 37
   exit 0
 make task-1 article
-  | run ./cmd/seo-pipeline task-1 article
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 article
   exit 0
 make task-1 article 37
-  | run ./cmd/seo-pipeline task-1 article 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 article 37
   exit 0
 make task-1 info
-  | run ./cmd/seo-pipeline task-1 info
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 info
   exit 0
 make task-1 info 37
-  | run ./cmd/seo-pipeline task-1 info 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 info 37
   exit 0
 make task-1 review
-  | run ./cmd/seo-pipeline task-1 review
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 review
   exit 0
 make task-1 review 37
-  | run ./cmd/seo-pipeline task-1 review 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 review 37
   exit 0
 make task-1 fix
-  | run ./cmd/seo-pipeline task-1 fix
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 fix
   exit 0
 make task-1 fix 37
-  | run ./cmd/seo-pipeline task-1 fix 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 fix 37
   exit 0
 make task-1 html
-  | run ./cmd/seo-pipeline task-1 html
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 html
   exit 0
 make task-1 html 37
-  | run ./cmd/seo-pipeline task-1 html 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 html 37
   exit 0
 make task-1 result
-  | run ./cmd/seo-pipeline task-1 result
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 result
   exit 0
 make task-1 result 37
-  | run ./cmd/seo-pipeline task-1 result 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 result 37
   exit 0
 make task-1 report
-  | run ./cmd/seo-pipeline task-1 report
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 report
   exit 0
 make task-1 report 37
-  | run ./cmd/seo-pipeline task-1 report 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 report 37
   exit 0
 make task-1 clear
-  | run ./cmd/seo-pipeline task-1 clear
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 clear
   exit 0
 make task-1 clear 37
-  | run ./cmd/seo-pipeline task-1 clear 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 clear 37
   exit 0
 make task-1 reset
-  | run ./cmd/seo-pipeline task-1 reset
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 reset
   exit 0
 make task-1 reset 37
-  | run ./cmd/seo-pipeline task-1 reset 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 reset 37
   exit 0
 make task-1 google-login
-  | run ./cmd/seo-pipeline task-1 google-login
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 google-login
   exit 0
 make task-1 google-login 37
   | google-login does not accept arguments.
@@ -373,13 +373,13 @@ make task-1 google-login 37
   | make task-1 google-login
   exit 2
 make task-1 google-publish
-  | run ./cmd/seo-pipeline task-1 google-publish
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 google-publish
   exit 0
 make task-1 google-publish 37
-  | run ./cmd/seo-pipeline task-1 google-publish 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 google-publish 37
   exit 0
 make task-1 deepseek-login
-  | run ./cmd/seo-pipeline task-1 deepseek-login
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 deepseek-login
   exit 0
 make task-1 deepseek-login 37
   | deepseek-login does not accept arguments.
@@ -389,40 +389,40 @@ make task-1 deepseek-login 37
   | make task-1 deepseek-login
   exit 2
 make task-1 wordpress-check
-  | run ./cmd/seo-pipeline task-1 wordpress-check
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 wordpress-check
   exit 0
 make task-1 wordpress-check 37
-  | run ./cmd/seo-pipeline task-1 wordpress-check 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 wordpress-check 37
   exit 0
 make task-1 publish
-  | run ./cmd/seo-pipeline task-1 publish
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 publish
   exit 0
 make task-1 publish 37
-  | run ./cmd/seo-pipeline task-1 publish 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 publish 37
   exit 0
 make task-1 republish
-  | run ./cmd/seo-pipeline task-1 republish
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 republish
   exit 0
 make task-1 republish 37
-  | run ./cmd/seo-pipeline task-1 republish 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 republish 37
   exit 0
 make task-1 mark-published
-  | run ./cmd/seo-pipeline task-1 mark-published
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 mark-published
   exit 0
 make task-1 mark-published 37
-  | run ./cmd/seo-pipeline task-1 mark-published 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 mark-published 37
   exit 0
 make task-1 catalog-sync
-  | run ./cmd/seo-pipeline task-1 catalog-sync
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 catalog-sync
   exit 0
 make task-1 catalog-sync 37
-  | run ./cmd/seo-pipeline task-1 catalog-sync 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 catalog-sync 37
   exit 0
 make task-1 catalog-show
-  | run ./cmd/seo-pipeline task-1 catalog-show
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 catalog-show
   exit 0
 make task-1 catalog-show 37
-  | run ./cmd/seo-pipeline task-1 catalog-show 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 catalog-show 37
   exit 0
 make pprof-1
   | Operation is required.
@@ -460,19 +460,19 @@ make pprof-1 run 37 38
   | make pprof-1 run 37
   exit 2
 make pprof-1 run plan
-  | run ./cmd/seo-pipeline pprof-1 run --plan
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 run --plan
   exit 0
 make pprof-1 run plan 5
-  | run ./cmd/seo-pipeline pprof-1 run --plan 5
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 run --plan 5
   exit 0
 make pprof-1 publish plan
-  | run ./cmd/seo-pipeline pprof-1 publish --plan
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 publish --plan
   exit 0
 make pprof-1 publish plan 5
-  | run ./cmd/seo-pipeline pprof-1 publish --plan 5
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 publish --plan 5
   exit 0
 make pprof-1 mark-published 16 21593
-  | run ./cmd/seo-pipeline pprof-1 mark-published 16 21593
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 mark-published 16 21593
   exit 0
 make pprof-1 mark-published 16 x
   | wordpress_post_id must be a positive integer.
@@ -503,52 +503,52 @@ make pprof-1 google-login 1
   | make pprof-1 google-login
   exit 2
 make pprof-1 import
-  | run ./cmd/seo-pipeline pprof-1 import
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 import
   exit 0
 make pprof-1 import 37
-  | run ./cmd/seo-pipeline pprof-1 import 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 import 37
   exit 0
 make pprof-1 import-check
-  | run ./cmd/seo-pipeline pprof-1 import-check
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 import-check
   exit 0
 make pprof-1 import-check 37
-  | run ./cmd/seo-pipeline pprof-1 import-check 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 import-check 37
   exit 0
 make pprof-1 errors
-  | run ./cmd/seo-pipeline pprof-1 errors
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 errors
   exit 0
 make pprof-1 errors 37
-  | run ./cmd/seo-pipeline pprof-1 errors 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 errors 37
   exit 0
 make pprof-1 keywords
-  | run ./cmd/seo-pipeline pprof-1 keywords
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 keywords
   exit 0
 make pprof-1 keywords 37
-  | run ./cmd/seo-pipeline pprof-1 keywords 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 keywords 37
   exit 0
 make pprof-1 retry
-  | run ./cmd/seo-pipeline pprof-1 retry
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 retry
   exit 0
 make pprof-1 retry 37
-  | run ./cmd/seo-pipeline pprof-1 retry 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 retry 37
   exit 0
 make pprof-1 run
-  | run ./cmd/seo-pipeline pprof-1 run
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 run
   exit 0
 make pprof-1 run 37
-  | run ./cmd/seo-pipeline pprof-1 run 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 run 37
   exit 0
 make pprof-1 regenerate
-  | run ./cmd/seo-pipeline pprof-1 regenerate
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 regenerate
   exit 0
 make pprof-1 regenerate 37
-  | run ./cmd/seo-pipeline pprof-1 regenerate 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 regenerate 37
   exit 0
 make pprof-1 dry-run
   | up -d --wait postgres-dry-run
   | test ./...
   | vet ./...
-  | run ./cmd/seo-pipeline pprof-1 run --dry-run
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 run --dry-run
   exit 0
 make pprof-1 dry-run 37
   | dry-run does not accept arguments.
@@ -558,79 +558,79 @@ make pprof-1 dry-run 37
   | make pprof-1 dry-run
   exit 2
 make pprof-1 prepare
-  | run ./cmd/seo-pipeline pprof-1 prepare
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 prepare
   exit 0
 make pprof-1 prepare 37
-  | run ./cmd/seo-pipeline pprof-1 prepare 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 prepare 37
   exit 0
 make pprof-1 generate
-  | run ./cmd/seo-pipeline pprof-1 generate
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 generate
   exit 0
 make pprof-1 generate 37
-  | run ./cmd/seo-pipeline pprof-1 generate 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 generate 37
   exit 0
 make pprof-1 demo-generate
-  | run ./cmd/seo-pipeline pprof-1 demo-generate
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 demo-generate
   exit 0
 make pprof-1 demo-generate 37
-  | run ./cmd/seo-pipeline pprof-1 demo-generate 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 demo-generate 37
   exit 0
 make pprof-1 article
-  | run ./cmd/seo-pipeline pprof-1 article
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 article
   exit 0
 make pprof-1 article 37
-  | run ./cmd/seo-pipeline pprof-1 article 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 article 37
   exit 0
 make pprof-1 info
-  | run ./cmd/seo-pipeline pprof-1 info
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 info
   exit 0
 make pprof-1 info 37
-  | run ./cmd/seo-pipeline pprof-1 info 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 info 37
   exit 0
 make pprof-1 review
-  | run ./cmd/seo-pipeline pprof-1 review
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 review
   exit 0
 make pprof-1 review 37
-  | run ./cmd/seo-pipeline pprof-1 review 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 review 37
   exit 0
 make pprof-1 fix
-  | run ./cmd/seo-pipeline pprof-1 fix
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 fix
   exit 0
 make pprof-1 fix 37
-  | run ./cmd/seo-pipeline pprof-1 fix 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 fix 37
   exit 0
 make pprof-1 html
-  | run ./cmd/seo-pipeline pprof-1 html
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 html
   exit 0
 make pprof-1 html 37
-  | run ./cmd/seo-pipeline pprof-1 html 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 html 37
   exit 0
 make pprof-1 result
-  | run ./cmd/seo-pipeline pprof-1 result
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 result
   exit 0
 make pprof-1 result 37
-  | run ./cmd/seo-pipeline pprof-1 result 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 result 37
   exit 0
 make pprof-1 report
-  | run ./cmd/seo-pipeline pprof-1 report
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 report
   exit 0
 make pprof-1 report 37
-  | run ./cmd/seo-pipeline pprof-1 report 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 report 37
   exit 0
 make pprof-1 clear
-  | run ./cmd/seo-pipeline pprof-1 clear
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 clear
   exit 0
 make pprof-1 clear 37
-  | run ./cmd/seo-pipeline pprof-1 clear 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 clear 37
   exit 0
 make pprof-1 reset
-  | run ./cmd/seo-pipeline pprof-1 reset
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 reset
   exit 0
 make pprof-1 reset 37
-  | run ./cmd/seo-pipeline pprof-1 reset 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 reset 37
   exit 0
 make pprof-1 google-login
-  | run ./cmd/seo-pipeline pprof-1 google-login
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 google-login
   exit 0
 make pprof-1 google-login 37
   | google-login does not accept arguments.
@@ -640,13 +640,13 @@ make pprof-1 google-login 37
   | make pprof-1 google-login
   exit 2
 make pprof-1 google-publish
-  | run ./cmd/seo-pipeline pprof-1 google-publish
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 google-publish
   exit 0
 make pprof-1 google-publish 37
-  | run ./cmd/seo-pipeline pprof-1 google-publish 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 google-publish 37
   exit 0
 make pprof-1 deepseek-login
-  | run ./cmd/seo-pipeline pprof-1 deepseek-login
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 deepseek-login
   exit 0
 make pprof-1 deepseek-login 37
   | deepseek-login does not accept arguments.
@@ -656,40 +656,40 @@ make pprof-1 deepseek-login 37
   | make pprof-1 deepseek-login
   exit 2
 make pprof-1 wordpress-check
-  | run ./cmd/seo-pipeline pprof-1 wordpress-check
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 wordpress-check
   exit 0
 make pprof-1 wordpress-check 37
-  | run ./cmd/seo-pipeline pprof-1 wordpress-check 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 wordpress-check 37
   exit 0
 make pprof-1 publish
-  | run ./cmd/seo-pipeline pprof-1 publish
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 publish
   exit 0
 make pprof-1 publish 37
-  | run ./cmd/seo-pipeline pprof-1 publish 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 publish 37
   exit 0
 make pprof-1 republish
-  | run ./cmd/seo-pipeline pprof-1 republish
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 republish
   exit 0
 make pprof-1 republish 37
-  | run ./cmd/seo-pipeline pprof-1 republish 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 republish 37
   exit 0
 make pprof-1 mark-published
-  | run ./cmd/seo-pipeline pprof-1 mark-published
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 mark-published
   exit 0
 make pprof-1 mark-published 37
-  | run ./cmd/seo-pipeline pprof-1 mark-published 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 mark-published 37
   exit 0
 make pprof-1 catalog-sync
-  | run ./cmd/seo-pipeline pprof-1 catalog-sync
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 catalog-sync
   exit 0
 make pprof-1 catalog-sync 37
-  | run ./cmd/seo-pipeline pprof-1 catalog-sync 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 catalog-sync 37
   exit 0
 make pprof-1 catalog-show
-  | run ./cmd/seo-pipeline pprof-1 catalog-show
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 catalog-show
   exit 0
 make pprof-1 catalog-show 37
-  | run ./cmd/seo-pipeline pprof-1 catalog-show 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 catalog-show 37
   exit 0
 make pprof-2
   | Operation is required.
@@ -727,19 +727,19 @@ make pprof-2 run 37 38
   | make pprof-2 run 37
   exit 2
 make pprof-2 run plan
-  | run ./cmd/seo-pipeline pprof-2 run --plan
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 run --plan
   exit 0
 make pprof-2 run plan 5
-  | run ./cmd/seo-pipeline pprof-2 run --plan 5
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 run --plan 5
   exit 0
 make pprof-2 publish plan
-  | run ./cmd/seo-pipeline pprof-2 publish --plan
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 publish --plan
   exit 0
 make pprof-2 publish plan 5
-  | run ./cmd/seo-pipeline pprof-2 publish --plan 5
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 publish --plan 5
   exit 0
 make pprof-2 mark-published 16 21593
-  | run ./cmd/seo-pipeline pprof-2 mark-published 16 21593
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 mark-published 16 21593
   exit 0
 make pprof-2 mark-published 16 x
   | wordpress_post_id must be a positive integer.
@@ -770,52 +770,52 @@ make pprof-2 google-login 1
   | make pprof-2 google-login
   exit 2
 make pprof-2 import
-  | run ./cmd/seo-pipeline pprof-2 import
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 import
   exit 0
 make pprof-2 import 37
-  | run ./cmd/seo-pipeline pprof-2 import 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 import 37
   exit 0
 make pprof-2 import-check
-  | run ./cmd/seo-pipeline pprof-2 import-check
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 import-check
   exit 0
 make pprof-2 import-check 37
-  | run ./cmd/seo-pipeline pprof-2 import-check 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 import-check 37
   exit 0
 make pprof-2 errors
-  | run ./cmd/seo-pipeline pprof-2 errors
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 errors
   exit 0
 make pprof-2 errors 37
-  | run ./cmd/seo-pipeline pprof-2 errors 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 errors 37
   exit 0
 make pprof-2 keywords
-  | run ./cmd/seo-pipeline pprof-2 keywords
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 keywords
   exit 0
 make pprof-2 keywords 37
-  | run ./cmd/seo-pipeline pprof-2 keywords 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 keywords 37
   exit 0
 make pprof-2 retry
-  | run ./cmd/seo-pipeline pprof-2 retry
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 retry
   exit 0
 make pprof-2 retry 37
-  | run ./cmd/seo-pipeline pprof-2 retry 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 retry 37
   exit 0
 make pprof-2 run
-  | run ./cmd/seo-pipeline pprof-2 run
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 run
   exit 0
 make pprof-2 run 37
-  | run ./cmd/seo-pipeline pprof-2 run 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 run 37
   exit 0
 make pprof-2 regenerate
-  | run ./cmd/seo-pipeline pprof-2 regenerate
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 regenerate
   exit 0
 make pprof-2 regenerate 37
-  | run ./cmd/seo-pipeline pprof-2 regenerate 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 regenerate 37
   exit 0
 make pprof-2 dry-run
   | up -d --wait postgres-dry-run
   | test ./...
   | vet ./...
-  | run ./cmd/seo-pipeline pprof-2 run --dry-run
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 run --dry-run
   exit 0
 make pprof-2 dry-run 37
   | dry-run does not accept arguments.
@@ -825,79 +825,79 @@ make pprof-2 dry-run 37
   | make pprof-2 dry-run
   exit 2
 make pprof-2 prepare
-  | run ./cmd/seo-pipeline pprof-2 prepare
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 prepare
   exit 0
 make pprof-2 prepare 37
-  | run ./cmd/seo-pipeline pprof-2 prepare 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 prepare 37
   exit 0
 make pprof-2 generate
-  | run ./cmd/seo-pipeline pprof-2 generate
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 generate
   exit 0
 make pprof-2 generate 37
-  | run ./cmd/seo-pipeline pprof-2 generate 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 generate 37
   exit 0
 make pprof-2 demo-generate
-  | run ./cmd/seo-pipeline pprof-2 demo-generate
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 demo-generate
   exit 0
 make pprof-2 demo-generate 37
-  | run ./cmd/seo-pipeline pprof-2 demo-generate 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 demo-generate 37
   exit 0
 make pprof-2 article
-  | run ./cmd/seo-pipeline pprof-2 article
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 article
   exit 0
 make pprof-2 article 37
-  | run ./cmd/seo-pipeline pprof-2 article 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 article 37
   exit 0
 make pprof-2 info
-  | run ./cmd/seo-pipeline pprof-2 info
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 info
   exit 0
 make pprof-2 info 37
-  | run ./cmd/seo-pipeline pprof-2 info 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 info 37
   exit 0
 make pprof-2 review
-  | run ./cmd/seo-pipeline pprof-2 review
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 review
   exit 0
 make pprof-2 review 37
-  | run ./cmd/seo-pipeline pprof-2 review 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 review 37
   exit 0
 make pprof-2 fix
-  | run ./cmd/seo-pipeline pprof-2 fix
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 fix
   exit 0
 make pprof-2 fix 37
-  | run ./cmd/seo-pipeline pprof-2 fix 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 fix 37
   exit 0
 make pprof-2 html
-  | run ./cmd/seo-pipeline pprof-2 html
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 html
   exit 0
 make pprof-2 html 37
-  | run ./cmd/seo-pipeline pprof-2 html 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 html 37
   exit 0
 make pprof-2 result
-  | run ./cmd/seo-pipeline pprof-2 result
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 result
   exit 0
 make pprof-2 result 37
-  | run ./cmd/seo-pipeline pprof-2 result 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 result 37
   exit 0
 make pprof-2 report
-  | run ./cmd/seo-pipeline pprof-2 report
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 report
   exit 0
 make pprof-2 report 37
-  | run ./cmd/seo-pipeline pprof-2 report 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 report 37
   exit 0
 make pprof-2 clear
-  | run ./cmd/seo-pipeline pprof-2 clear
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 clear
   exit 0
 make pprof-2 clear 37
-  | run ./cmd/seo-pipeline pprof-2 clear 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 clear 37
   exit 0
 make pprof-2 reset
-  | run ./cmd/seo-pipeline pprof-2 reset
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 reset
   exit 0
 make pprof-2 reset 37
-  | run ./cmd/seo-pipeline pprof-2 reset 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 reset 37
   exit 0
 make pprof-2 google-login
-  | run ./cmd/seo-pipeline pprof-2 google-login
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 google-login
   exit 0
 make pprof-2 google-login 37
   | google-login does not accept arguments.
@@ -907,13 +907,13 @@ make pprof-2 google-login 37
   | make pprof-2 google-login
   exit 2
 make pprof-2 google-publish
-  | run ./cmd/seo-pipeline pprof-2 google-publish
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 google-publish
   exit 0
 make pprof-2 google-publish 37
-  | run ./cmd/seo-pipeline pprof-2 google-publish 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 google-publish 37
   exit 0
 make pprof-2 deepseek-login
-  | run ./cmd/seo-pipeline pprof-2 deepseek-login
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 deepseek-login
   exit 0
 make pprof-2 deepseek-login 37
   | deepseek-login does not accept arguments.
@@ -923,40 +923,40 @@ make pprof-2 deepseek-login 37
   | make pprof-2 deepseek-login
   exit 2
 make pprof-2 wordpress-check
-  | run ./cmd/seo-pipeline pprof-2 wordpress-check
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 wordpress-check
   exit 0
 make pprof-2 wordpress-check 37
-  | run ./cmd/seo-pipeline pprof-2 wordpress-check 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 wordpress-check 37
   exit 0
 make pprof-2 publish
-  | run ./cmd/seo-pipeline pprof-2 publish
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 publish
   exit 0
 make pprof-2 publish 37
-  | run ./cmd/seo-pipeline pprof-2 publish 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 publish 37
   exit 0
 make pprof-2 republish
-  | run ./cmd/seo-pipeline pprof-2 republish
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 republish
   exit 0
 make pprof-2 republish 37
-  | run ./cmd/seo-pipeline pprof-2 republish 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 republish 37
   exit 0
 make pprof-2 mark-published
-  | run ./cmd/seo-pipeline pprof-2 mark-published
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 mark-published
   exit 0
 make pprof-2 mark-published 37
-  | run ./cmd/seo-pipeline pprof-2 mark-published 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 mark-published 37
   exit 0
 make pprof-2 catalog-sync
-  | run ./cmd/seo-pipeline pprof-2 catalog-sync
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 catalog-sync
   exit 0
 make pprof-2 catalog-sync 37
-  | run ./cmd/seo-pipeline pprof-2 catalog-sync 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 catalog-sync 37
   exit 0
 make pprof-2 catalog-show
-  | run ./cmd/seo-pipeline pprof-2 catalog-show
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 catalog-show
   exit 0
 make pprof-2 catalog-show 37
-  | run ./cmd/seo-pipeline pprof-2 catalog-show 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 catalog-show 37
   exit 0
 make obuch-1
   | Operation is required.
@@ -994,19 +994,19 @@ make obuch-1 run 37 38
   | make obuch-1 run 37
   exit 2
 make obuch-1 run plan
-  | run ./cmd/seo-pipeline obuch-1 run --plan
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 run --plan
   exit 0
 make obuch-1 run plan 5
-  | run ./cmd/seo-pipeline obuch-1 run --plan 5
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 run --plan 5
   exit 0
 make obuch-1 publish plan
-  | run ./cmd/seo-pipeline obuch-1 publish --plan
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 publish --plan
   exit 0
 make obuch-1 publish plan 5
-  | run ./cmd/seo-pipeline obuch-1 publish --plan 5
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 publish --plan 5
   exit 0
 make obuch-1 mark-published 16 21593
-  | run ./cmd/seo-pipeline obuch-1 mark-published 16 21593
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 mark-published 16 21593
   exit 0
 make obuch-1 mark-published 16 x
   | wordpress_post_id must be a positive integer.
@@ -1037,52 +1037,52 @@ make obuch-1 google-login 1
   | make obuch-1 google-login
   exit 2
 make obuch-1 import
-  | run ./cmd/seo-pipeline obuch-1 import
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 import
   exit 0
 make obuch-1 import 37
-  | run ./cmd/seo-pipeline obuch-1 import 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 import 37
   exit 0
 make obuch-1 import-check
-  | run ./cmd/seo-pipeline obuch-1 import-check
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 import-check
   exit 0
 make obuch-1 import-check 37
-  | run ./cmd/seo-pipeline obuch-1 import-check 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 import-check 37
   exit 0
 make obuch-1 errors
-  | run ./cmd/seo-pipeline obuch-1 errors
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 errors
   exit 0
 make obuch-1 errors 37
-  | run ./cmd/seo-pipeline obuch-1 errors 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 errors 37
   exit 0
 make obuch-1 keywords
-  | run ./cmd/seo-pipeline obuch-1 keywords
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 keywords
   exit 0
 make obuch-1 keywords 37
-  | run ./cmd/seo-pipeline obuch-1 keywords 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 keywords 37
   exit 0
 make obuch-1 retry
-  | run ./cmd/seo-pipeline obuch-1 retry
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 retry
   exit 0
 make obuch-1 retry 37
-  | run ./cmd/seo-pipeline obuch-1 retry 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 retry 37
   exit 0
 make obuch-1 run
-  | run ./cmd/seo-pipeline obuch-1 run
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 run
   exit 0
 make obuch-1 run 37
-  | run ./cmd/seo-pipeline obuch-1 run 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 run 37
   exit 0
 make obuch-1 regenerate
-  | run ./cmd/seo-pipeline obuch-1 regenerate
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 regenerate
   exit 0
 make obuch-1 regenerate 37
-  | run ./cmd/seo-pipeline obuch-1 regenerate 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 regenerate 37
   exit 0
 make obuch-1 dry-run
   | up -d --wait postgres-dry-run
   | test ./...
   | vet ./...
-  | run ./cmd/seo-pipeline obuch-1 run --dry-run
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 run --dry-run
   exit 0
 make obuch-1 dry-run 37
   | dry-run does not accept arguments.
@@ -1092,79 +1092,79 @@ make obuch-1 dry-run 37
   | make obuch-1 dry-run
   exit 2
 make obuch-1 prepare
-  | run ./cmd/seo-pipeline obuch-1 prepare
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 prepare
   exit 0
 make obuch-1 prepare 37
-  | run ./cmd/seo-pipeline obuch-1 prepare 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 prepare 37
   exit 0
 make obuch-1 generate
-  | run ./cmd/seo-pipeline obuch-1 generate
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 generate
   exit 0
 make obuch-1 generate 37
-  | run ./cmd/seo-pipeline obuch-1 generate 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 generate 37
   exit 0
 make obuch-1 demo-generate
-  | run ./cmd/seo-pipeline obuch-1 demo-generate
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 demo-generate
   exit 0
 make obuch-1 demo-generate 37
-  | run ./cmd/seo-pipeline obuch-1 demo-generate 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 demo-generate 37
   exit 0
 make obuch-1 article
-  | run ./cmd/seo-pipeline obuch-1 article
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 article
   exit 0
 make obuch-1 article 37
-  | run ./cmd/seo-pipeline obuch-1 article 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 article 37
   exit 0
 make obuch-1 info
-  | run ./cmd/seo-pipeline obuch-1 info
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 info
   exit 0
 make obuch-1 info 37
-  | run ./cmd/seo-pipeline obuch-1 info 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 info 37
   exit 0
 make obuch-1 review
-  | run ./cmd/seo-pipeline obuch-1 review
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 review
   exit 0
 make obuch-1 review 37
-  | run ./cmd/seo-pipeline obuch-1 review 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 review 37
   exit 0
 make obuch-1 fix
-  | run ./cmd/seo-pipeline obuch-1 fix
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 fix
   exit 0
 make obuch-1 fix 37
-  | run ./cmd/seo-pipeline obuch-1 fix 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 fix 37
   exit 0
 make obuch-1 html
-  | run ./cmd/seo-pipeline obuch-1 html
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 html
   exit 0
 make obuch-1 html 37
-  | run ./cmd/seo-pipeline obuch-1 html 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 html 37
   exit 0
 make obuch-1 result
-  | run ./cmd/seo-pipeline obuch-1 result
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 result
   exit 0
 make obuch-1 result 37
-  | run ./cmd/seo-pipeline obuch-1 result 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 result 37
   exit 0
 make obuch-1 report
-  | run ./cmd/seo-pipeline obuch-1 report
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 report
   exit 0
 make obuch-1 report 37
-  | run ./cmd/seo-pipeline obuch-1 report 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 report 37
   exit 0
 make obuch-1 clear
-  | run ./cmd/seo-pipeline obuch-1 clear
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 clear
   exit 0
 make obuch-1 clear 37
-  | run ./cmd/seo-pipeline obuch-1 clear 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 clear 37
   exit 0
 make obuch-1 reset
-  | run ./cmd/seo-pipeline obuch-1 reset
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 reset
   exit 0
 make obuch-1 reset 37
-  | run ./cmd/seo-pipeline obuch-1 reset 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 reset 37
   exit 0
 make obuch-1 google-login
-  | run ./cmd/seo-pipeline obuch-1 google-login
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 google-login
   exit 0
 make obuch-1 google-login 37
   | google-login does not accept arguments.
@@ -1174,13 +1174,13 @@ make obuch-1 google-login 37
   | make obuch-1 google-login
   exit 2
 make obuch-1 google-publish
-  | run ./cmd/seo-pipeline obuch-1 google-publish
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 google-publish
   exit 0
 make obuch-1 google-publish 37
-  | run ./cmd/seo-pipeline obuch-1 google-publish 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 google-publish 37
   exit 0
 make obuch-1 deepseek-login
-  | run ./cmd/seo-pipeline obuch-1 deepseek-login
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 deepseek-login
   exit 0
 make obuch-1 deepseek-login 37
   | deepseek-login does not accept arguments.
@@ -1190,40 +1190,40 @@ make obuch-1 deepseek-login 37
   | make obuch-1 deepseek-login
   exit 2
 make obuch-1 wordpress-check
-  | run ./cmd/seo-pipeline obuch-1 wordpress-check
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 wordpress-check
   exit 0
 make obuch-1 wordpress-check 37
-  | run ./cmd/seo-pipeline obuch-1 wordpress-check 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 wordpress-check 37
   exit 0
 make obuch-1 publish
-  | run ./cmd/seo-pipeline obuch-1 publish
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 publish
   exit 0
 make obuch-1 publish 37
-  | run ./cmd/seo-pipeline obuch-1 publish 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 publish 37
   exit 0
 make obuch-1 republish
-  | run ./cmd/seo-pipeline obuch-1 republish
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 republish
   exit 0
 make obuch-1 republish 37
-  | run ./cmd/seo-pipeline obuch-1 republish 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 republish 37
   exit 0
 make obuch-1 mark-published
-  | run ./cmd/seo-pipeline obuch-1 mark-published
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 mark-published
   exit 0
 make obuch-1 mark-published 37
-  | run ./cmd/seo-pipeline obuch-1 mark-published 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 mark-published 37
   exit 0
 make obuch-1 catalog-sync
-  | run ./cmd/seo-pipeline obuch-1 catalog-sync
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 catalog-sync
   exit 0
 make obuch-1 catalog-sync 37
-  | run ./cmd/seo-pipeline obuch-1 catalog-sync 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 catalog-sync 37
   exit 0
 make obuch-1 catalog-show
-  | run ./cmd/seo-pipeline obuch-1 catalog-show
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 catalog-show
   exit 0
 make obuch-1 catalog-show 37
-  | run ./cmd/seo-pipeline obuch-1 catalog-show 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 catalog-show 37
   exit 0
 make obuch-2
   | Operation is required.
@@ -1261,19 +1261,19 @@ make obuch-2 run 37 38
   | make obuch-2 run 37
   exit 2
 make obuch-2 run plan
-  | run ./cmd/seo-pipeline obuch-2 run --plan
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 run --plan
   exit 0
 make obuch-2 run plan 5
-  | run ./cmd/seo-pipeline obuch-2 run --plan 5
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 run --plan 5
   exit 0
 make obuch-2 publish plan
-  | run ./cmd/seo-pipeline obuch-2 publish --plan
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 publish --plan
   exit 0
 make obuch-2 publish plan 5
-  | run ./cmd/seo-pipeline obuch-2 publish --plan 5
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 publish --plan 5
   exit 0
 make obuch-2 mark-published 16 21593
-  | run ./cmd/seo-pipeline obuch-2 mark-published 16 21593
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 mark-published 16 21593
   exit 0
 make obuch-2 mark-published 16 x
   | wordpress_post_id must be a positive integer.
@@ -1304,52 +1304,52 @@ make obuch-2 google-login 1
   | make obuch-2 google-login
   exit 2
 make obuch-2 import
-  | run ./cmd/seo-pipeline obuch-2 import
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 import
   exit 0
 make obuch-2 import 37
-  | run ./cmd/seo-pipeline obuch-2 import 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 import 37
   exit 0
 make obuch-2 import-check
-  | run ./cmd/seo-pipeline obuch-2 import-check
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 import-check
   exit 0
 make obuch-2 import-check 37
-  | run ./cmd/seo-pipeline obuch-2 import-check 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 import-check 37
   exit 0
 make obuch-2 errors
-  | run ./cmd/seo-pipeline obuch-2 errors
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 errors
   exit 0
 make obuch-2 errors 37
-  | run ./cmd/seo-pipeline obuch-2 errors 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 errors 37
   exit 0
 make obuch-2 keywords
-  | run ./cmd/seo-pipeline obuch-2 keywords
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 keywords
   exit 0
 make obuch-2 keywords 37
-  | run ./cmd/seo-pipeline obuch-2 keywords 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 keywords 37
   exit 0
 make obuch-2 retry
-  | run ./cmd/seo-pipeline obuch-2 retry
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 retry
   exit 0
 make obuch-2 retry 37
-  | run ./cmd/seo-pipeline obuch-2 retry 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 retry 37
   exit 0
 make obuch-2 run
-  | run ./cmd/seo-pipeline obuch-2 run
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 run
   exit 0
 make obuch-2 run 37
-  | run ./cmd/seo-pipeline obuch-2 run 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 run 37
   exit 0
 make obuch-2 regenerate
-  | run ./cmd/seo-pipeline obuch-2 regenerate
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 regenerate
   exit 0
 make obuch-2 regenerate 37
-  | run ./cmd/seo-pipeline obuch-2 regenerate 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 regenerate 37
   exit 0
 make obuch-2 dry-run
   | up -d --wait postgres-dry-run
   | test ./...
   | vet ./...
-  | run ./cmd/seo-pipeline obuch-2 run --dry-run
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 run --dry-run
   exit 0
 make obuch-2 dry-run 37
   | dry-run does not accept arguments.
@@ -1359,79 +1359,79 @@ make obuch-2 dry-run 37
   | make obuch-2 dry-run
   exit 2
 make obuch-2 prepare
-  | run ./cmd/seo-pipeline obuch-2 prepare
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 prepare
   exit 0
 make obuch-2 prepare 37
-  | run ./cmd/seo-pipeline obuch-2 prepare 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 prepare 37
   exit 0
 make obuch-2 generate
-  | run ./cmd/seo-pipeline obuch-2 generate
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 generate
   exit 0
 make obuch-2 generate 37
-  | run ./cmd/seo-pipeline obuch-2 generate 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 generate 37
   exit 0
 make obuch-2 demo-generate
-  | run ./cmd/seo-pipeline obuch-2 demo-generate
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 demo-generate
   exit 0
 make obuch-2 demo-generate 37
-  | run ./cmd/seo-pipeline obuch-2 demo-generate 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 demo-generate 37
   exit 0
 make obuch-2 article
-  | run ./cmd/seo-pipeline obuch-2 article
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 article
   exit 0
 make obuch-2 article 37
-  | run ./cmd/seo-pipeline obuch-2 article 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 article 37
   exit 0
 make obuch-2 info
-  | run ./cmd/seo-pipeline obuch-2 info
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 info
   exit 0
 make obuch-2 info 37
-  | run ./cmd/seo-pipeline obuch-2 info 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 info 37
   exit 0
 make obuch-2 review
-  | run ./cmd/seo-pipeline obuch-2 review
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 review
   exit 0
 make obuch-2 review 37
-  | run ./cmd/seo-pipeline obuch-2 review 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 review 37
   exit 0
 make obuch-2 fix
-  | run ./cmd/seo-pipeline obuch-2 fix
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 fix
   exit 0
 make obuch-2 fix 37
-  | run ./cmd/seo-pipeline obuch-2 fix 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 fix 37
   exit 0
 make obuch-2 html
-  | run ./cmd/seo-pipeline obuch-2 html
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 html
   exit 0
 make obuch-2 html 37
-  | run ./cmd/seo-pipeline obuch-2 html 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 html 37
   exit 0
 make obuch-2 result
-  | run ./cmd/seo-pipeline obuch-2 result
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 result
   exit 0
 make obuch-2 result 37
-  | run ./cmd/seo-pipeline obuch-2 result 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 result 37
   exit 0
 make obuch-2 report
-  | run ./cmd/seo-pipeline obuch-2 report
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 report
   exit 0
 make obuch-2 report 37
-  | run ./cmd/seo-pipeline obuch-2 report 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 report 37
   exit 0
 make obuch-2 clear
-  | run ./cmd/seo-pipeline obuch-2 clear
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 clear
   exit 0
 make obuch-2 clear 37
-  | run ./cmd/seo-pipeline obuch-2 clear 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 clear 37
   exit 0
 make obuch-2 reset
-  | run ./cmd/seo-pipeline obuch-2 reset
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 reset
   exit 0
 make obuch-2 reset 37
-  | run ./cmd/seo-pipeline obuch-2 reset 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 reset 37
   exit 0
 make obuch-2 google-login
-  | run ./cmd/seo-pipeline obuch-2 google-login
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 google-login
   exit 0
 make obuch-2 google-login 37
   | google-login does not accept arguments.
@@ -1441,13 +1441,13 @@ make obuch-2 google-login 37
   | make obuch-2 google-login
   exit 2
 make obuch-2 google-publish
-  | run ./cmd/seo-pipeline obuch-2 google-publish
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 google-publish
   exit 0
 make obuch-2 google-publish 37
-  | run ./cmd/seo-pipeline obuch-2 google-publish 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 google-publish 37
   exit 0
 make obuch-2 deepseek-login
-  | run ./cmd/seo-pipeline obuch-2 deepseek-login
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 deepseek-login
   exit 0
 make obuch-2 deepseek-login 37
   | deepseek-login does not accept arguments.
@@ -1457,40 +1457,40 @@ make obuch-2 deepseek-login 37
   | make obuch-2 deepseek-login
   exit 2
 make obuch-2 wordpress-check
-  | run ./cmd/seo-pipeline obuch-2 wordpress-check
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 wordpress-check
   exit 0
 make obuch-2 wordpress-check 37
-  | run ./cmd/seo-pipeline obuch-2 wordpress-check 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 wordpress-check 37
   exit 0
 make obuch-2 publish
-  | run ./cmd/seo-pipeline obuch-2 publish
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 publish
   exit 0
 make obuch-2 publish 37
-  | run ./cmd/seo-pipeline obuch-2 publish 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 publish 37
   exit 0
 make obuch-2 republish
-  | run ./cmd/seo-pipeline obuch-2 republish
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 republish
   exit 0
 make obuch-2 republish 37
-  | run ./cmd/seo-pipeline obuch-2 republish 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 republish 37
   exit 0
 make obuch-2 mark-published
-  | run ./cmd/seo-pipeline obuch-2 mark-published
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 mark-published
   exit 0
 make obuch-2 mark-published 37
-  | run ./cmd/seo-pipeline obuch-2 mark-published 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 mark-published 37
   exit 0
 make obuch-2 catalog-sync
-  | run ./cmd/seo-pipeline obuch-2 catalog-sync
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 catalog-sync
   exit 0
 make obuch-2 catalog-sync 37
-  | run ./cmd/seo-pipeline obuch-2 catalog-sync 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 catalog-sync 37
   exit 0
 make obuch-2 catalog-show
-  | run ./cmd/seo-pipeline obuch-2 catalog-show
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 catalog-show
   exit 0
 make obuch-2 catalog-show 37
-  | run ./cmd/seo-pipeline obuch-2 catalog-show 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 catalog-show 37
   exit 0
 make pprof-audit-1
   | Operation is required.
@@ -1528,19 +1528,19 @@ make pprof-audit-1 run 37 38
   | make pprof-audit-1 run 37
   exit 2
 make pprof-audit-1 run plan
-  | run ./cmd/seo-pipeline pprof-audit-1 run --plan
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 run --plan
   exit 0
 make pprof-audit-1 run plan 5
-  | run ./cmd/seo-pipeline pprof-audit-1 run --plan 5
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 run --plan 5
   exit 0
 make pprof-audit-1 publish plan
-  | run ./cmd/seo-pipeline pprof-audit-1 publish --plan
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 publish --plan
   exit 0
 make pprof-audit-1 publish plan 5
-  | run ./cmd/seo-pipeline pprof-audit-1 publish --plan 5
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 publish --plan 5
   exit 0
 make pprof-audit-1 mark-published 16 21593
-  | run ./cmd/seo-pipeline pprof-audit-1 mark-published 16 21593
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 mark-published 16 21593
   exit 0
 make pprof-audit-1 mark-published 16 x
   | wordpress_post_id must be a positive integer.
@@ -1571,52 +1571,52 @@ make pprof-audit-1 google-login 1
   | make pprof-audit-1 google-login
   exit 2
 make pprof-audit-1 import
-  | run ./cmd/seo-pipeline pprof-audit-1 import
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 import
   exit 0
 make pprof-audit-1 import 37
-  | run ./cmd/seo-pipeline pprof-audit-1 import 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 import 37
   exit 0
 make pprof-audit-1 import-check
-  | run ./cmd/seo-pipeline pprof-audit-1 import-check
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 import-check
   exit 0
 make pprof-audit-1 import-check 37
-  | run ./cmd/seo-pipeline pprof-audit-1 import-check 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 import-check 37
   exit 0
 make pprof-audit-1 errors
-  | run ./cmd/seo-pipeline pprof-audit-1 errors
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 errors
   exit 0
 make pprof-audit-1 errors 37
-  | run ./cmd/seo-pipeline pprof-audit-1 errors 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 errors 37
   exit 0
 make pprof-audit-1 keywords
-  | run ./cmd/seo-pipeline pprof-audit-1 keywords
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 keywords
   exit 0
 make pprof-audit-1 keywords 37
-  | run ./cmd/seo-pipeline pprof-audit-1 keywords 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 keywords 37
   exit 0
 make pprof-audit-1 retry
-  | run ./cmd/seo-pipeline pprof-audit-1 retry
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 retry
   exit 0
 make pprof-audit-1 retry 37
-  | run ./cmd/seo-pipeline pprof-audit-1 retry 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 retry 37
   exit 0
 make pprof-audit-1 run
-  | run ./cmd/seo-pipeline pprof-audit-1 run
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 run
   exit 0
 make pprof-audit-1 run 37
-  | run ./cmd/seo-pipeline pprof-audit-1 run 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 run 37
   exit 0
 make pprof-audit-1 regenerate
-  | run ./cmd/seo-pipeline pprof-audit-1 regenerate
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 regenerate
   exit 0
 make pprof-audit-1 regenerate 37
-  | run ./cmd/seo-pipeline pprof-audit-1 regenerate 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 regenerate 37
   exit 0
 make pprof-audit-1 dry-run
   | up -d --wait postgres-dry-run
   | test ./...
   | vet ./...
-  | run ./cmd/seo-pipeline pprof-audit-1 run --dry-run
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 run --dry-run
   exit 0
 make pprof-audit-1 dry-run 37
   | dry-run does not accept arguments.
@@ -1626,79 +1626,79 @@ make pprof-audit-1 dry-run 37
   | make pprof-audit-1 dry-run
   exit 2
 make pprof-audit-1 prepare
-  | run ./cmd/seo-pipeline pprof-audit-1 prepare
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 prepare
   exit 0
 make pprof-audit-1 prepare 37
-  | run ./cmd/seo-pipeline pprof-audit-1 prepare 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 prepare 37
   exit 0
 make pprof-audit-1 generate
-  | run ./cmd/seo-pipeline pprof-audit-1 generate
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 generate
   exit 0
 make pprof-audit-1 generate 37
-  | run ./cmd/seo-pipeline pprof-audit-1 generate 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 generate 37
   exit 0
 make pprof-audit-1 demo-generate
-  | run ./cmd/seo-pipeline pprof-audit-1 demo-generate
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 demo-generate
   exit 0
 make pprof-audit-1 demo-generate 37
-  | run ./cmd/seo-pipeline pprof-audit-1 demo-generate 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 demo-generate 37
   exit 0
 make pprof-audit-1 article
-  | run ./cmd/seo-pipeline pprof-audit-1 article
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 article
   exit 0
 make pprof-audit-1 article 37
-  | run ./cmd/seo-pipeline pprof-audit-1 article 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 article 37
   exit 0
 make pprof-audit-1 info
-  | run ./cmd/seo-pipeline pprof-audit-1 info
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 info
   exit 0
 make pprof-audit-1 info 37
-  | run ./cmd/seo-pipeline pprof-audit-1 info 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 info 37
   exit 0
 make pprof-audit-1 review
-  | run ./cmd/seo-pipeline pprof-audit-1 review
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 review
   exit 0
 make pprof-audit-1 review 37
-  | run ./cmd/seo-pipeline pprof-audit-1 review 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 review 37
   exit 0
 make pprof-audit-1 fix
-  | run ./cmd/seo-pipeline pprof-audit-1 fix
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 fix
   exit 0
 make pprof-audit-1 fix 37
-  | run ./cmd/seo-pipeline pprof-audit-1 fix 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 fix 37
   exit 0
 make pprof-audit-1 html
-  | run ./cmd/seo-pipeline pprof-audit-1 html
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 html
   exit 0
 make pprof-audit-1 html 37
-  | run ./cmd/seo-pipeline pprof-audit-1 html 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 html 37
   exit 0
 make pprof-audit-1 result
-  | run ./cmd/seo-pipeline pprof-audit-1 result
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 result
   exit 0
 make pprof-audit-1 result 37
-  | run ./cmd/seo-pipeline pprof-audit-1 result 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 result 37
   exit 0
 make pprof-audit-1 report
-  | run ./cmd/seo-pipeline pprof-audit-1 report
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 report
   exit 0
 make pprof-audit-1 report 37
-  | run ./cmd/seo-pipeline pprof-audit-1 report 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 report 37
   exit 0
 make pprof-audit-1 clear
-  | run ./cmd/seo-pipeline pprof-audit-1 clear
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 clear
   exit 0
 make pprof-audit-1 clear 37
-  | run ./cmd/seo-pipeline pprof-audit-1 clear 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 clear 37
   exit 0
 make pprof-audit-1 reset
-  | run ./cmd/seo-pipeline pprof-audit-1 reset
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 reset
   exit 0
 make pprof-audit-1 reset 37
-  | run ./cmd/seo-pipeline pprof-audit-1 reset 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 reset 37
   exit 0
 make pprof-audit-1 google-login
-  | run ./cmd/seo-pipeline pprof-audit-1 google-login
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 google-login
   exit 0
 make pprof-audit-1 google-login 37
   | google-login does not accept arguments.
@@ -1708,13 +1708,13 @@ make pprof-audit-1 google-login 37
   | make pprof-audit-1 google-login
   exit 2
 make pprof-audit-1 google-publish
-  | run ./cmd/seo-pipeline pprof-audit-1 google-publish
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 google-publish
   exit 0
 make pprof-audit-1 google-publish 37
-  | run ./cmd/seo-pipeline pprof-audit-1 google-publish 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 google-publish 37
   exit 0
 make pprof-audit-1 deepseek-login
-  | run ./cmd/seo-pipeline pprof-audit-1 deepseek-login
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 deepseek-login
   exit 0
 make pprof-audit-1 deepseek-login 37
   | deepseek-login does not accept arguments.
@@ -1724,40 +1724,40 @@ make pprof-audit-1 deepseek-login 37
   | make pprof-audit-1 deepseek-login
   exit 2
 make pprof-audit-1 wordpress-check
-  | run ./cmd/seo-pipeline pprof-audit-1 wordpress-check
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 wordpress-check
   exit 0
 make pprof-audit-1 wordpress-check 37
-  | run ./cmd/seo-pipeline pprof-audit-1 wordpress-check 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 wordpress-check 37
   exit 0
 make pprof-audit-1 publish
-  | run ./cmd/seo-pipeline pprof-audit-1 publish
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 publish
   exit 0
 make pprof-audit-1 publish 37
-  | run ./cmd/seo-pipeline pprof-audit-1 publish 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 publish 37
   exit 0
 make pprof-audit-1 republish
-  | run ./cmd/seo-pipeline pprof-audit-1 republish
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 republish
   exit 0
 make pprof-audit-1 republish 37
-  | run ./cmd/seo-pipeline pprof-audit-1 republish 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 republish 37
   exit 0
 make pprof-audit-1 mark-published
-  | run ./cmd/seo-pipeline pprof-audit-1 mark-published
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 mark-published
   exit 0
 make pprof-audit-1 mark-published 37
-  | run ./cmd/seo-pipeline pprof-audit-1 mark-published 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 mark-published 37
   exit 0
 make pprof-audit-1 catalog-sync
-  | run ./cmd/seo-pipeline pprof-audit-1 catalog-sync
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 catalog-sync
   exit 0
 make pprof-audit-1 catalog-sync 37
-  | run ./cmd/seo-pipeline pprof-audit-1 catalog-sync 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 catalog-sync 37
   exit 0
 make pprof-audit-1 catalog-show
-  | run ./cmd/seo-pipeline pprof-audit-1 catalog-show
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 catalog-show
   exit 0
 make pprof-audit-1 catalog-show 37
-  | run ./cmd/seo-pipeline pprof-audit-1 catalog-show 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 catalog-show 37
   exit 0
 make pprof-audit-2
   | Operation is required.
@@ -1795,19 +1795,19 @@ make pprof-audit-2 run 37 38
   | make pprof-audit-2 run 37
   exit 2
 make pprof-audit-2 run plan
-  | run ./cmd/seo-pipeline pprof-audit-2 run --plan
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 run --plan
   exit 0
 make pprof-audit-2 run plan 5
-  | run ./cmd/seo-pipeline pprof-audit-2 run --plan 5
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 run --plan 5
   exit 0
 make pprof-audit-2 publish plan
-  | run ./cmd/seo-pipeline pprof-audit-2 publish --plan
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 publish --plan
   exit 0
 make pprof-audit-2 publish plan 5
-  | run ./cmd/seo-pipeline pprof-audit-2 publish --plan 5
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 publish --plan 5
   exit 0
 make pprof-audit-2 mark-published 16 21593
-  | run ./cmd/seo-pipeline pprof-audit-2 mark-published 16 21593
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 mark-published 16 21593
   exit 0
 make pprof-audit-2 mark-published 16 x
   | wordpress_post_id must be a positive integer.
@@ -1838,52 +1838,52 @@ make pprof-audit-2 google-login 1
   | make pprof-audit-2 google-login
   exit 2
 make pprof-audit-2 import
-  | run ./cmd/seo-pipeline pprof-audit-2 import
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 import
   exit 0
 make pprof-audit-2 import 37
-  | run ./cmd/seo-pipeline pprof-audit-2 import 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 import 37
   exit 0
 make pprof-audit-2 import-check
-  | run ./cmd/seo-pipeline pprof-audit-2 import-check
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 import-check
   exit 0
 make pprof-audit-2 import-check 37
-  | run ./cmd/seo-pipeline pprof-audit-2 import-check 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 import-check 37
   exit 0
 make pprof-audit-2 errors
-  | run ./cmd/seo-pipeline pprof-audit-2 errors
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 errors
   exit 0
 make pprof-audit-2 errors 37
-  | run ./cmd/seo-pipeline pprof-audit-2 errors 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 errors 37
   exit 0
 make pprof-audit-2 keywords
-  | run ./cmd/seo-pipeline pprof-audit-2 keywords
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 keywords
   exit 0
 make pprof-audit-2 keywords 37
-  | run ./cmd/seo-pipeline pprof-audit-2 keywords 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 keywords 37
   exit 0
 make pprof-audit-2 retry
-  | run ./cmd/seo-pipeline pprof-audit-2 retry
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 retry
   exit 0
 make pprof-audit-2 retry 37
-  | run ./cmd/seo-pipeline pprof-audit-2 retry 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 retry 37
   exit 0
 make pprof-audit-2 run
-  | run ./cmd/seo-pipeline pprof-audit-2 run
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 run
   exit 0
 make pprof-audit-2 run 37
-  | run ./cmd/seo-pipeline pprof-audit-2 run 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 run 37
   exit 0
 make pprof-audit-2 regenerate
-  | run ./cmd/seo-pipeline pprof-audit-2 regenerate
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 regenerate
   exit 0
 make pprof-audit-2 regenerate 37
-  | run ./cmd/seo-pipeline pprof-audit-2 regenerate 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 regenerate 37
   exit 0
 make pprof-audit-2 dry-run
   | up -d --wait postgres-dry-run
   | test ./...
   | vet ./...
-  | run ./cmd/seo-pipeline pprof-audit-2 run --dry-run
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 run --dry-run
   exit 0
 make pprof-audit-2 dry-run 37
   | dry-run does not accept arguments.
@@ -1893,79 +1893,79 @@ make pprof-audit-2 dry-run 37
   | make pprof-audit-2 dry-run
   exit 2
 make pprof-audit-2 prepare
-  | run ./cmd/seo-pipeline pprof-audit-2 prepare
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 prepare
   exit 0
 make pprof-audit-2 prepare 37
-  | run ./cmd/seo-pipeline pprof-audit-2 prepare 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 prepare 37
   exit 0
 make pprof-audit-2 generate
-  | run ./cmd/seo-pipeline pprof-audit-2 generate
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 generate
   exit 0
 make pprof-audit-2 generate 37
-  | run ./cmd/seo-pipeline pprof-audit-2 generate 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 generate 37
   exit 0
 make pprof-audit-2 demo-generate
-  | run ./cmd/seo-pipeline pprof-audit-2 demo-generate
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 demo-generate
   exit 0
 make pprof-audit-2 demo-generate 37
-  | run ./cmd/seo-pipeline pprof-audit-2 demo-generate 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 demo-generate 37
   exit 0
 make pprof-audit-2 article
-  | run ./cmd/seo-pipeline pprof-audit-2 article
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 article
   exit 0
 make pprof-audit-2 article 37
-  | run ./cmd/seo-pipeline pprof-audit-2 article 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 article 37
   exit 0
 make pprof-audit-2 info
-  | run ./cmd/seo-pipeline pprof-audit-2 info
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 info
   exit 0
 make pprof-audit-2 info 37
-  | run ./cmd/seo-pipeline pprof-audit-2 info 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 info 37
   exit 0
 make pprof-audit-2 review
-  | run ./cmd/seo-pipeline pprof-audit-2 review
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 review
   exit 0
 make pprof-audit-2 review 37
-  | run ./cmd/seo-pipeline pprof-audit-2 review 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 review 37
   exit 0
 make pprof-audit-2 fix
-  | run ./cmd/seo-pipeline pprof-audit-2 fix
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 fix
   exit 0
 make pprof-audit-2 fix 37
-  | run ./cmd/seo-pipeline pprof-audit-2 fix 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 fix 37
   exit 0
 make pprof-audit-2 html
-  | run ./cmd/seo-pipeline pprof-audit-2 html
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 html
   exit 0
 make pprof-audit-2 html 37
-  | run ./cmd/seo-pipeline pprof-audit-2 html 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 html 37
   exit 0
 make pprof-audit-2 result
-  | run ./cmd/seo-pipeline pprof-audit-2 result
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 result
   exit 0
 make pprof-audit-2 result 37
-  | run ./cmd/seo-pipeline pprof-audit-2 result 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 result 37
   exit 0
 make pprof-audit-2 report
-  | run ./cmd/seo-pipeline pprof-audit-2 report
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 report
   exit 0
 make pprof-audit-2 report 37
-  | run ./cmd/seo-pipeline pprof-audit-2 report 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 report 37
   exit 0
 make pprof-audit-2 clear
-  | run ./cmd/seo-pipeline pprof-audit-2 clear
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 clear
   exit 0
 make pprof-audit-2 clear 37
-  | run ./cmd/seo-pipeline pprof-audit-2 clear 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 clear 37
   exit 0
 make pprof-audit-2 reset
-  | run ./cmd/seo-pipeline pprof-audit-2 reset
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 reset
   exit 0
 make pprof-audit-2 reset 37
-  | run ./cmd/seo-pipeline pprof-audit-2 reset 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 reset 37
   exit 0
 make pprof-audit-2 google-login
-  | run ./cmd/seo-pipeline pprof-audit-2 google-login
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 google-login
   exit 0
 make pprof-audit-2 google-login 37
   | google-login does not accept arguments.
@@ -1975,13 +1975,13 @@ make pprof-audit-2 google-login 37
   | make pprof-audit-2 google-login
   exit 2
 make pprof-audit-2 google-publish
-  | run ./cmd/seo-pipeline pprof-audit-2 google-publish
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 google-publish
   exit 0
 make pprof-audit-2 google-publish 37
-  | run ./cmd/seo-pipeline pprof-audit-2 google-publish 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 google-publish 37
   exit 0
 make pprof-audit-2 deepseek-login
-  | run ./cmd/seo-pipeline pprof-audit-2 deepseek-login
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 deepseek-login
   exit 0
 make pprof-audit-2 deepseek-login 37
   | deepseek-login does not accept arguments.
@@ -1991,38 +1991,38 @@ make pprof-audit-2 deepseek-login 37
   | make pprof-audit-2 deepseek-login
   exit 2
 make pprof-audit-2 wordpress-check
-  | run ./cmd/seo-pipeline pprof-audit-2 wordpress-check
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 wordpress-check
   exit 0
 make pprof-audit-2 wordpress-check 37
-  | run ./cmd/seo-pipeline pprof-audit-2 wordpress-check 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 wordpress-check 37
   exit 0
 make pprof-audit-2 publish
-  | run ./cmd/seo-pipeline pprof-audit-2 publish
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 publish
   exit 0
 make pprof-audit-2 publish 37
-  | run ./cmd/seo-pipeline pprof-audit-2 publish 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 publish 37
   exit 0
 make pprof-audit-2 republish
-  | run ./cmd/seo-pipeline pprof-audit-2 republish
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 republish
   exit 0
 make pprof-audit-2 republish 37
-  | run ./cmd/seo-pipeline pprof-audit-2 republish 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 republish 37
   exit 0
 make pprof-audit-2 mark-published
-  | run ./cmd/seo-pipeline pprof-audit-2 mark-published
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 mark-published
   exit 0
 make pprof-audit-2 mark-published 37
-  | run ./cmd/seo-pipeline pprof-audit-2 mark-published 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 mark-published 37
   exit 0
 make pprof-audit-2 catalog-sync
-  | run ./cmd/seo-pipeline pprof-audit-2 catalog-sync
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 catalog-sync
   exit 0
 make pprof-audit-2 catalog-sync 37
-  | run ./cmd/seo-pipeline pprof-audit-2 catalog-sync 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 catalog-sync 37
   exit 0
 make pprof-audit-2 catalog-show
-  | run ./cmd/seo-pipeline pprof-audit-2 catalog-show
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 catalog-show
   exit 0
 make pprof-audit-2 catalog-show 37
-  | run ./cmd/seo-pipeline pprof-audit-2 catalog-show 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 catalog-show 37
   exit 0

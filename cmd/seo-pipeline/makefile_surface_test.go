@@ -74,7 +74,7 @@ func TestMakefileSurfaceSnapshot(t *testing.T) {
 
 func runMakeSurface(t *testing.T, args []string) string {
 	t.Helper()
-	command := exec.Command("make", append([]string{"-s", "GO=echo", "DOCKER_COMPOSE=echo", "GOLANGCI_LINT=echo"}, args...)...)
+	command := exec.Command("make", append([]string{"-s", "GO=echo", "DOCKER_COMPOSE=echo", "GOLANGCI_LINT=echo", "VERSION=snapshot"}, args...)...)
 	command.Dir = filepath.Join("..", "..")
 	for _, env := range os.Environ() {
 		if !strings.HasPrefix(env, "MAKEFLAGS=") && !strings.HasPrefix(env, "MFLAGS=") && !strings.HasPrefix(env, "MAKELEVEL=") {

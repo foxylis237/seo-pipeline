@@ -21,6 +21,7 @@ type LogFileOpener interface {
 type ArticleLogRouter struct {
 	opener   LogFileOpener
 	stageLog string
+	version  string
 	newFile  func(io.Writer) slog.Handler
 
 	mu         sync.Mutex
@@ -32,10 +33,11 @@ type ArticleLogRouter struct {
 	openFailed map[string]struct{}
 }
 
-// NewArticleLogRouter creates a router writing <stage>.log next to the article artifacts.
-func NewArticleLogRouter(opener LogFileOpener, stage string, newFile func(io.Writer) slog.Handler) *ArticleLogRouter {
+// NewArticleLogRouter creates a router writing <stage>.log next to the article artifacts;
+// every opened log starts with the code version.
+func NewArticleLogRouter(opener LogFileOpener, stage, version string, newFile func(io.Writer) slog.Handler) *ArticleLogRouter {
 	return &ArticleLogRouter{
-		opener: opener, stageLog: stage + ".log", newFile: newFile,
+		opener: opener, stageLog: stage + ".log", version: version, newFile: newFile,
 		slugs: map[string]string{}, byArticle: map[string]string{},
 		files: map[string]*os.File{}, handlers: map[string]slog.Handler{},
 		logPaths: map[string]string{}, openFailed: map[string]struct{}{},
@@ -107,6 +109,7 @@ func (r *ArticleLogRouter) handlerFor(externalID string) slog.Handler {
 		return nil
 	}
 	handler := r.newFile(file)
+	slog.New(handler).Info("article log opened", "external_id", externalID, "version", r.version)
 	r.files[externalID] = file
 	r.handlers[externalID] = handler
 	r.logPaths[externalID] = relativePath

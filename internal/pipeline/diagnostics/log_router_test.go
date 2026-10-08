@@ -42,7 +42,7 @@ func newTestRouter(t *testing.T) (*ArticleLogRouter, *bytes.Buffer, string) {
 	t.Helper()
 	root := t.TempDir()
 	opener := &fileOpener{root: root, knownSlugs: map[string]string{}}
-	router := NewArticleLogRouter(opener, "prepare", func(destination io.Writer) slog.Handler {
+	router := NewArticleLogRouter(opener, "prepare", "v-test", func(destination io.Writer) slog.Handler {
 		return slog.NewTextHandler(destination, nil)
 	})
 	t.Cleanup(func() { _ = router.Close() })
@@ -79,6 +79,25 @@ func TestRouterWritesArticleRecordsIntoItsOwnLog(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "без статьи") || !strings.Contains(stdout.String(), "этап начат") {
 		t.Fatalf("stdout потерял записи: %q", stdout.String())
+	}
+}
+
+func TestRouterStartsArticleLogWithVersion(t *testing.T) {
+	router, stdout, root := newTestRouter(t)
+	router.Register(7, "52", "kak-stat-logopedom")
+	logger := slog.New(router.Handler(slog.NewTextHandler(stdout, nil)))
+
+	logger.With("article_id", int64(7), "external_id", "52").Info("этап начат")
+	if err := router.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	first, _, _ := strings.Cut(readStageLog(t, root, "52-kak-stat-logopedom"), "\n")
+	if !strings.Contains(first, "article log opened") || !strings.Contains(first, "version=v-test") {
+		t.Fatalf("лог статьи начинается не с версии: %q", first)
+	}
+	if strings.Contains(stdout.String(), "version=") {
+		t.Fatalf("строка версии попала в stdout: %q", stdout.String())
 	}
 }
 

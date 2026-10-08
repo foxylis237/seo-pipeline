@@ -6,6 +6,9 @@ GO ?= go
 GOLANGCI_LINT ?= golangci-lint
 DOCKER_COMPOSE ?= docker compose
 BINARY := bin/seo-pipeline
+# Версия кода уходит в лог каждой статьи: по артефакту видно, каким кодом он писался.
+VERSION ?= $(shell git describe --always --dirty 2>/dev/null || echo dev)
+LDFLAGS = -ldflags "-X main.version=$(VERSION)"
 DRY_RUN_DATABASE_URL ?= postgres://seo:seo@localhost:5433/seo_dry_run?sslmode=disable
 
 # Namespaced syntax: make <task> <operation> [article_id|limit].
@@ -14,7 +17,7 @@ DRY_RUN_DATABASE_URL ?= postgres://seo:seo@localhost:5433/seo_dry_run?sslmode=di
 # а пути, схему стадий и схему PostgreSQL выбирает профиль внутри CLI.
 TASK_NAMES := task-1 pprof-1 pprof-2 obuch-1 obuch-2 pprof-audit-1 pprof-audit-2
 TASK_NAME := $(firstword $(MAKECMDGOALS))
-CLI = $(GO) run ./cmd/seo-pipeline $(TASK_NAME)
+CLI = $(GO) run $(LDFLAGS) ./cmd/seo-pipeline $(TASK_NAME)
 
 # Глобальный вход в сервисы: make login deepseek. Задаче не принадлежит.
 LOGIN_SERVICE := $(word 2,$(MAKECMDGOALS))
@@ -249,7 +252,7 @@ login: ## ручной вход: make login deepseek
 		printf 'Service is required.\n\nExample:\n\nmake login deepseek\n'; \
 		exit 1; \
 	fi
-	@$(GO) run ./cmd/seo-pipeline login "$(LOGIN_SERVICE)"
+	@$(GO) run $(LDFLAGS) ./cmd/seo-pipeline login "$(LOGIN_SERVICE)"
 
 # ----------------------------------------------------
 # Docker
@@ -305,7 +308,7 @@ lint-fix: ## golangci-lint с автоправками
 
 build: ## бинарник в bin/seo-pipeline
 	mkdir -p bin
-	$(GO) build -o $(BINARY) ./cmd/seo-pipeline
+	$(GO) build $(LDFLAGS) -o $(BINARY) ./cmd/seo-pipeline
 
 # Снимки команд на живой базе и книгах импорта. Эталон — вне git, в $(SNAPSHOT_DIR);
 # из worktree: make snapshot-check SNAPSHOT_WORKDIR=../seo-pipeline.
