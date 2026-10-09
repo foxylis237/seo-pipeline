@@ -176,7 +176,7 @@ func (e *keywordsTableWaitError) Unwrap() error { return e.Err }
 
 // New создаёт интеграцию с Keys.so.
 func New(cfg Config, logger *slog.Logger) *Service {
-	return &Service{cfg: cfg, logger: logger.With("article_id", cfg.ArticleID, "external_id", cfg.ExternalID, "integration", "keysso")}
+	return &Service{cfg: cfg, logger: logger.With("article_id", cfg.ArticleID, "external_id", cfg.ExternalID, "stage", "keysso")}
 }
 
 // CollectCleanKeywords получает запросы конкурента и очищает неявные дубли.
@@ -505,8 +505,6 @@ func (s *Service) collectCompetitorQueries(ctx context.Context, referenceURL str
 		if !isRetryableResultError(navigationErr) || attempt == keywordsTableMaxAttempts {
 			return nil, navigationErr
 		}
-		result, retryable := resultErrorFields(navigationErr)
-		s.log(ctx, slog.LevelWarn, "Keys.so search navigation retry", "navigate_search_results", "attempt", attempt+1, "max_attempts", keywordsTableMaxAttempts, "reference_url", referenceURL, "result", result, "retryable", retryable, "error", navigationErr)
 	}
 
 	if err := s.waitKeywordsResults(ctx); err != nil {
@@ -694,23 +692,21 @@ func (s *Service) waitKeywordsResults(ctx context.Context) error {
 			return err
 		}
 		if attempt > 1 {
-			s.log(ctx, slog.LevelInfo, "Keys.so: refreshing results page", "wait_search_results", "attempt", attempt, "max_attempts", keywordsTableMaxAttempts)
+			s.log(ctx, slog.LevelInfo, "страница результатов Keys.so перезагружается", "wait_search_results", "attempt", attempt, "max_attempts", keywordsTableMaxAttempts)
 			if err := s.refreshKeywordsResults(ctx); err != nil {
 				return fmt.Errorf("refresh Keys.so results before attempt %d/%d: %w", attempt, keywordsTableMaxAttempts, errors.Join(lastErr, err))
 			}
 		}
 
-		s.log(ctx, slog.LevelInfo, "Keys.so: waiting keywords table", "wait_search_results", "attempt", attempt, "max_attempts", keywordsTableMaxAttempts, "locator", keywordsTableSelector)
+		s.log(ctx, slog.LevelInfo, "ожидание таблицы запросов Keys.so", "wait_search_results", "attempt", attempt, "max_attempts", keywordsTableMaxAttempts, "locator", keywordsTableSelector)
 		started := time.Now()
 		lastErr = s.waitKeywordsResultsOnce(ctx)
 		duration := time.Since(started)
 		durations = append(durations, duration)
 		if lastErr == nil {
-			s.log(ctx, slog.LevelInfo, "Keys.so: keywords table loaded", "wait_search_results", "attempt", attempt, "max_attempts", keywordsTableMaxAttempts, "attempt_duration_ms", duration.Milliseconds(), "locator", keywordsTableSelector)
+			s.log(ctx, slog.LevelInfo, "таблица запросов Keys.so загружена", "wait_search_results", "attempt", attempt, "max_attempts", keywordsTableMaxAttempts, "duration_ms", duration.Milliseconds(), "locator", keywordsTableSelector)
 			return nil
 		}
-		result, retryable := resultErrorFields(lastErr)
-		s.log(ctx, slog.LevelWarn, "Keys.so: keywords table attempt failed", "wait_search_results", "attempt", attempt, "max_attempts", keywordsTableMaxAttempts, "attempt_duration_ms", duration.Milliseconds(), "locator", keywordsTableSelector, "reference_url", s.referenceURL, "requested_url", s.requestedURL, "result", result, "retryable", retryable, "error", lastErr)
 		lastErr = s.captureError(ctx, "wait_search_results", attempt, keywordsTableMaxAttempts, lastErr)
 		if !isRetryableResultError(lastErr) {
 			return lastErr
@@ -725,7 +721,7 @@ func (s *Service) waitKeywordsResults(ctx context.Context) error {
 		}
 	}
 	result, retryable := resultErrorFields(lastErr)
-	s.log(ctx, slog.LevelError, "Keys.so failed after 3 attempts", "wait_search_results", "attempts", keywordsTableMaxAttempts, "locator", keywordsTableSelector, "reference_url", s.referenceURL, "requested_url", s.requestedURL, "result", result, "retryable", retryable, "error", lastErr)
+	s.log(ctx, slog.LevelError, "таблица запросов Keys.so не загрузилась за все попытки", "wait_search_results", "attempts", keywordsTableMaxAttempts, "locator", keywordsTableSelector, "reference_url", s.referenceURL, "requested_url", s.requestedURL, "result", result, "retryable", retryable, "error", lastErr)
 	return &keywordsTableWaitError{
 		Attempts: keywordsTableMaxAttempts, URL: s.currentURL(), Selector: keywordsTableSelector,
 		AttemptDurations: durations, Err: lastErr,
@@ -1030,7 +1026,7 @@ func (s *Service) detectMaintenancePage(ctx context.Context) error {
 		return fmt.Errorf("read Keys.so page title: %w", err)
 	}
 	if strings.EqualFold(strings.TrimSpace(title), "Технические работы на сайте") {
-		s.log(ctx, slog.LevelWarn, "Keys.so maintenance page detected", "maintenance", "page_title", title, "retryable", true, "reference_url", s.referenceURL)
+		s.log(ctx, slog.LevelWarn, "на Keys.so технические работы", "maintenance", "page_title", title, "retryable", true, "reference_url", s.referenceURL)
 		return &resultError{Kind: resultMaintenance, Retryable: true, Err: fmt.Errorf("Keys.so is unavailable: maintenance page detected")}
 	}
 	return nil
@@ -1081,18 +1077,24 @@ func (s *Service) captureError(ctx context.Context, stage string, attempt, maxAt
 	if errors.As(err, &captured) {
 		return err
 	}
+	debugPath := ""
 	if s.saveDebugArtifactsHook != nil {
 		s.saveDebugArtifactsHook(stage, attempt, maxAttempts, err)
 	} else {
-		s.saveDebugArtifacts(ctx, stage, attempt, maxAttempts, err)
+		debugPath = s.saveDebugArtifacts(ctx, stage, attempt, maxAttempts, err)
 	}
+	result, retryable := resultErrorFields(err)
+	s.log(ctx, slog.LevelWarn, "попытка Keys.so не удалась", stage,
+		"attempt", attempt, "max_attempts", maxAttempts, "result", result, "retryable", retryable,
+		"reference_url", s.referenceURL, "requested_url", s.requestedURL, "debug_path", debugPath, "error", err)
 	return &debugCapturedError{err: err}
 }
 
-func (s *Service) saveDebugArtifacts(ctx context.Context, stage string, attempt, maxAttempts int, processingErr error) {
+// saveDebugArtifacts returns the snapshot directory, or "" when the page was unavailable.
+func (s *Service) saveDebugArtifacts(ctx context.Context, stage string, attempt, maxAttempts int, processingErr error) string {
 	if s.page == nil {
-		s.log(ctx, slog.LevelWarn, "Keys.so debug artifacts were not saved: page is unavailable", stage, "attempt", attempt)
-		return
+		s.log(ctx, slog.LevelWarn, "снимок Keys.so не сохранён: страница недоступна", stage, "attempt", attempt)
+		return ""
 	}
 	timestamp := time.Now()
 	directory := filepath.Join(
@@ -1102,7 +1104,7 @@ func (s *Service) saveDebugArtifacts(ctx context.Context, stage string, attempt,
 	)
 	if err := os.MkdirAll(directory, 0o750); err != nil {
 		s.log(ctx, slog.LevelWarn, "не удалось создать каталог Keys.so debug", stage, "attempt", attempt, "debug_path", directory, "error", err)
-		return
+		return ""
 	}
 
 	screenshotPath := filepath.Join(directory, "screenshot.png")
@@ -1144,7 +1146,7 @@ func (s *Service) saveDebugArtifacts(ctx context.Context, stage string, attempt,
 	} else if err := os.WriteFile(filepath.Join(directory, "info.json"), encoded, 0o600); err != nil {
 		s.log(ctx, slog.LevelWarn, "не удалось сохранить Keys.so info.json", stage, "attempt", attempt, "debug_path", directory, "error", err)
 	}
-	s.log(ctx, slog.LevelInfo, "Keys.so debug artifacts saved", stage, "attempt", attempt, "debug_path", directory)
+	return directory
 }
 
 func safeDiagnosticError(err error) string {
@@ -1341,16 +1343,11 @@ func (s *Service) stageError(stage string, err error) error {
 	}
 }
 
-// log пишет запись этапа с контекстом вызывающего.
-func (s *Service) log(ctx context.Context, level slog.Level, message, stage string, attributes ...any) {
-	duration := time.Duration(0)
-	if !s.startedAt.IsZero() {
-		duration = time.Since(s.startedAt)
-	}
+// log пишет запись шага с контекстом вызывающего.
+func (s *Service) log(ctx context.Context, level slog.Level, message, step string, attributes ...any) {
 	fields := []any{
-		"stage", stage,
-		"duration_ms", duration.Milliseconds(),
-		"current_url", s.currentURL(),
+		"step", step,
+		"url", s.currentURL(),
 		"collected_count", s.collectedCount,
 		"cleaned_count", s.cleanedCount,
 	}

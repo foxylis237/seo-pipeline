@@ -3,6 +3,7 @@ package keysso
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -52,10 +53,43 @@ func TestWaitKeywordsResultsRetriesAtMostThreeTimes(t *testing.T) {
 			if captures != test.failures {
 				t.Fatalf("debug captures=%d, want %d", captures, test.failures)
 			}
-			if !strings.Contains(logs.String(), "attempt="+strconv.Itoa(test.wantAttempts)) || !strings.Contains(logs.String(), "keywords table loaded") {
+			if !strings.Contains(logs.String(), "attempt="+strconv.Itoa(test.wantAttempts)) || !strings.Contains(logs.String(), "таблица запросов Keys.so загружена") {
 				t.Fatalf("attempt/success log is missing:\n%s", logs.String())
 			}
 		})
+	}
+}
+
+func TestFailedAttemptIsOneRecordWithStageAndStep(t *testing.T) {
+	var logs bytes.Buffer
+	service := New(Config{ArticleID: 9, ExternalID: "46"}, slog.New(slog.NewJSONHandler(&logs, nil)))
+	service.waitKeywordsResultsHook = func(context.Context) error { return errors.New("table timeout") }
+	service.refreshKeywordsResultsHook = func(context.Context) error { return nil }
+	service.saveDebugArtifactsHook = func(string, int, int, error) {}
+
+	if err := service.waitKeywordsResults(context.Background()); err == nil {
+		t.Fatal("waitKeywordsResults succeeded, want error")
+	}
+	var failedAttempts []float64
+	for _, line := range strings.Split(strings.TrimSpace(logs.String()), "\n") {
+		var record map[string]any
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
+			t.Fatal(err)
+		}
+		if record["stage"] != "keysso" || record["step"] == nil || record["external_id"] != "46" {
+			t.Errorf("%q: stage=%v step=%v external_id=%v", record["msg"], record["stage"], record["step"], record["external_id"])
+		}
+		for _, key := range []string{"integration", "current_url", "attempt_duration_ms"} {
+			if _, found := record[key]; found {
+				t.Errorf("%q: old key %s", record["msg"], key)
+			}
+		}
+		if record["level"] == "WARN" {
+			failedAttempts = append(failedAttempts, record["attempt"].(float64))
+		}
+	}
+	if !reflect.DeepEqual(failedAttempts, []float64{1, 2, 3}) {
+		t.Fatalf("warn records per attempt = %v, want one per attempt [1 2 3]\n%s", failedAttempts, logs.String())
 	}
 }
 
@@ -92,7 +126,7 @@ func TestWaitKeywordsResultsReturnsOriginalErrorAfterThreeAttempts(t *testing.T)
 	if attempts != 3 || refreshes != 2 || captures != 3 || waitErr.Attempts != 3 || len(waitErr.AttemptDurations) != 3 {
 		t.Fatalf("attempts=%d refreshes=%d error=%+v", attempts, refreshes, waitErr)
 	}
-	for _, expected := range []string{"after 3 attempts", keywordsTableSelector, "attempt_durations", "failed after 3 attempts", "attempt=3"} {
+	for _, expected := range []string{"after 3 attempts", keywordsTableSelector, "attempt_durations", "не загрузилась за все попытки", "attempt=3"} {
 		if !strings.Contains(err.Error()+logs.String(), expected) {
 			t.Fatalf("missing %q in error/logs:\nerror=%v\nlogs=%s", expected, err, logs.String())
 		}
