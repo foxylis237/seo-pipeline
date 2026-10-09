@@ -24,14 +24,14 @@ func TraceFields(trace article.Trace) []any {
 	}
 }
 
-// LogStep records the article identity before or after one external step.
-func LogStep(logger *slog.Logger, integration, phase string, trace article.Trace, extra ...any) {
+// LogStep records the article identity before or after one stage.
+func LogStep(logger *slog.Logger, stage, phase string, trace article.Trace, extra ...any) {
 	if logger == nil {
 		return
 	}
-	fields := []any{"stage", "identity_trace", "integration", integration, "phase", phase}
+	fields := []any{"stage", stage, "step", "identity_trace", "phase", phase}
 	fields = append(fields, TraceFields(trace)...)
-	logger.Info("article identity trace", append(fields, extra...)...)
+	logger.Info("след идентичности статьи", append(fields, extra...)...)
 }
 
 // TraceMismatch reports the identity of one article changing between two reads.

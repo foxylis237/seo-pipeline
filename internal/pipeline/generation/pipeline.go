@@ -185,7 +185,7 @@ func (p *Pipeline) runArticleAndInfo(ctx context.Context, input article.Generati
 	if err != nil {
 		return articleStageOutput{}, p.fail(ctx, logger, input, "verify_article_identity", err)
 	}
-	diagnostics.LogStep(p.logger, "llm_article", "before", trace,
+	diagnostics.LogStep(p.logger, "article", "before", trace,
 		"structure_fingerprint", diagnostics.Fingerprint(structure),
 		"keywords_count", len(input.WordstatKeywords),
 		"keywords_fingerprint", diagnostics.Fingerprint(formatKeywords(input.WordstatKeywords)),
@@ -233,7 +233,7 @@ func (p *Pipeline) runArticleAndInfo(ctx context.Context, input article.Generati
 		Prompt:     articleResult.Prompt,
 		PromptPath: paths.ArticlePromptPath,
 	})
-	diagnostics.LogStep(p.logger, "llm_article", "after", trace,
+	diagnostics.LogStep(p.logger, "article", "after", trace,
 		"prompt_fingerprint", diagnostics.Fingerprint(articleResult.Prompt),
 		"response_fingerprint", diagnostics.Fingerprint(text),
 		"result_path", paths.ArticlePath,
@@ -244,7 +244,7 @@ func (p *Pipeline) runArticleAndInfo(ctx context.Context, input article.Generati
 		return articleStageOutput{}, p.fail(ctx, logger, input, "metadata_generation", err)
 	}
 	logger.Info("article info generation started", "stage", "info")
-	diagnostics.LogStep(p.logger, "llm_info", "before", trace,
+	diagnostics.LogStep(p.logger, "info", "before", trace,
 		"article_fingerprint", diagnostics.Fingerprint(text),
 	)
 	// Информация для публикации собирается отдельным вызовом: текст статьи передаётся
@@ -282,7 +282,7 @@ func (p *Pipeline) runArticleAndInfo(ctx context.Context, input article.Generati
 		return articleStageOutput{}, p.fail(ctx, logger, input, "save_article_info_state", err)
 	}
 	logger.Info("article info saved", "stage", "info")
-	diagnostics.LogStep(p.logger, "llm_info", "after", trace,
+	diagnostics.LogStep(p.logger, "info", "after", trace,
 		"prompt_fingerprint", diagnostics.Fingerprint(infoResult.Prompt),
 		"response_fingerprint", diagnostics.Fingerprint(articleInfo),
 	)
@@ -299,7 +299,7 @@ func (p *Pipeline) runReview(ctx context.Context, input article.GenerationInput,
 		return stageOutput{}, nil, p.fail(ctx, logger, input, "article_review", err)
 	}
 	logger.Info("article review started", "stage", "article_review")
-	trace, err := p.traceLLMStage(ctx, logger, input, "llm_review", articleText)
+	trace, err := p.traceLLMStage(ctx, logger, input, "review", articleText)
 	if err != nil {
 		return stageOutput{}, nil, p.fail(ctx, logger, input, "verify_article_identity", err)
 	}
@@ -339,7 +339,7 @@ func (p *Pipeline) runReview(ctx context.Context, input article.GenerationInput,
 		return stageOutput{}, nil, p.fail(ctx, logger, input, "save_article_review_path", err)
 	}
 	logger.Info("article review completed", "stage", "article_review", "prompt_size", len([]rune(reviewCall.Prompt)), "input_tokens", result.InputTokens, "output_tokens", result.OutputTokens, "duration_ms", time.Since(started).Milliseconds(), "result_path", paths.ReviewPath)
-	diagnostics.LogStep(p.logger, "llm_review", "after", trace,
+	diagnostics.LogStep(p.logger, "review", "after", trace,
 		"prompt_fingerprint", diagnostics.Fingerprint(reviewCall.Prompt),
 		"response_fingerprint", diagnostics.Fingerprint(text),
 		"result_path", paths.ReviewPath,
@@ -362,7 +362,7 @@ func (p *Pipeline) runFix(ctx context.Context, input article.GenerationInput, ch
 		return stageOutput{}, p.fail(ctx, logger, input, "article_fix", err)
 	}
 	logger.Info("article fix started", "stage", "article_fix")
-	trace, err := p.traceLLMStage(ctx, logger, input, "llm_fix", articleText)
+	trace, err := p.traceLLMStage(ctx, logger, input, "fix", articleText)
 	if err != nil {
 		return stageOutput{}, p.fail(ctx, logger, input, "verify_article_identity", err)
 	}
@@ -395,7 +395,7 @@ func (p *Pipeline) runFix(ctx context.Context, input article.GenerationInput, ch
 		return stageOutput{}, p.fail(ctx, logger, input, "save_fixed_article_path", err)
 	}
 	logger.Info("article fix completed", "stage", "article_fix", "prompt_size", len([]rune(fixCall.Prompt)), "input_tokens", result.InputTokens, "output_tokens", result.OutputTokens, "duration_ms", time.Since(started).Milliseconds(), "result_path", paths.FixedArticlePath)
-	diagnostics.LogStep(p.logger, "llm_fix", "after", trace,
+	diagnostics.LogStep(p.logger, "fix", "after", trace,
 		"prompt_fingerprint", diagnostics.Fingerprint(fixCall.Prompt),
 		"response_fingerprint", diagnostics.Fingerprint(text),
 		"result_path", paths.FixedArticlePath,
@@ -441,7 +441,7 @@ func (p *Pipeline) runHTML(ctx context.Context, input article.GenerationInput, f
 		return stageOutput{}, p.fail(ctx, logger, input, "html_generation", err)
 	}
 	logger.Info("HTML generation started", "stage", "html_generation")
-	trace, err := p.traceLLMStage(ctx, logger, input, "llm_html", fixedArticle)
+	trace, err := p.traceLLMStage(ctx, logger, input, "html", fixedArticle)
 	if err != nil {
 		return stageOutput{}, p.fail(ctx, logger, input, "verify_article_identity", err)
 	}
@@ -472,7 +472,7 @@ func (p *Pipeline) runHTML(ctx context.Context, input article.GenerationInput, f
 		return stageOutput{}, p.fail(ctx, logger, input, "save_html_path", err)
 	}
 	logger.Info("HTML generation completed", "stage", "html_generation", "prompt_size", len([]rune(result.Prompt)), "input_tokens", result.InputTokens, "output_tokens", result.OutputTokens, "duration_ms", time.Since(started).Milliseconds(), "result_path", paths.HTMLPath)
-	diagnostics.LogStep(p.logger, "llm_html", "after", trace,
+	diagnostics.LogStep(p.logger, "html", "after", trace,
 		"prompt_fingerprint", diagnostics.Fingerprint(result.Prompt),
 		"response_fingerprint", diagnostics.Fingerprint(html),
 		"result_path", paths.HTMLPath,

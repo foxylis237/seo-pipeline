@@ -61,7 +61,7 @@ func (s *StructureService) Generate(ctx context.Context, input article.Generatio
 		logger.Error("идентичность статьи не подтверждена", "stage", "verify_article_identity", "error", err)
 		return StructureOutput{}, fmt.Errorf("подтвердить идентичность статьи external_id %q: %w", input.Article.ExternalID, err)
 	}
-	diagnostics.LogStep(s.logger, "llm_structure", "before", trace,
+	diagnostics.LogStep(s.logger, "structure", "before", trace,
 		"competitor_structure_fingerprint", diagnostics.Fingerprint(input.CompetitorStructure),
 	)
 
@@ -92,7 +92,7 @@ func (s *StructureService) Generate(ctx context.Context, input article.Generatio
 		return StructureOutput{}, fmt.Errorf("сохранить результат структуры для external_id %q: %w", input.Article.ExternalID, err)
 	}
 	logger.Info("генерация структуры успешно завершена", "stage", "structure_generation_complete", "provider", result.Provider, "model", result.Model, "prompt_size", promptSize, "duration_ms", time.Since(started).Milliseconds(), "input_tokens", result.InputTokens, "output_tokens", result.OutputTokens, "structure_path", paths.StructurePath)
-	diagnostics.LogStep(s.logger, "llm_structure", "after", trace,
+	diagnostics.LogStep(s.logger, "structure", "after", trace,
 		"prompt_fingerprint", diagnostics.Fingerprint(result.Prompt),
 		"response_fingerprint", diagnostics.Fingerprint(result.Text),
 		"result_path", paths.StructurePath,

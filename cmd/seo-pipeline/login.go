@@ -132,7 +132,7 @@ func runKeysSOLogin(ctx context.Context, logger *slog.Logger) error {
 	if err := config.LoadEnvFile(); err != nil {
 		return err
 	}
-	return keysso.Login(ctx, os.Getenv("KEYS_SO_EMAIL"), os.Getenv("KEYS_SO_PASSWORD"), logger.With("integration", "keysso"))
+	return keysso.Login(ctx, os.Getenv("KEYS_SO_EMAIL"), os.Getenv("KEYS_SO_PASSWORD"), logger)
 }
 
 // diagnosticsDirs — корни диагностики интеграций одной задачи.

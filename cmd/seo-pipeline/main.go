@@ -669,10 +669,10 @@ func main() {
 			taskLogger.Error(
 				"этап Arsenkin завершён с ошибкой",
 				"article_id", arsenkinErr.ArticleID,
-				"integration", "arsenkin",
-				"stage", arsenkinErr.Stage,
+				"stage", "arsenkin",
+				"step", arsenkinErr.Stage,
 				"duration_ms", arsenkinErr.Duration.Milliseconds(),
-				"current_url", arsenkinErr.CurrentURL,
+				"url", arsenkinErr.CurrentURL,
 				"error", arsenkinErr.Err,
 			)
 			os.Exit(1)
@@ -682,10 +682,10 @@ func main() {
 			taskLogger.Error(
 				"этап Keys.so завершён с ошибкой",
 				"article_id", stageErr.articleID,
-				"integration", "keysso",
-				"stage", stageErr.stage,
+				"stage", "keysso",
+				"step", stageErr.stage,
 				"duration_ms", stageErr.duration.Milliseconds(),
-				"current_url", stageErr.currentURL,
+				"url", stageErr.currentURL,
 				"collected_count", stageErr.collectedCount,
 				"cleaned_count", stageErr.cleanedCount,
 				"error", stageErr.err,

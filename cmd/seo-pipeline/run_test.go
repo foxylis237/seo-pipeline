@@ -374,6 +374,53 @@ func TestPrepareArticleRejectsWordstatResultOfAnotherArticle(t *testing.T) {
 	assertOldPrepareResultsPreserved(t, repository, want)
 }
 
+func TestPrepareLogsStageAsStageName(t *testing.T) {
+	repository := oldPrepareRepositoryState()
+	repository.trace = article.Trace{
+		ArticleID: 7, ExternalID: "37", Title: "Как стать бариста",
+		Keyword: "бариста", ReferenceURL: "https://example.test/barista",
+	}
+	var records []capturedRecord
+	logger := slog.New(captureHandler{records: &records}).With("task", "pprof_1", "operation", "prepare")
+
+	err := prepareArticleWithCollectors(
+		context.Background(), repository, config.Config{}, logger, newFakePrepareArtifacts(), testBaristaArticle(),
+		fakeKeysSOCollector{result: keysso.CollectResult{CollectedCount: 3, CleanedKeywords: []string{"работа бариста"}}},
+		fakeArsenkinCollector{result: arsenkin.Result{
+			WordstatKeywords:    []arsenkin.KeywordFrequency{{Query: "работа бариста", Frequency: 500}},
+			LSIWords:            []string{"кофе"},
+			CompetitorStructure: "H1 Бариста",
+		}}, nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stages := map[string]bool{"prepare": true, "keysso": true, "arsenkin": true}
+	for _, record := range records {
+		seen := map[string]bool{}
+		for _, key := range record.keys {
+			if seen[key] {
+				t.Errorf("%q: ключ %s дважды в одной записи", record.msg, key)
+			}
+			seen[key] = true
+		}
+		if !stages[record.attr["stage"]] {
+			t.Errorf("%q: stage=%q не имя стадии подготовки", record.msg, record.attr["stage"])
+		}
+		if record.attr["external_id"] != "37" {
+			t.Errorf("%q: external_id=%q", record.msg, record.attr["external_id"])
+		}
+		for _, key := range []string{"integration", "current_url"} {
+			if seen[key] {
+				t.Errorf("%q: старый ключ %s", record.msg, key)
+			}
+		}
+	}
+	if len(records) == 0 {
+		t.Fatal("подготовка не оставила ни одной записи")
+	}
+}
+
 func TestPrepareSavesDiagnosticsForSuccessfulRun(t *testing.T) {
 	repository := oldPrepareRepositoryState()
 	repository.trace = article.Trace{

@@ -243,7 +243,7 @@ func collectPreparedResearch(
 	report.Pass("identity_trace", nil)
 	saveArticleInputDiagnostics(ctx, articleRepository, logger, artifacts, selected)
 	stageStarted := time.Now()
-	stageLogger := logger.With("article_id", selected.ID, "integration", "keysso")
+	stageLogger := logger.With("article_id", selected.ID, "external_id", selected.ExternalID, "stage", "keysso")
 
 	collectResult, source, failedStage, err := collectCleanedKeywords(
 		ctx, articleRepository, logger, stageLogger, artifacts, selected, trace, keyssoService, fallback, report, stageStarted,
@@ -251,11 +251,9 @@ func collectPreparedResearch(
 	if err != nil {
 		return failedStage, err
 	}
-	stageLogger.Info("результат Keys.so собран", append(
-		keyssoLogFields("collect_result", stageStarted, "", collectResult.CollectedCount, len(collectResult.CleanedKeywords)),
-		"source", source,
-	)...)
-	stageLogger.Info("этап Keys.so завершён", keyssoLogFields("complete", stageStarted, "", collectResult.CollectedCount, len(collectResult.CleanedKeywords))...)
+	stageLogger.Info("этап Keys.so завершён", "source", source,
+		"collected_count", collectResult.CollectedCount, "cleaned_count", len(collectResult.CleanedKeywords),
+		"duration_ms", time.Since(stageStarted).Milliseconds())
 	diagnostics.LogStep(logger, "keysso", "after", trace,
 		"source", source,
 		"collected_count", collectResult.CollectedCount,
@@ -263,12 +261,12 @@ func collectPreparedResearch(
 		"keywords_fingerprint", diagnostics.Fingerprint(strings.Join(collectResult.CleanedKeywords, "\n")),
 		"keywords_sample", diagnostics.Sample(collectResult.CleanedKeywords, 5),
 	)
-	if relevanceErr := checkKeywordRelevance(articleLogger, trace, collectResult, stageStarted, report); relevanceErr != nil {
+	if relevanceErr := checkKeywordRelevance(stageLogger, trace, collectResult, stageStarted, report); relevanceErr != nil {
 		return "keyword_relevance", savePipelineError(ctx, articleRepository, selected.ID, relevanceErr)
 	}
 
 	arsenkinStarted := time.Now()
-	arsenkinLogger := logger.With("article_id", selected.ID, "integration", "arsenkin")
+	arsenkinLogger := logger.With("article_id", selected.ID, "external_id", selected.ExternalID, "stage", "arsenkin")
 	// Что именно уйдёт в форму Wordstat, решает клиент Arsenkin: он нормализует список и
 	// обрезает его до лимита формы. Диагностика спрашивает набор у него, а не пересчитывает
 	// сама, иначе лимит пришлось бы держать в двух местах и они разошлись бы.
@@ -308,7 +306,7 @@ func collectPreparedResearch(
 		"competitor_structure_length":      len([]rune(arsenkinResult.CompetitorStructure)),
 		"competitor_structure_fingerprint": diagnostics.Fingerprint(arsenkinResult.CompetitorStructure),
 	})
-	if membershipErr := checkWordstatMembership(articleLogger, trace, submittedQueries, returnedQueries, arsenkinStarted, report); membershipErr != nil {
+	if membershipErr := checkWordstatMembership(arsenkinLogger, trace, submittedQueries, returnedQueries, arsenkinStarted, report); membershipErr != nil {
 		return "wordstat_membership", savePipelineError(ctx, articleRepository, selected.ID, membershipErr)
 	}
 	if err := articleRepository.SavePreparedResearch(
@@ -337,12 +335,12 @@ func collectPreparedResearch(
 		return "save_research", savePipelineError(ctx, articleRepository, selected.ID, mismatchErr)
 	}
 	report.Pass("save_research", nil)
-	diagnostics.LogStep(logger, "save_research", "after", savedTrace,
+	diagnostics.LogStep(logger, "prepare", "after_save", savedTrace,
 		"competitor_structure_fingerprint", diagnostics.Fingerprint(arsenkinResult.CompetitorStructure),
 	)
-	stageLogger.Info("результат Keys.so сохранён", keyssoLogFields("save_result", stageStarted, "", collectResult.CollectedCount, len(collectResult.CleanedKeywords))...)
-	arsenkinLogger.Info("данные сохранены", "stage", "save_result", "duration_ms", time.Since(arsenkinStarted).Milliseconds(), "current_url", "https://arsenkin.ru/tools/copyrighters/", "wordstat_count", len(arsenkinResult.WordstatKeywords), "lsi_count", len(arsenkinResult.LSIWords), "competitor_structure_length", len(arsenkinResult.CompetitorStructure))
-	arsenkinLogger.Info("этап завершён", "stage", "complete", "duration_ms", time.Since(arsenkinStarted).Milliseconds(), "current_url", "https://arsenkin.ru/tools/copyrighters/", "wordstat_count", len(arsenkinResult.WordstatKeywords), "lsi_count", len(arsenkinResult.LSIWords), "competitor_structure_length", len(arsenkinResult.CompetitorStructure))
+	arsenkinLogger.Info("этап Arsenkin завершён", "wordstat_count", len(arsenkinResult.WordstatKeywords),
+		"lsi_count", len(arsenkinResult.LSIWords), "competitor_structure_length", len(arsenkinResult.CompetitorStructure),
+		"duration_ms", time.Since(arsenkinStarted).Milliseconds())
 	printKeysSOResult(os.Stdout, selected, source, collectResult)
 	printArsenkinResult(os.Stdout, selected, arsenkinResult)
 
@@ -360,7 +358,7 @@ func resetPrepareDiagnostics(logger *slog.Logger, artifacts prepareArtifactWrite
 	}
 	if err := artifacts.ResetDiagnostics(selected.ExternalID, selected.Slug, articleoutput.PrepareSubdirectory); err != nil {
 		logger.Warn("не удалось очистить диагностику предыдущего прогона",
-			"stage", "prepare_diagnostics", "article_id", selected.ID, "external_id", selected.ExternalID, "error", err)
+			"stage", "prepare", "step", "diagnostics", "article_id", selected.ID, "external_id", selected.ExternalID, "error", err)
 	}
 }
 
@@ -373,12 +371,12 @@ func savePrepareDiagnostics(logger *slog.Logger, artifacts prepareArtifactWriter
 	path, err := artifacts.SaveDiagnostics(selected.ExternalID, selected.Slug, articleoutput.PrepareSubdirectory, name, payload)
 	if err != nil {
 		logger.Warn("не удалось сохранить диагностику prepare",
-			"stage", "prepare_diagnostics", "article_id", selected.ID, "external_id", selected.ExternalID,
+			"stage", "prepare", "step", "diagnostics", "article_id", selected.ID, "external_id", selected.ExternalID,
 			"file", name, "error", err)
 		return
 	}
 	logger.Info("диагностика prepare сохранена",
-		"stage", "prepare_diagnostics", "article_id", selected.ID, "external_id", selected.ExternalID,
+		"stage", "prepare", "step", "diagnostics", "article_id", selected.ID, "external_id", selected.ExternalID,
 		"file", name, "path", path)
 }
 
@@ -392,7 +390,7 @@ func saveArticleInputDiagnostics(
 	input, err := articleRepository.GetArticleInput(ctx, selected.ID)
 	if err != nil {
 		logger.Warn("не удалось прочитать входные данные статьи для диагностики",
-			"stage", "prepare_diagnostics", "article_id", selected.ID, "external_id", selected.ExternalID, "error", err)
+			"stage", "prepare", "step", "diagnostics", "article_id", selected.ID, "external_id", selected.ExternalID, "error", err)
 		return
 	}
 	savePrepareDiagnostics(logger, artifacts, selected, diagnostics.InputFile, diagnostics.NewInputSnapshot(selected, input))
@@ -428,8 +426,7 @@ func collectCleanedKeywords(
 	}
 	if len(manualKeywords) > 0 {
 		stageLogger.Info("сбор запросов у конкурента пропущен: запросы вставлены вручную",
-			append(keyssoLogFields("skip_collect", stageStarted, "", len(manualKeywords), 0),
-				"source", diagnostics.KeywordSourceManual)...)
+			"step", "skip_collect", "source", diagnostics.KeywordSourceManual, "collected_count", len(manualKeywords))
 		diagnostics.LogStep(logger, "keysso", "before", trace, "source", diagnostics.KeywordSourceManual)
 		report.Pass("manual_keywords", map[string]any{
 			"raw_count":   len(manualKeywords),
@@ -449,7 +446,7 @@ func collectCleanedKeywords(
 		)
 	}
 	report.Pass("reference_url", map[string]any{"reference_url": selected.ReferenceURL})
-	stageLogger.Info("этап Keys.so начат", keyssoLogFields("start", stageStarted, "", 0, 0)...)
+	stageLogger.Info("этап Keys.so начат")
 	diagnostics.LogStep(logger, "keysso", "before", trace, "source", diagnostics.KeywordSourceKeysSO)
 
 	collected, err := keyssoService.CollectCleanKeywords(ctx, selected.ReferenceURL)
@@ -505,7 +502,7 @@ func collectCleanedKeywords(
 	// подбирает модель, а очистка остаётся той же формой Keys.so.
 	if fallback != nil && len(collected.CleanedKeywords) < minKeysSOKeywords {
 		stageLogger.Warn("Keys.so вернул слишком мало запросов, подбираем их моделью",
-			"stage", "keysso_collect", "cleaned_count", len(collected.CleanedKeywords),
+			"step", "collect", "cleaned_count", len(collected.CleanedKeywords),
 			"minimum", minKeysSOKeywords)
 		report.Pass("keysso_collect", map[string]any{
 			"source":          diagnostics.KeywordSourceKeysSO,
@@ -546,8 +543,7 @@ func collectFallbackKeywords(
 	stageStarted time.Time,
 	collectErr error,
 ) (keysso.CollectResult, string, string, error) {
-	fields := append(keyssoLogFields("fallback_start", stageStarted, "", 0, 0),
-		"source", diagnostics.KeywordSourceFallback, "reason", collectErr.Error())
+	fields := []any{"step", "fallback", "source", diagnostics.KeywordSourceFallback, "reason", collectErr.Error()}
 	problem := keyssoProblem(collectErr)
 	switch {
 	case errors.Is(collectErr, errKeysSODisabled):
@@ -719,7 +715,7 @@ func checkKeywordRelevance(logger *slog.Logger, trace article.Trace, collected k
 	relevance := diagnostics.CheckKeywordRelevance(trace.Keyword, trace.Title, collected.CleanedKeywords)
 	logger.Info(
 		"проверка соответствия запросов ключевому слову",
-		append([]any{"stage", "identity_trace", "integration", "keysso"}, relevance.Fields()...)...,
+		append([]any{"step", "identity_trace"}, relevance.Fields()...)...,
 	)
 	blocked := relevance.KeywordBased && relevance.Matched == 0
 	report.AddKeywordRelevance(relevance, blocked)
@@ -741,7 +737,7 @@ func checkWordstatMembership(logger *slog.Logger, trace article.Trace, submitted
 	membership := diagnostics.CheckQueryMembership(submitted, returned)
 	logger.Info(
 		"проверка происхождения запросов Wordstat",
-		append([]any{"stage", "identity_trace", "integration", "arsenkin"}, membership.Fields()...)...,
+		append([]any{"step", "identity_trace"}, membership.Fields()...)...,
 	)
 	blocked := membership.Returned > 0 && membership.Ratio() < minWordstatMembershipRatio
 	report.AddQueryMembership(membership, blocked)
@@ -765,16 +761,6 @@ func newKeyssoRunError(articleID int64, stage string, startedAt time.Time, curre
 		articleID: articleID, stage: stage, currentURL: currentURL,
 		duration: time.Since(startedAt), collectedCount: collectedCount,
 		cleanedCount: cleanedCount, err: err,
-	}
-}
-
-func keyssoLogFields(stage string, startedAt time.Time, currentURL string, collectedCount, cleanedCount int) []any {
-	return []any{
-		"stage", stage,
-		"duration_ms", time.Since(startedAt).Milliseconds(),
-		"current_url", currentURL,
-		"collected_count", collectedCount,
-		"cleaned_count", cleanedCount,
 	}
 }
 
