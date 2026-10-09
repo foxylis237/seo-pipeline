@@ -92,7 +92,7 @@ func BuildArticleText(ctx context.Context, request ArticleTextRequest) (string, 
 	}
 	stage := request.Stage
 	if stage == "" {
-		stage = "article_generation"
+		stage = "article"
 	}
 	answer, err := request.Send(ctx, request.Prompt)
 	if err != nil {

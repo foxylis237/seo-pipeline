@@ -151,12 +151,10 @@ func (s *Service) Build(ctx context.Context, externalID string) (articleoutput.A
 	if err := articleoutput.Commit(nil, pending); err != nil {
 		return articleoutput.ArticlePaths{}, err
 	}
-	s.logger.Info("result saved", "external_id", externalID, "stage", "result_generation", "result_path", pending.Paths.ResultPath)
 	return pending.Paths, nil
 }
 
 func (s *Service) BuildStaged(ctx context.Context, externalID string) (*articleoutput.PendingArtifact, error) {
-	s.logger.Info("result generation started", "external_id", externalID, "stage", "result_generation")
 	input, err := s.repository.GetResultInput(ctx, externalID)
 	if err != nil {
 		return nil, fmt.Errorf("load result data for external_id %s: %w", externalID, err)
@@ -189,7 +187,7 @@ func (s *Service) BuildStaged(ctx context.Context, externalID string) (*articleo
 	if err != nil {
 		return nil, err
 	}
-	s.logger.Info("result staged", "article_id", input.Article.ID, "external_id", externalID, "stage", "result_generation", "result_path", pending.Paths.ResultPath)
+	s.logger.Info("result.md собран", "article_id", input.Article.ID, "external_id", externalID, "stage", "result", "path", pending.Paths.ResultPath)
 	return pending, nil
 }
 
@@ -201,7 +199,7 @@ func (s *Service) relatedCourses(ctx context.Context, input article.ResultInput)
 	courses, err := s.courses.RelatedCourses(ctx, input)
 	if err != nil {
 		s.logger.Warn("связанные курсы не подобраны", "external_id", input.Article.ExternalID,
-			"stage", "result_generation", "error", err)
+			"stage", "result", "error", err)
 		return nil
 	}
 	return courses
@@ -256,7 +254,7 @@ func (s *Service) RenderForDemo(ctx context.Context, externalID, articleText str
 	faqItems, err := ParseFAQItems(input.FAQ)
 	if err != nil {
 		s.logger.Warn("FAQ не разобран, раздел вопросов останется пустым",
-			"external_id", externalID, "stage", "result_generation", "error", err)
+			"external_id", externalID, "stage", "result", "error", err)
 		faqItems = nil
 	}
 	// Тот же подбор курсов, что у боевого листа.
@@ -283,7 +281,7 @@ func (s *Service) warnMissingResultFields(input article.ResultInput) {
 	}
 	for _, field := range fields {
 		if strings.TrimSpace(field.value) == "" {
-			s.logger.Warn("result field is empty", "article_id", input.Article.ID, "external_id", input.Article.ExternalID, "field", field.name)
+			s.logger.Warn("поле result.md пустое", "article_id", input.Article.ID, "external_id", input.Article.ExternalID, "stage", "result", "field", field.name)
 		}
 	}
 }

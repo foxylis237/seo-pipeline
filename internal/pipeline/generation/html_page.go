@@ -108,7 +108,7 @@ func BuildHTMLPage(ctx context.Context, request HTMLPageRequest) (string, error)
 		}
 		page = trimIncompleteHTML(page)
 		logger.Warn("разметка оборвалась, просим модель дописать страницу",
-			"stage", "html_generation", "attempt", attempt, "html_runes", len([]rune(page)))
+			"stage", "html", "attempt", attempt, "html_runes", len([]rune(page)))
 		part, partErr := request.Continue(ctx, continueHTMLPrompt(page))
 		if partErr != nil {
 			return "", partErr
@@ -124,7 +124,7 @@ func BuildHTMLPage(ctx context.Context, request HTMLPageRequest) (string, error)
 		coverErr = ValidateHTMLCoversPage(request.Page, page)
 		if coverErr == nil {
 			logger.Info("страница дописана после обрыва",
-				"stage", "html_generation", "attempt", attempt, "html_runes", len([]rune(page)))
+				"stage", "html", "attempt", attempt, "html_runes", len([]rune(page)))
 		}
 	}
 	if coverErr != nil {
@@ -134,7 +134,7 @@ func BuildHTMLPage(ctx context.Context, request HTMLPageRequest) (string, error)
 		// Страницу отдаём как есть: прогон дороже безупречной разметки, а неполнота видна
 		// человеку по этому предупреждению.
 		logger.Warn("разметка так и не покрыла страницу целиком, принимаем как есть",
-			"stage", "html_generation", "html_runes", len([]rune(page)), "error", coverErr)
+			"stage", "html", "html_runes", len([]rune(page)), "error", coverErr)
 	}
 	return page, nil
 }

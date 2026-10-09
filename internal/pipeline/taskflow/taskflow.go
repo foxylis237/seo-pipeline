@@ -169,9 +169,9 @@ func (b *Base) SavedStructurePath(ctx context.Context, externalID string) (strin
 func (b *Base) Fail(ctx context.Context, logger *slog.Logger, selected article.Article, stage string, err error) error {
 	wrapped := &StageError{ArticleID: selected.ID, ExternalID: selected.ExternalID, Stage: stage, Err: err}
 	if ctx.Err() == nil {
-		logger.Error("generation failed", "stage", stage, "error", err)
+		logger.Error("генерация статьи упала", "error_operation", stage, "error", err)
 		if saveErr := b.repository.SaveError(ctx, selected.ID, wrapped); saveErr != nil {
-			logger.Error("не удалось сохранить ошибку статьи", "stage", stage, "error", saveErr)
+			logger.Error("не удалось сохранить ошибку статьи", "error_operation", stage, "error", saveErr)
 		}
 	}
 	return wrapped

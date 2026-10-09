@@ -95,7 +95,7 @@ func (p *Pipeline) RunByExternalID(ctx context.Context, externalID string) (Pipe
 	if err != nil {
 		wrapped := &StageError{ExternalID: externalID, Stage: "load_generation_data", Err: err}
 		if !isContextCancellation(ctx, err) {
-			p.logger.Error("generation pipeline failed", "article_id", int64(0), "external_id", externalID, "stage", wrapped.Stage, "error", err)
+			p.logger.Error("генерация статьи упала", "article_id", int64(0), "external_id", externalID, "error_operation", wrapped.Stage, "error", err)
 		}
 		return PipelineOutput{}, wrapped
 	}
@@ -108,18 +108,15 @@ func (p *Pipeline) RunByExternalID(ctx context.Context, externalID string) (Pipe
 func (p *Pipeline) Run(ctx context.Context, input article.GenerationInput) (PipelineOutput, error) {
 	started := time.Now()
 	logger := p.logger.With("article_id", input.Article.ID, "external_id", input.Article.ExternalID)
-	logger.Info("generation pipeline started", "stage", "generation_pipeline")
+	logger.Info("генерация статьи начата")
 	if err := p.repository.BeginGeneration(ctx, input.Article.ID); err != nil {
 		return PipelineOutput{}, p.fail(ctx, logger, input, "begin_generation", err)
 	}
-	logger.Info("article prepared for generation", "stage", "structure_generation")
 
-	logger.Info("structure generation started", "stage", "structure_generation")
 	structureOutput, err := p.structureService.Generate(ctx, input)
 	if err != nil {
 		return PipelineOutput{}, p.fail(ctx, logger, input, "structure_generation", err)
 	}
-	logger.Info("structure generation completed", "stage", "structure_generation", "result_path", structureOutput.Paths.StructurePath)
 	if err := ctx.Err(); err != nil {
 		return PipelineOutput{}, p.fail(ctx, logger, input, "structure_generation", err)
 	}
@@ -136,7 +133,7 @@ func (p *Pipeline) Run(ctx context.Context, input article.GenerationInput) (Pipe
 	}
 	fixOutput, err := p.runFix(ctx, input, reviewChat, articleText)
 	if closeErr := reviewChat.Close(); closeErr != nil {
-		logger.Warn("не удалось закрыть чат ревью", "stage", "article_fix", "error", closeErr)
+		logger.Warn("не удалось закрыть чат ревью", "stage", "fix", "error", closeErr)
 	}
 	if err != nil {
 		return PipelineOutput{}, err
@@ -160,7 +157,7 @@ func (p *Pipeline) Run(ctx context.Context, input article.GenerationInput) (Pipe
 	if err := p.repository.CompleteGeneration(ctx, input.Article.ID); err != nil {
 		return PipelineOutput{}, p.fail(ctx, logger, input, "complete_generation", err)
 	}
-	logger.Info("generation pipeline completed", "stage", "generation_pipeline", "duration_ms", time.Since(started).Milliseconds())
+	logger.Info("генерация статьи завершена", "duration_ms", time.Since(started).Milliseconds())
 	return PipelineOutput{Paths: paths}, nil
 }
 
@@ -180,7 +177,7 @@ func (p *Pipeline) runArticleAndInfo(ctx context.Context, input article.Generati
 	if err := ctx.Err(); err != nil {
 		return articleStageOutput{}, p.fail(ctx, logger, input, "article_generation", err)
 	}
-	logger.Info("article generation started", "stage", "article_generation")
+	logger.Info("стадия начата", "stage", "article")
 	trace, err := p.articleTrace(ctx, logger, input)
 	if err != nil {
 		return articleStageOutput{}, p.fail(ctx, logger, input, "verify_article_identity", err)
@@ -209,7 +206,7 @@ func (p *Pipeline) runArticleAndInfo(ctx context.Context, input article.Generati
 	if err := ctx.Err(); err != nil {
 		return articleStageOutput{}, p.fail(ctx, logger, input, "article_generation", err)
 	}
-	logger.Info("article generated", "stage", "article_generation", "model", articleResult.Model, "prompt_size", len([]rune(articleResult.Prompt)), "input_tokens", articleResult.InputTokens, "output_tokens", articleResult.OutputTokens, "duration_ms", time.Since(started).Milliseconds())
+	logger.Info("статья получена от модели", "stage", "article", "model", articleResult.Model, "prompt_size", len([]rune(articleResult.Prompt)), "input_tokens", articleResult.InputTokens, "output_tokens", articleResult.OutputTokens, "duration_ms", time.Since(started).Milliseconds())
 	articlePending, err := p.writer.StageArticle(input.Article.ExternalID, input.Article.Slug, articleResult.Prompt, text, articleResult.Model)
 	if err != nil {
 		return articleStageOutput{}, p.fail(ctx, logger, input, "save_article", err)
@@ -221,7 +218,7 @@ func (p *Pipeline) runArticleAndInfo(ctx context.Context, input article.Generati
 	}, articlePending); err != nil {
 		return articleStageOutput{}, p.fail(ctx, logger, input, "save_article_path", err)
 	}
-	logger.Info("article saved", "stage", "article_generation", "model", articleResult.Model, "result_path", paths.ArticlePath)
+	logger.Info("статья сохранена", "stage", "article", "model", articleResult.Model, "path", paths.ArticlePath)
 	// Промпт статьи уже опубликован на диске и записан в состояние, поэтому его можно
 	// выгружать наружу. Вызов не блокирующий по контракту PromptPublisher: стадия info идёт
 	// следом и не ждёт чужого браузера. Ошибки публикации сюда не возвращаются — они не имеют
@@ -236,14 +233,14 @@ func (p *Pipeline) runArticleAndInfo(ctx context.Context, input article.Generati
 	diagnostics.LogStep(p.logger, "article", "after", trace,
 		"prompt_fingerprint", diagnostics.Fingerprint(articleResult.Prompt),
 		"response_fingerprint", diagnostics.Fingerprint(text),
-		"result_path", paths.ArticlePath,
+		"path", paths.ArticlePath,
 	)
 
 	infoStarted := time.Now()
 	if err := ctx.Err(); err != nil {
 		return articleStageOutput{}, p.fail(ctx, logger, input, "metadata_generation", err)
 	}
-	logger.Info("article info generation started", "stage", "info")
+	logger.Info("стадия начата", "stage", "info")
 	diagnostics.LogStep(p.logger, "info", "before", trace,
 		"article_fingerprint", diagnostics.Fingerprint(text),
 	)
@@ -265,28 +262,25 @@ func (p *Pipeline) runArticleAndInfo(ctx context.Context, input article.Generati
 	if err := ctx.Err(); err != nil {
 		return articleStageOutput{}, p.fail(ctx, logger, input, "metadata_generation", err)
 	}
-	logger.Info("article info generated", "stage", "info", "model", infoResult.Model, "prompt_size", len([]rune(infoResult.Prompt)), "input_tokens", infoResult.InputTokens, "output_tokens", infoResult.OutputTokens, "duration_ms", time.Since(infoStarted).Milliseconds())
-	logger.Info("article info parsing started", "stage", "info")
+	logger.Info("метаданные получены от модели", "stage", "info", "model", infoResult.Model, "prompt_size", len([]rune(infoResult.Prompt)), "input_tokens", infoResult.InputTokens, "output_tokens", infoResult.OutputTokens, "duration_ms", time.Since(infoStarted).Milliseconds())
 	parsedInfo, err := article.ParseArticleInfo(articleInfo)
 	if err != nil {
 		return articleStageOutput{}, p.fail(ctx, logger, input, "metadata_parsing", err)
 	}
 	if parsedInfo.FallbackUsed {
-		logger.Warn("metadata parsing incomplete, recognized and raw response content saved", "stage", "info",
+		logger.Warn("метаданные разобраны не полностью, сохранены распознанное и сырой ответ", "stage", "info",
 			"has_tldr", parsedInfo.TLDR != "", "has_faq", parsedInfo.FAQ != "",
 			"has_additional_info", parsedInfo.AdditionalInfo != "")
-	} else {
-		logger.Info("article info parsed", "stage", "info")
 	}
 	if err := p.repository.SaveArticleInfo(ctx, input.Article.ID, articleInfo, parsedInfo); err != nil {
 		return articleStageOutput{}, p.fail(ctx, logger, input, "save_article_info_state", err)
 	}
-	logger.Info("article info saved", "stage", "info")
+	logger.Info("метаданные сохранены", "stage", "info")
 	diagnostics.LogStep(p.logger, "info", "after", trace,
 		"prompt_fingerprint", diagnostics.Fingerprint(infoResult.Prompt),
 		"response_fingerprint", diagnostics.Fingerprint(articleInfo),
 	)
-	logger.Info("article stage completed", "stage", "article_generation", "duration_ms", time.Since(started).Milliseconds(), "result_path", paths.ArticlePath)
+	logger.Info("стадия завершена", "stage", "article", "duration_ms", time.Since(started).Milliseconds(), "path", paths.ArticlePath)
 	return articleStageOutput{stageOutput: stageOutput{Text: text, Paths: paths}, Info: articleInfo}, nil
 }
 
@@ -298,7 +292,7 @@ func (p *Pipeline) runReview(ctx context.Context, input article.GenerationInput,
 	if err := ctx.Err(); err != nil {
 		return stageOutput{}, nil, p.fail(ctx, logger, input, "article_review", err)
 	}
-	logger.Info("article review started", "stage", "article_review")
+	logger.Info("стадия начата", "stage", "review")
 	trace, err := p.traceLLMStage(ctx, logger, input, "review", articleText)
 	if err != nil {
 		return stageOutput{}, nil, p.fail(ctx, logger, input, "verify_article_identity", err)
@@ -338,11 +332,11 @@ func (p *Pipeline) runReview(ctx context.Context, input article.GenerationInput,
 		_ = chat.Close()
 		return stageOutput{}, nil, p.fail(ctx, logger, input, "save_article_review_path", err)
 	}
-	logger.Info("article review completed", "stage", "article_review", "prompt_size", len([]rune(reviewCall.Prompt)), "input_tokens", result.InputTokens, "output_tokens", result.OutputTokens, "duration_ms", time.Since(started).Milliseconds(), "result_path", paths.ReviewPath)
+	logger.Info("стадия завершена", "stage", "review", "prompt_size", len([]rune(reviewCall.Prompt)), "input_tokens", result.InputTokens, "output_tokens", result.OutputTokens, "duration_ms", time.Since(started).Milliseconds(), "path", paths.ReviewPath)
 	diagnostics.LogStep(p.logger, "review", "after", trace,
 		"prompt_fingerprint", diagnostics.Fingerprint(reviewCall.Prompt),
 		"response_fingerprint", diagnostics.Fingerprint(text),
-		"result_path", paths.ReviewPath,
+		"path", paths.ReviewPath,
 	)
 	return stageOutput{Text: text, Paths: paths}, chat, nil
 }
@@ -361,7 +355,7 @@ func (p *Pipeline) runFix(ctx context.Context, input article.GenerationInput, ch
 	if err := ctx.Err(); err != nil {
 		return stageOutput{}, p.fail(ctx, logger, input, "article_fix", err)
 	}
-	logger.Info("article fix started", "stage", "article_fix")
+	logger.Info("стадия начата", "stage", "fix")
 	trace, err := p.traceLLMStage(ctx, logger, input, "fix", articleText)
 	if err != nil {
 		return stageOutput{}, p.fail(ctx, logger, input, "verify_article_identity", err)
@@ -394,11 +388,11 @@ func (p *Pipeline) runFix(ctx context.Context, input article.GenerationInput, ch
 	}, pending); err != nil {
 		return stageOutput{}, p.fail(ctx, logger, input, "save_fixed_article_path", err)
 	}
-	logger.Info("article fix completed", "stage", "article_fix", "prompt_size", len([]rune(fixCall.Prompt)), "input_tokens", result.InputTokens, "output_tokens", result.OutputTokens, "duration_ms", time.Since(started).Milliseconds(), "result_path", paths.FixedArticlePath)
+	logger.Info("стадия завершена", "stage", "fix", "prompt_size", len([]rune(fixCall.Prompt)), "input_tokens", result.InputTokens, "output_tokens", result.OutputTokens, "duration_ms", time.Since(started).Milliseconds(), "path", paths.FixedArticlePath)
 	diagnostics.LogStep(p.logger, "fix", "after", trace,
 		"prompt_fingerprint", diagnostics.Fingerprint(fixCall.Prompt),
 		"response_fingerprint", diagnostics.Fingerprint(text),
-		"result_path", paths.FixedArticlePath,
+		"path", paths.FixedArticlePath,
 	)
 	return stageOutput{Text: text, Paths: paths}, nil
 }
@@ -428,10 +422,10 @@ func (p *Pipeline) dumpHTMLResponse(logger *slog.Logger, input article.Generatio
 	}
 	path, err := dumper.SaveDiagnosticsText(input.Article.ExternalID, input.Article.Slug, articleoutput.LogsSubdirectory, htmlResponseDumpName, response)
 	if err != nil {
-		logger.Warn("failed to save raw HTML response", "stage", "validate_html", "error", err)
+		logger.Warn("не удалось сохранить ответ модели с разметкой", "stage", "html", "step", "validate_html", "error", err)
 		return
 	}
-	logger.Info("raw HTML response saved", "stage", "validate_html", "result_path", path)
+	logger.Info("ответ модели с разметкой сохранён", "stage", "html", "step", "validate_html", "path", path)
 }
 
 func (p *Pipeline) runHTML(ctx context.Context, input article.GenerationInput, fixedArticle string) (stageOutput, error) {
@@ -440,7 +434,7 @@ func (p *Pipeline) runHTML(ctx context.Context, input article.GenerationInput, f
 	if err := ctx.Err(); err != nil {
 		return stageOutput{}, p.fail(ctx, logger, input, "html_generation", err)
 	}
-	logger.Info("HTML generation started", "stage", "html_generation")
+	logger.Info("стадия начата", "stage", "html")
 	trace, err := p.traceLLMStage(ctx, logger, input, "html", fixedArticle)
 	if err != nil {
 		return stageOutput{}, p.fail(ctx, logger, input, "verify_article_identity", err)
@@ -451,7 +445,7 @@ func (p *Pipeline) runHTML(ctx context.Context, input article.GenerationInput, f
 	}
 	html, cleanup, err := normalizeAndValidateHTML(result.Text)
 	if cleanup.Applied() {
-		logger.Warn("markdown wrapper removed from HTML response", "stage", "validate_html", "cleanup", cleanup.Kind, "size_before", cleanup.SizeBefore, "size_after", cleanup.SizeAfter)
+		logger.Warn("из ответа с разметкой снята обёртка Markdown", "stage", "html", "step", "validate_html", "cleanup", cleanup.Kind, "size_before", cleanup.SizeBefore, "size_after", cleanup.SizeAfter)
 	}
 	if err != nil {
 		p.dumpHTMLResponse(logger, input, result.Text)
@@ -471,11 +465,11 @@ func (p *Pipeline) runHTML(ctx context.Context, input article.GenerationInput, f
 	}, pending); err != nil {
 		return stageOutput{}, p.fail(ctx, logger, input, "save_html_path", err)
 	}
-	logger.Info("HTML generation completed", "stage", "html_generation", "prompt_size", len([]rune(result.Prompt)), "input_tokens", result.InputTokens, "output_tokens", result.OutputTokens, "duration_ms", time.Since(started).Milliseconds(), "result_path", paths.HTMLPath)
+	logger.Info("стадия завершена", "stage", "html", "prompt_size", len([]rune(result.Prompt)), "input_tokens", result.InputTokens, "output_tokens", result.OutputTokens, "duration_ms", time.Since(started).Milliseconds(), "path", paths.HTMLPath)
 	diagnostics.LogStep(p.logger, "html", "after", trace,
 		"prompt_fingerprint", diagnostics.Fingerprint(result.Prompt),
 		"response_fingerprint", diagnostics.Fingerprint(html),
-		"result_path", paths.HTMLPath,
+		"path", paths.HTMLPath,
 	)
 	return stageOutput{Text: html, Paths: paths}, nil
 }
@@ -485,7 +479,7 @@ func (p *Pipeline) RunArticleByExternalID(ctx context.Context, externalID string
 	if err != nil {
 		wrapped := &StageError{ExternalID: externalID, Stage: "load_article_data", Err: err}
 		if !isContextCancellation(ctx, err) {
-			p.logger.Error("generation stage failed", "article_id", int64(0), "external_id", externalID, "stage", wrapped.Stage, "error", err)
+			p.logger.Error("генерация статьи упала", "article_id", int64(0), "external_id", externalID, "error_operation", wrapped.Stage, "error", err)
 		}
 		return PipelineOutput{}, wrapped
 	}
@@ -518,7 +512,7 @@ func (p *Pipeline) RunStructureByExternalID(ctx context.Context, externalID stri
 	if err != nil {
 		wrapped := &StageError{ExternalID: externalID, Stage: "load_structure_data", Err: err}
 		if !isContextCancellation(ctx, err) {
-			p.logger.Error("generation stage failed", "article_id", int64(0), "external_id", externalID, "stage", wrapped.Stage, "error", err)
+			p.logger.Error("генерация статьи упала", "article_id", int64(0), "external_id", externalID, "error_operation", wrapped.Stage, "error", err)
 		}
 		return PipelineOutput{}, wrapped
 	}
@@ -550,7 +544,7 @@ func (p *Pipeline) RunReviewByExternalID(ctx context.Context, externalID string)
 	output, chat, err := p.runReview(ctx, input, articleText)
 	if chat != nil {
 		if closeErr := chat.Close(); closeErr != nil {
-			p.stageLogger(input).Warn("не удалось закрыть чат ревью", "stage", "article_review", "error", closeErr)
+			p.stageLogger(input).Warn("не удалось закрыть чат ревью", "stage", "review", "error", closeErr)
 		}
 	}
 	return PipelineOutput{Paths: output.Paths}, err
@@ -580,7 +574,7 @@ func (p *Pipeline) RunFixByExternalID(ctx context.Context, externalID string) (P
 	}
 	output, err := p.runFix(ctx, input, chat, articleText)
 	if closeErr := chat.Close(); closeErr != nil {
-		p.stageLogger(input).Warn("не удалось закрыть чат ревью", "stage", "article_fix", "error", closeErr)
+		p.stageLogger(input).Warn("не удалось закрыть чат ревью", "stage", "fix", "error", closeErr)
 	}
 	return PipelineOutput{Paths: output.Paths}, err
 }
@@ -618,7 +612,7 @@ func (p *Pipeline) loadSavedInput(ctx context.Context, externalID, stage string)
 	if err != nil {
 		wrapped := &StageError{ExternalID: externalID, Stage: "load_" + stage + "_data", Err: err}
 		if !isContextCancellation(ctx, err) {
-			p.logger.Error("generation stage failed", "article_id", int64(0), "external_id", externalID, "stage", wrapped.Stage, "error", err)
+			p.logger.Error("генерация статьи упала", "article_id", int64(0), "external_id", externalID, "error_operation", wrapped.Stage, "error", err)
 		}
 		return article.SavedGenerationInput{}, article.GenerationInput{}, wrapped
 	}
@@ -650,7 +644,7 @@ func articleTrace(ctx context.Context, logger *slog.Logger, reader articleTraceR
 		if isContextCancellation(ctx, err) {
 			return article.Trace{}, err
 		}
-		logger.Warn("не удалось прочитать идентичность статьи для трассировки", "stage", "identity_trace", "error", err)
+		logger.Warn("не удалось прочитать идентичность статьи для трассировки", "step", "identity_trace", "error", err)
 		return inMemory, nil
 	}
 	if mismatchErr := diagnostics.TraceMismatch(inMemory, stored); mismatchErr != nil {
@@ -720,7 +714,7 @@ func (p *Pipeline) fail(ctx context.Context, logger *slog.Logger, input article.
 	if isContextCancellation(ctx, err) {
 		return wrapped
 	}
-	logger.Error("generation pipeline failed", "stage", stage, "error", err)
+	logger.Error("генерация статьи упала", "error_operation", stage, "error", err)
 	if saveErr := p.repository.SaveError(ctx, input.Article.ID, wrapped); saveErr != nil {
 		return errors.Join(wrapped, fmt.Errorf("сохранить ошибку статьи: %w", saveErr))
 	}
