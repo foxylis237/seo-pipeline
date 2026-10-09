@@ -131,7 +131,7 @@ func (f *Flow) namedLinks(ctx context.Context, logger *slog.Logger, links string
 		name, err := f.names.Name(ctx, url)
 		if err != nil || strings.TrimSpace(name) == "" {
 			logger.Warn("название программы не получено, ссылка уходит без него",
-				"stage", "html_generation", "url", url, "error", err)
+				"stage", StageHTML, "url", url, "error", err)
 			lines = append(lines, url)
 			continue
 		}
@@ -165,10 +165,10 @@ func (f *Flow) RunStructure(ctx context.Context, externalID string) error {
 	if err != nil {
 		return f.Fail(ctx, logger, input.Article, "structure_generation", err)
 	}
-	defer f.CloseChat(chat, logger, "structure_generation")
+	defer f.CloseChat(chat, logger, StageStructure)
 
 	started := time.Now()
-	logger.Info("structure generation started", "stage", "structure_generation", "chat", 1)
+	logger.Info("стадия начата", "stage", StageStructure, "chat", 1)
 	structure, err := f.Answer(ctx, chat.Send, prompt, StageStructure)
 	if err != nil {
 		return f.Fail(ctx, logger, input.Article, "structure_generation", err)
@@ -186,8 +186,8 @@ func (f *Flow) RunStructure(ctx context.Context, externalID string) error {
 	}, pending); err != nil {
 		return f.Fail(ctx, logger, input.Article, "save_structure_path", err)
 	}
-	logger.Info("structure generation completed", "stage", "structure_generation",
-		"duration_ms", time.Since(started).Milliseconds(), "result_path", pending.Paths.StructurePath)
+	logger.Info("стадия завершена", "stage", StageStructure,
+		"duration_ms", time.Since(started).Milliseconds(), "path", pending.Paths.StructurePath)
 	return nil
 }
 
@@ -225,7 +225,7 @@ func (f *Flow) RunArticle(ctx context.Context, externalID string) error {
 	if err := f.saveArticleChat(ctx, logger, input, externalID, basePrompt, chat); err != nil {
 		return err
 	}
-	logger.Info("article chat completed", "stage", "article_generation", "chat", 2,
+	logger.Info("чат статьи завершён", "stage", StageArticle, "chat", 2,
 		"duration_ms", time.Since(started).Milliseconds())
 	return nil
 }
@@ -284,8 +284,8 @@ func (f *Flow) runArticleChat(ctx context.Context, logger *slog.Logger, input ar
 	if err != nil {
 		return out, f.Fail(ctx, logger, input.Article, "article_generation", err)
 	}
-	defer f.CloseChat(chat, logger, "article_generation")
-	logger.Info("article chat started", "stage", "article_generation", "chat", 2)
+	defer f.CloseChat(chat, logger, StageArticle)
+	logger.Info("чат статьи начат", "stage", StageArticle, "chat", 2)
 
 	// Текст статьи собирается с дописыванием: ответ веб-интерфейса упирается в предел длины
 	// и обрывается посреди предложения, внешне оставаясь целым. Запись заголовков при этом
@@ -300,12 +300,12 @@ func (f *Flow) runArticleChat(ctx context.Context, logger *slog.Logger, input ar
 		Send:      f.message(chat.Send, StageExpert),
 		Continue:  f.message(chat.Continue, StageExpert),
 		Logger:    logger,
-		Stage:     "article_generation",
+		Stage:     StageExpert,
 	}); err != nil {
 		return out, f.Fail(ctx, logger, input.Article, "article_generation", err)
 	}
 	skipStage(chat, StageExpert)
-	logger.Info("expert article generated", "stage", "article_generation", "prompt_size", len([]rune(out.expertPrompt)))
+	logger.Info("статья получена от модели", "stage", StageExpert, "prompt_size", len([]rune(out.expertPrompt)))
 
 	if out.reviewPrompt, err = f.Render(StageReview, editorData(input)); err != nil {
 		return out, f.Fail(ctx, logger, input.Article, "article_review", err)
@@ -318,12 +318,12 @@ func (f *Flow) runArticleChat(ctx context.Context, logger *slog.Logger, input ar
 		Send:      f.message(chat.Continue, StageReview),
 		Continue:  f.message(chat.Continue, StageReview),
 		Logger:    logger,
-		Stage:     "article_review",
+		Stage:     StageReview,
 	}); err != nil {
 		return out, f.Fail(ctx, logger, input.Article, "article_review", err)
 	}
 	skipStage(chat, StageReview)
-	logger.Info("article review completed", "stage", "article_review")
+	logger.Info("редактура завершена", "stage", StageReview)
 
 	if out.infoPrompt, out.infoText, err = f.Message(ctx, chat.Continue,
 		StageInfo, struct{}{}); err != nil {
@@ -333,10 +333,10 @@ func (f *Flow) runArticleChat(ctx context.Context, logger *slog.Logger, input ar
 		return out, f.Fail(ctx, logger, input.Article, "metadata_parsing", err)
 	}
 	if out.parsedInfo.FallbackUsed {
-		logger.Warn("metadata parsing incomplete, recognized and raw response content saved", "stage", "metadata_generation",
+		logger.Warn("метаданные разобраны не полностью, сохранены распознанное и сырой ответ", "stage", StageInfo,
 			"has_tldr", out.parsedInfo.TLDR != "", "has_faq", out.parsedInfo.FAQ != "")
 	}
-	logger.Info("article info generated", "stage", "metadata_generation")
+	logger.Info("метаданные получены от модели", "stage", StageInfo)
 	return out, nil
 }
 
@@ -411,8 +411,8 @@ func (f *Flow) saveArticleChat(ctx context.Context, logger *slog.Logger, input a
 		Prompt:     basePrompt,
 		PromptPath: expertPending.Paths.ArticlePromptPath,
 	})
-	logger.Info("article artifacts saved", "stage", "article_generation",
-		"result_path", finalPending.Paths.FixedArticlePath)
+	logger.Info("артефакты чата статьи сохранены", "stage", StageArticle,
+		"path", finalPending.Paths.FixedArticlePath)
 	return nil
 }
 
@@ -470,10 +470,10 @@ func (f *Flow) RunHTML(ctx context.Context, externalID string) error {
 	if err != nil {
 		return f.Fail(ctx, logger, input.Article, "html_generation", err)
 	}
-	defer f.CloseChat(chat, logger, "html_generation")
+	defer f.CloseChat(chat, logger, StageHTML)
 
 	started := time.Now()
-	logger.Info("html generation started", "stage", "html_generation", "chat", 3)
+	logger.Info("стадия начата", "stage", StageHTML, "chat", 3)
 	html, err := generation.BuildHTMLPage(ctx, generation.HTMLPageRequest{
 		Page:   finalText,
 		Prompt: prompt,
@@ -504,8 +504,8 @@ func (f *Flow) RunHTML(ctx context.Context, externalID string) error {
 	}, pending); err != nil {
 		return f.Fail(ctx, logger, input.Article, "save_html_path", err)
 	}
-	logger.Info("html generation completed", "stage", "html_generation",
-		"duration_ms", time.Since(started).Milliseconds(), "result_path", pending.Paths.HTMLPath)
+	logger.Info("стадия завершена", "stage", StageHTML,
+		"duration_ms", time.Since(started).Milliseconds(), "path", pending.Paths.HTMLPath)
 	return nil
 }
 
@@ -522,11 +522,11 @@ func (f *Flow) completeHTMLPage(logger *slog.Logger, page, markup string) string
 		generation.CleanPlainBlogMarkup(generation.DropHeading1(markup))))
 	if !generation.LeadKept(page, markup) {
 		markup = generation.RestoreLead(page, markup)
-		logger.Warn("вводный абзац возвращён в разметку кодом", "stage", "html_generation")
+		logger.Warn("вводный абзац возвращён в разметку кодом", "stage", StageHTML)
 	}
 	if left := generation.LeftoverBlockMarkers(markup); len(left) > 0 {
 		logger.Warn("вёрстка не узнала метки визуальных блоков, они остались в разметке текстом",
-			"stage", "html_generation", "markers", strings.Join(left, ", "))
+			"stage", StageHTML, "markers", strings.Join(left, ", "))
 	}
 	return markup
 }
@@ -540,7 +540,7 @@ func (f *Flow) decorate(logger *slog.Logger, markup string) string {
 	blocks, err := generation.ReadBlockTemplates(f.blockTemplatesDir)
 	if err != nil {
 		logger.Warn("шаблоны визуальных блоков не прочитаны, статья уходит без оформления блоков",
-			"stage", "html_generation", "error", err)
+			"stage", StageHTML, "error", err)
 		return markup
 	}
 	return generation.DecorateBlocks(markup, blocks)
@@ -562,28 +562,28 @@ func (f *Flow) appendCTA(ctx context.Context, logger *slog.Logger, chat taskflow
 	answer, err := f.Answer(ctx, chat.Continue, ctaSlotsPrompt(title, courseURL), StageHTML)
 	if err != nil {
 		logger.Warn("строки карточки призыва не получены, карточка соберётся на умолчаниях",
-			"stage", "html_generation", "error", err)
+			"stage", StageHTML, "error", err)
 	} else {
 		slots = parseCTASlots(answer)
 	}
 	card, missing := buildCTACard(slots, courseURL)
 	if len(missing) > 0 {
 		logger.Warn("часть слотов карточки призыва заменена умолчаниями",
-			"stage", "html_generation", "slots", strings.Join(missing, ", "))
+			"stage", StageHTML, "slots", strings.Join(missing, ", "))
 	}
 	rendered, err := renderCTACard(tmpl, card)
 	if err != nil {
 		logger.Warn("карточка призыва не собрана, статья уходит без неё",
-			"stage", "html_generation", "error", err)
+			"stage", StageHTML, "error", err)
 		return markup
 	}
 	result, added := appendCTACard(markup, rendered)
 	if !added {
 		logger.Warn("в разметке уже есть призыв — свою карточку не дописываем",
-			"stage", "html_generation")
+			"stage", StageHTML)
 		return result
 	}
-	logger.Info("карточка призыва дописана кодом", "stage", "html_generation",
+	logger.Info("карточка призыва дописана кодом", "stage", StageHTML,
 		"button_url", card.ButtonURL)
 	return result
 }
@@ -616,7 +616,7 @@ func (f *Flow) courseURL(ctx context.Context, logger *slog.Logger, input article
 	known, err := f.programs.HasProgram(ctx, url)
 	if err != nil {
 		logger.Warn("адрес курса не сверен с каталогом услуг",
-			"stage", "load_article_data", "course_url", url, "error", err)
+			"course_url", url, "error", err)
 		return url, nil
 	}
 	if !known {
@@ -641,7 +641,7 @@ func (f *Flow) completeLinks(ctx context.Context, logger *slog.Logger, chat task
 	if missing := generation.MissingInternalLinks(markup, links); len(missing) > 0 {
 		if placed := generation.PlacedInternalLinks(markup, links); placed >= enoughInternalLinks {
 			logger.Info("ссылок перелинковки в тексте достаточно, недостающие не доспрашиваются",
-				"stage", "html_generation", "placed_links", placed, "missing_links", len(missing))
+				"stage", StageHTML, "placed_links", placed, "missing_links", len(missing))
 		} else {
 			markup = f.repairLinks(ctx, logger, chat, links, markup, missing)
 		}
@@ -649,16 +649,16 @@ func (f *Flow) completeLinks(ctx context.Context, logger *slog.Logger, chat task
 	spread, moved := generation.SpreadCrowdedLinks(markup, links)
 	if moved > 0 {
 		logger.Info("перелинковка расставлена кодом",
-			"stage", "html_generation", "links_moved", moved)
+			"stage", StageHTML, "links_moved", moved)
 		markup = spread
 	}
 	if left := generation.MissingInternalLinks(markup, links); len(left) > 0 {
 		logger.Warn("часть ссылок перелинковки в разметку так и не попала",
-			"stage", "html_generation", "missing_links", len(left))
+			"stage", StageHTML, "missing_links", len(left))
 	}
 	if crowded := generation.CrowdedLinks(markup, links); len(crowded) > 0 {
 		logger.Warn("часть ссылок осталась в одном разделе: свободных разделов не хватило",
-			"stage", "html_generation", "crowded_links", len(crowded))
+			"stage", StageHTML, "crowded_links", len(crowded))
 	}
 	return markup
 }
@@ -667,19 +667,19 @@ func (f *Flow) completeLinks(ctx context.Context, logger *slog.Logger, chat task
 // уже заплачено, и страница без части ссылок полезнее, чем её отсутствие.
 func (f *Flow) repairLinks(ctx context.Context, logger *slog.Logger, chat taskflow.Chat, links, markup string, missing []string) string {
 	logger.Info("ссылок перелинковки в тексте мало, недостающие доспрашиваются у модели",
-		"stage", "html_generation", "missing_links", len(missing))
+		"stage", StageHTML, "missing_links", len(missing))
 	answer, err := f.Answer(ctx, chat.Continue, generation.RepairLinksPrompt(markup, links, missing), StageHTML)
 	if err != nil {
-		logger.Warn("доспрос перелинковки не удался", "stage", "html_generation", "error", err)
+		logger.Warn("доспрос перелинковки не удался", "stage", StageHTML, "error", err)
 		return markup
 	}
 	inserts := generation.ParseLinkInserts(answer, links, missing)
 	repaired, skipped := generation.InsertLinkSentences(markup, inserts)
 	for _, insert := range skipped {
 		logger.Warn("раздел, названный моделью для ссылки, в разметке не найден",
-			"stage", "html_generation", "url", insert.URL, "heading", insert.Heading)
+			"stage", StageHTML, "url", insert.URL, "heading", insert.Heading)
 	}
-	logger.Info("перелинковка дописана моделью", "stage", "html_generation",
+	logger.Info("перелинковка дописана моделью", "stage", StageHTML,
 		"asked_links", len(missing), "inserted_links", len(inserts)-len(skipped))
 	return repaired
 }

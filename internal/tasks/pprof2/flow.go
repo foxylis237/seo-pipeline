@@ -113,10 +113,10 @@ func (f *Flow) RunStructure(ctx context.Context, externalID string) error {
 	if err != nil {
 		return f.Fail(ctx, logger, input.Article, "structure_generation", err)
 	}
-	defer f.CloseChat(chat, logger, "structure_generation")
+	defer f.CloseChat(chat, logger, StageStructure)
 
 	started := time.Now()
-	logger.Info("structure generation started", "stage", "structure_generation", "chat", 1)
+	logger.Info("стадия начата", "stage", StageStructure, "chat", 1)
 	structure, err := f.Answer(ctx, chat.Send, prompt, StageStructure)
 	if err != nil {
 		return f.Fail(ctx, logger, input.Article, "structure_generation", err)
@@ -131,8 +131,8 @@ func (f *Flow) RunStructure(ctx context.Context, externalID string) error {
 	}, pending); err != nil {
 		return f.Fail(ctx, logger, input.Article, "save_structure_path", err)
 	}
-	logger.Info("structure generation completed", "stage", "structure_generation",
-		"duration_ms", time.Since(started).Milliseconds(), "result_path", pending.Paths.StructurePath)
+	logger.Info("стадия завершена", "stage", StageStructure,
+		"duration_ms", time.Since(started).Milliseconds(), "path", pending.Paths.StructurePath)
 	return nil
 }
 
@@ -164,7 +164,7 @@ func (f *Flow) RunArticle(ctx context.Context, externalID string) error {
 	if err := f.saveArticleChat(ctx, logger, input, externalID, chat); err != nil {
 		return err
 	}
-	logger.Info("article chat completed", "stage", "article_generation", "chat", 2,
+	logger.Info("чат статьи завершён", "stage", StageArticle, "chat", 2,
 		"duration_ms", time.Since(started).Milliseconds())
 	return nil
 }
@@ -186,20 +186,20 @@ func (f *Flow) runArticleChat(ctx context.Context, logger *slog.Logger, input ar
 	if err != nil {
 		return out, f.Fail(ctx, logger, input.Article, "article_generation", err)
 	}
-	defer f.CloseChat(chat, logger, "article_generation")
-	logger.Info("article chat started", "stage", "article_generation", "chat", 2)
+	defer f.CloseChat(chat, logger, StageArticle)
+	logger.Info("чат статьи начат", "stage", StageArticle, "chat", 2)
 
 	if out.articlePrompt, out.articleText, err = f.Message(ctx, chat.Send,
 		StageArticle, articleData(input, structure)); err != nil {
 		return out, f.Fail(ctx, logger, input.Article, "article_generation", err)
 	}
-	logger.Info("article generated", "stage", "article_generation", "prompt_size", len([]rune(out.articlePrompt)))
+	logger.Info("статья получена от модели", "stage", StageArticle, "prompt_size", len([]rune(out.articlePrompt)))
 
 	if out.reviewPrompt, out.reviewedPage, err = f.Message(ctx, chat.Continue,
 		StageReview, reviewData(input, out.articleText)); err != nil {
 		return out, f.Fail(ctx, logger, input.Article, "article_review", err)
 	}
-	logger.Info("article review completed", "stage", "article_review")
+	logger.Info("редактура завершена", "stage", StageReview)
 	return out, nil
 }
 
@@ -241,7 +241,7 @@ func (f *Flow) saveArticleChat(ctx context.Context, logger *slog.Logger, input a
 	faq := ExtractFAQ(chat.reviewedPage)
 	if strings.TrimSpace(faq) == "" {
 		logger.Warn("блок частых вопросов не найден в тексте страницы, FAQ останется пустым",
-			"stage", "article_review")
+			"stage", StageReview)
 	}
 	pagePath := finalPending.Paths.FixedArticlePath
 	commitErr := articleoutput.Commit(func() error {
@@ -271,8 +271,8 @@ func (f *Flow) saveArticleChat(ctx context.Context, logger *slog.Logger, input a
 		Prompt:     chat.articlePrompt,
 		PromptPath: articlePending.Paths.ArticlePromptPath,
 	})
-	logger.Info("article artifacts saved", "stage", "article_generation",
-		"draft_path", articlePending.Paths.ArticlePath, "result_path", pagePath,
+	logger.Info("артефакты чата статьи сохранены", "stage", StageArticle,
+		"draft_path", articlePending.Paths.ArticlePath, "path", pagePath,
 		"faq_saved", strings.TrimSpace(faq) != "")
 	return nil
 }
@@ -318,10 +318,10 @@ func (f *Flow) RunHTML(ctx context.Context, externalID string) error {
 	if err != nil {
 		return f.Fail(ctx, logger, input.Article, "html_generation", err)
 	}
-	defer f.CloseChat(chat, logger, "html_generation")
+	defer f.CloseChat(chat, logger, StageHTML)
 
 	started := time.Now()
-	logger.Info("html generation started", "stage", "html_generation", "chat", 3)
+	logger.Info("стадия начата", "stage", StageHTML, "chat", 3)
 	html, err := generation.BuildHTMLPage(ctx, generation.HTMLPageRequest{
 		Page:   finalText,
 		Prompt: prompt,
@@ -339,7 +339,7 @@ func (f *Flow) RunHTML(ctx context.Context, externalID string) error {
 	html, added := appendCTAButton(generation.ScrollTables(html), button)
 	if !added {
 		logger.Warn("в разметке уже есть кнопка — свою не дописываем",
-			"stage", "html_generation", "cta_button_path", f.ctaButtonPath)
+			"stage", StageHTML, "cta_button_path", f.ctaButtonPath)
 	}
 	pending, err := f.writer.StageHTML(input.Article.ExternalID, input.Article.Slug, prompt, html)
 	if err != nil {
@@ -351,7 +351,7 @@ func (f *Flow) RunHTML(ctx context.Context, externalID string) error {
 	}, pending); err != nil {
 		return f.Fail(ctx, logger, input.Article, "save_html_path", err)
 	}
-	logger.Info("html generation completed", "stage", "html_generation",
-		"duration_ms", time.Since(started).Milliseconds(), "result_path", pending.Paths.HTMLPath)
+	logger.Info("стадия завершена", "stage", StageHTML,
+		"duration_ms", time.Since(started).Milliseconds(), "path", pending.Paths.HTMLPath)
 	return nil
 }

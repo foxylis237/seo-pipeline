@@ -121,10 +121,10 @@ func (f *Flow) RunStructure(ctx context.Context, externalID string) error {
 	if err != nil {
 		return f.Fail(ctx, logger, input.Article, "structure_generation", err)
 	}
-	defer f.CloseChat(chat, logger, "structure_generation")
+	defer f.CloseChat(chat, logger, StageStructure)
 
 	started := time.Now()
-	logger.Info("structure generation started", "stage", "structure_generation", "chat", 1)
+	logger.Info("стадия начата", "stage", StageStructure, "chat", 1)
 	structure, err := f.Answer(ctx, chat.Send, prompt, StageStructure)
 	if err != nil {
 		return f.Fail(ctx, logger, input.Article, "structure_generation", err)
@@ -142,8 +142,8 @@ func (f *Flow) RunStructure(ctx context.Context, externalID string) error {
 	}, pending); err != nil {
 		return f.Fail(ctx, logger, input.Article, "save_structure_path", err)
 	}
-	logger.Info("structure generation completed", "stage", "structure_generation",
-		"duration_ms", time.Since(started).Milliseconds(), "result_path", pending.Paths.StructurePath)
+	logger.Info("стадия завершена", "stage", StageStructure,
+		"duration_ms", time.Since(started).Milliseconds(), "path", pending.Paths.StructurePath)
 	return nil
 }
 
@@ -175,7 +175,7 @@ func (f *Flow) RunArticle(ctx context.Context, externalID string) error {
 	if err := f.saveArticleChat(ctx, logger, input, externalID, chat); err != nil {
 		return err
 	}
-	logger.Info("article chat completed", "stage", "article_generation", "chat", 2,
+	logger.Info("чат статьи завершён", "stage", StageArticle, "chat", 2,
 		"duration_ms", time.Since(started).Milliseconds())
 	return nil
 }
@@ -203,8 +203,8 @@ func (f *Flow) runArticleChat(ctx context.Context, logger *slog.Logger, input ar
 	if err != nil {
 		return out, f.Fail(ctx, logger, input.Article, "article_generation", err)
 	}
-	defer f.CloseChat(chat, logger, "article_generation")
-	logger.Info("article chat started", "stage", "article_generation", "chat", 2)
+	defer f.CloseChat(chat, logger, StageArticle)
+	logger.Info("чат статьи начат", "stage", StageArticle, "chat", 2)
 
 	// Выгружаемый промпт собирается до первого сообщения: отказ шаблона обязан стоить нисколько.
 	if out.exportPrompt, err = RenderExportPrompt(f.exportPromptPath, input, structure); err != nil {
@@ -217,14 +217,14 @@ func (f *Flow) runArticleChat(ctx context.Context, logger *slog.Logger, input ar
 	// Запись заголовков приводится к одному виду до сохранения: стадия html расставляет теги
 	// по ней, а модель за один прогон свободно переходит с «H2 - » на «H2:» и на Markdown.
 	out.articleText = generation.NormalizeHeadings(out.articleText)
-	logger.Info("article generated", "stage", "article_generation", "prompt_size", len([]rune(out.articlePrompt)))
+	logger.Info("статья получена от модели", "stage", StageArticle, "prompt_size", len([]rune(out.articlePrompt)))
 
 	if out.reviewPrompt, out.reviewedPage, err = f.Message(ctx, chat.Continue,
 		StageReview, reviewData(out.articleText)); err != nil {
 		return out, f.Fail(ctx, logger, input.Article, "article_review", err)
 	}
 	out.reviewedPage = generation.NormalizeHeadings(out.reviewedPage)
-	logger.Info("article review completed", "stage", "article_review")
+	logger.Info("редактура завершена", "stage", StageReview)
 	return out, nil
 }
 
@@ -288,8 +288,8 @@ func (f *Flow) saveArticleChat(ctx context.Context, logger *slog.Logger, input a
 		Prompt:     chat.exportPrompt,
 		PromptPath: articlePending.Paths.ArticlePromptPath,
 	})
-	logger.Info("article artifacts saved", "stage", "article_generation",
-		"draft_path", articlePending.Paths.ArticlePath, "result_path", pagePath)
+	logger.Info("артефакты чата статьи сохранены", "stage", StageArticle,
+		"draft_path", articlePending.Paths.ArticlePath, "path", pagePath)
 	return nil
 }
 
@@ -339,10 +339,10 @@ func (f *Flow) RunHTML(ctx context.Context, externalID string) error {
 	if err != nil {
 		return f.Fail(ctx, logger, input.Article, "html_generation", err)
 	}
-	defer f.CloseChat(chat, logger, "html_generation")
+	defer f.CloseChat(chat, logger, StageHTML)
 
 	started := time.Now()
-	logger.Info("html generation started", "stage", "html_generation", "chat", 3)
+	logger.Info("стадия начата", "stage", StageHTML, "chat", 3)
 	// AcceptIncomplete не включается намеренно: у коммерческой страницы половина текста в
 	// блоге хуже отказа — читатель видит обрыв на середине модулей, а цена страницы стоит в
 	// плашке над ним. Так же устроен pprof_2.
@@ -374,8 +374,8 @@ func (f *Flow) RunHTML(ctx context.Context, externalID string) error {
 	}, pending); err != nil {
 		return f.Fail(ctx, logger, input.Article, "save_html_path", err)
 	}
-	logger.Info("html generation completed", "stage", "html_generation",
-		"duration_ms", time.Since(started).Milliseconds(), "result_path", pending.Paths.HTMLPath)
+	logger.Info("стадия завершена", "stage", StageHTML,
+		"duration_ms", time.Since(started).Milliseconds(), "path", pending.Paths.HTMLPath)
 	return nil
 }
 
@@ -400,11 +400,11 @@ func (f *Flow) completeHTMLPage(logger *slog.Logger, page, markup string) string
 	lead := generation.DropBlockMarkerLines(page)
 	if !generation.LeadKept(lead, markup) {
 		markup = generation.RestoreLead(lead, markup)
-		logger.Warn("вводный абзац возвращён в разметку кодом", "stage", "html_generation")
+		logger.Warn("вводный абзац возвращён в разметку кодом", "stage", StageHTML)
 	}
 	if left := generation.LeftoverBlockMarkers(markup); len(left) > 0 {
 		logger.Warn("вёрстка не узнала метки визуальных блоков, они остались в разметке текстом",
-			"stage", "html_generation", "markers", strings.Join(left, ", "))
+			"stage", StageHTML, "markers", strings.Join(left, ", "))
 	}
 	return markup
 }
@@ -424,7 +424,7 @@ func (f *Flow) decorate(logger *slog.Logger, markup string) string {
 	blocks, err := generation.ReadBlockTemplates(f.blockTemplatesDir)
 	if err != nil {
 		logger.Warn("шаблоны визуальных блоков не прочитаны, страница уходит без оформления блоков",
-			"stage", "html_generation", "error", err)
+			"stage", StageHTML, "error", err)
 		return markup
 	}
 	return generation.DecorateBlocks(markup, blocks)
@@ -447,28 +447,28 @@ func (f *Flow) appendCTA(ctx context.Context, logger *slog.Logger, chat taskflow
 	answer, err := f.Answer(ctx, chat.Continue, ctaSlotsPrompt(title), StageHTML)
 	if err != nil {
 		logger.Warn("строки карточки призыва не получены, карточка соберётся на умолчаниях",
-			"stage", "html_generation", "error", err)
+			"stage", StageHTML, "error", err)
 	} else {
 		slots = parseCTASlots(answer)
 	}
 	card, missing := buildCTACard(slots)
 	if len(missing) > 0 {
 		logger.Warn("строки карточки призыва заменены умолчаниями",
-			"stage", "html_generation", "slots", strings.Join(missing, ", "))
+			"stage", StageHTML, "slots", strings.Join(missing, ", "))
 	}
 	rendered, err := renderCTACard(tmpl, card)
 	if err != nil {
 		logger.Warn("карточка призыва не собрана, страница уходит без неё",
-			"stage", "html_generation", "error", err)
+			"stage", StageHTML, "error", err)
 		return markup
 	}
 	result, added := appendCTACard(markup, rendered)
 	if !added {
 		logger.Warn("в разметке уже есть призыв — свою карточку не дописываем",
-			"stage", "html_generation", "cta_card_path", f.ctaCardPath)
+			"stage", StageHTML, "cta_card_path", f.ctaCardPath)
 		return result
 	}
-	logger.Info("карточка призыва дописана кодом", "stage", "html_generation",
+	logger.Info("карточка призыва дописана кодом", "stage", StageHTML,
 		"button_text", card.ButtonText)
 	return result
 }
