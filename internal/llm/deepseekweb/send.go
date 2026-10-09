@@ -28,11 +28,11 @@ func (c *Client) sendPrompt(ctx context.Context, page playwright.Page, composer 
 	}
 	if c.promptAccepted(composer) {
 		c.rememberSentText(request.Prompt)
-		c.stage("send_prompt", "length", len([]rune(request.Prompt)), "model", request.Model, "sent_by", "enter")
+		c.step("send_prompt", "length", len([]rune(request.Prompt)), "model", request.Model, "sent_by", "enter")
 		return nil
 	}
 	// Enter отправляет не всегда.
-	c.stage("send_button_fallback", "article_id", request.ArticleID)
+	c.step("send_button_fallback")
 	if err := c.clickSendButton(page); err != nil {
 		c.saveDiagnostics(page, "send_button", request.ArticleID)
 		return c.browserError(ctx, "click DeepSeek send button", err)
@@ -43,7 +43,7 @@ func (c *Client) sendPrompt(ctx context.Context, page playwright.Page, composer 
 			fmt.Errorf("промпт остался в поле ввода спустя %s после отправки", promptSentTimeout))
 	}
 	c.rememberSentText(request.Prompt)
-	c.stage("send_prompt", "length", len([]rune(request.Prompt)), "model", request.Model, "sent_by", "button")
+	c.step("send_prompt", "length", len([]rune(request.Prompt)), "model", request.Model, "sent_by", "button")
 	return nil
 }
 

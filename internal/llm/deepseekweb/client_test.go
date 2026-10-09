@@ -76,3 +76,37 @@ func TestOperationTimeoutStaysPositiveAfterDeadline(t *testing.T) {
 		t.Fatalf("timeout = %v, want positive", timeout)
 	}
 }
+
+func TestGenerateRecordsCarryArticleAndStage(t *testing.T) {
+	profileDir := t.TempDir()
+	if err := writeBlockedUntil(profileDir, time.Now().Add(time.Hour), "account_blocked"); err != nil {
+		t.Fatal(err)
+	}
+	var logs strings.Builder
+	client, err := NewClient(Config{
+		ChatURL: "https://chat.deepseek.com/", LoginURL: "https://chat.deepseek.com/sign_in", ProfileDir: profileDir,
+	}, slog.New(slog.NewTextHandler(&logs, nil)).With("provider", "deepseek_web"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Generate(context.Background(), llm.Request{Prompt: "prompt", ArticleID: 9, Stage: "expert"}); err == nil {
+		t.Fatal("cooldown did not reject the request")
+	}
+	output := logs.String()
+	if !strings.Contains(output, "отклонён") {
+		t.Fatalf("cooldown was not logged: %s", output)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
+		if !strings.Contains(line, "article_id=9") || !strings.Contains(line, "stage=expert") {
+			t.Errorf("record does not reach the article log: %s", line)
+		}
+		if strings.Contains(line, "provider_type") {
+			t.Errorf("provider_type duplicates provider: %s", line)
+		}
+	}
+	logs.Reset()
+	client.step("open_page")
+	if !strings.Contains(logs.String(), `msg="шаг DeepSeek" provider=deepseek_web step=open_page`) {
+		t.Errorf("step is not written as step: %s", logs.String())
+	}
+}

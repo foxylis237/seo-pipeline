@@ -39,16 +39,16 @@ func (c *Client) applyMode(page playwright.Page, request llm.Request, newChat bo
 		"reasoningLabels": reasoningLabels,
 	})
 	if err != nil {
-		c.logger.Warn("DeepSeek mode was not switched", "mode", mode, "error", err)
+		c.log().Warn("режим DeepSeek не переключён", "mode", mode, "error", err)
 		return
 	}
 	result, _ := value.(string)
 	switch result {
 	case "clicked", "already":
-		c.stage("select_mode", "mode", mode, "result", result)
+		c.step("select_mode", "mode", mode, "result", result)
 	default:
 		c.saveDiagnostics(page, "select_mode", request.ArticleID)
-		c.logger.Warn("DeepSeek mode switch was not found on the page", "mode", mode, "result", result)
+		c.log().Warn("переключатель режима DeepSeek не найден на странице", "mode", mode, "result", result)
 	}
 }
 
@@ -63,16 +63,16 @@ func (c *Client) applySearch(page playwright.Page, request llm.Request, newChat 
 		"labels":   searchLabels,
 	})
 	if err != nil {
-		c.logger.Warn("DeepSeek search was not switched on", "error", err)
+		c.log().Warn("поиск DeepSeek не включён", "error", err)
 		return
 	}
 	result, _ := value.(string)
 	switch result {
 	case "clicked", "already":
-		c.stage("enable_search", "result", result)
+		c.step("enable_search", "result", result)
 	default:
 		c.saveDiagnostics(page, "enable_search", request.ArticleID)
-		c.logger.Warn("DeepSeek search toggle was not found on the page", "result", result)
+		c.log().Warn("тумблер поиска DeepSeek не найден на странице", "result", result)
 	}
 }
 
@@ -100,7 +100,7 @@ func (c *Client) attachDocuments(ctx context.Context, page playwright.Page, requ
 		c.saveDiagnostics(page, "attach_document", request.ArticleID)
 		return c.browserError(ctx, "attach DeepSeek document", err)
 	}
-	c.stage("attach_document", "documents", len(paths), "names", strings.Join(documentNames(paths), ", "))
+	c.step("attach_document", "documents", len(paths), "names", strings.Join(documentNames(paths), ", "))
 	return c.waitForAttachments(ctx, page, request, markers)
 }
 
@@ -114,7 +114,7 @@ func (c *Client) waitForAttachments(ctx context.Context, page playwright.Page, r
 		c.saveDiagnostics(page, "attachment_upload", request.ArticleID)
 		return c.browserError(ctx, "wait for DeepSeek attachment upload", err)
 	}
-	c.stage("attachment_uploaded", "duration_ms", time.Since(started).Milliseconds(), "documents", len(markers))
+	c.step("attachment_uploaded", "duration_ms", time.Since(started).Milliseconds(), "documents", len(markers))
 	return nil
 }
 

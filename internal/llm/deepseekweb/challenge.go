@@ -39,19 +39,19 @@ func (c *Client) handleUnavailable(ctx context.Context, reason string) error {
 
 // resolveChallenge открывает видимое окно с тем же профилем и ждёт, пока человек пройдёт проверку.
 func (c *Client) resolveChallenge(ctx context.Context) error {
-	c.logger.Warn("DeepSeek requires manual captcha verification",
+	c.log().Warn("DeepSeek требует ручной проверки",
 		"profile_dir", c.cfg.ProfileDir, "wait", captchaWaitTimeout.String())
 
 	// Профиль под flock: headless-сессию закрываем, cookies остаются.
 	if err := c.resetSession(); err != nil {
-		c.logger.Warn("DeepSeek headless session was not closed cleanly", "error", err)
+		c.log().Warn("фоновая сессия DeepSeek закрылась с ошибкой", "error", err)
 	}
 
 	if err := c.waitForManualVerification(ctx); err != nil {
-		c.logger.Error("DeepSeek captcha was not passed", "error", err)
+		c.log().Error("проверка DeepSeek не пройдена", "error", err)
 		return captchaError()
 	}
-	c.logger.Info("DeepSeek captcha passed; continuing with the same profile and session",
+	c.log().Info("проверка DeepSeek пройдена, продолжаем в том же профиле",
 		"profile_dir", c.cfg.ProfileDir)
 	// Временная ошибка: роутер повторит стадию по проверенному профилю.
 	return temporaryError("DeepSeek captcha passed, retrying the stage", nil)
@@ -75,7 +75,7 @@ func (c *Client) waitForManualVerification(ctx context.Context) error {
 	}); err != nil {
 		return fmt.Errorf("открыть DeepSeek Chat для ручной проверки: %w", err)
 	}
-	c.logger.Warn("pass the DeepSeek verification in the opened Chromium window; the run continues by itself afterwards")
+	c.log().Warn("пройдите проверку DeepSeek в открытом окне Chromium — прогон продолжится сам")
 
 	for {
 		if _, blocked := c.detectBlocked(session.page); !blocked {

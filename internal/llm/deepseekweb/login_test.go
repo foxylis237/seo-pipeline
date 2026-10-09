@@ -112,7 +112,7 @@ func TestResetProfileLogsClearedCooldown(t *testing.T) {
 	if err := resetProfile(profileDir, logger); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(logs.String(), "block cooldown was cleared") {
+	if !strings.Contains(logs.String(), "пауза блокировки DeepSeek снята") {
 		t.Fatalf("сброс cooldown не попал в лог: %s", logs.String())
 	}
 }
@@ -124,10 +124,10 @@ func TestResetProfileDoesNotLogCooldownWhenAbsent(t *testing.T) {
 	if err := resetProfile(profileDir, logger); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(logs.String(), "block cooldown was cleared") {
+	if strings.Contains(logs.String(), "пауза блокировки DeepSeek снята") {
 		t.Fatalf("сообщение о сбросе cooldown без самого cooldown: %s", logs.String())
 	}
-	if !strings.Contains(logs.String(), "profile removed before manual login") {
+	if !strings.Contains(logs.String(), "удалён перед ручным входом") {
 		t.Fatalf("удаление профиля не залогировано: %s", logs.String())
 	}
 }

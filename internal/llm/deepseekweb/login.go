@@ -28,14 +28,14 @@ func Login(ctx context.Context, cfg Config, logger *slog.Logger) error {
 	}
 	defer session.close()
 
-	logger.Info("opening DeepSeek login page in a clean browser profile", "profile_dir", cfg.ProfileDir)
+	logger.Info("открываю вход в DeepSeek в чистом профиле браузера", "profile_dir", cfg.ProfileDir)
 	if _, err := session.page.Goto(cfg.LoginURL, playwright.PageGotoOptions{
 		WaitUntil: playwright.WaitUntilStateDomcontentloaded,
 		Timeout:   playwright.Float(operationTimeout(loginCtx, defaultOperationTimeout)),
 	}); err != nil {
 		return fmt.Errorf("open DeepSeek login page: %w", err)
 	}
-	logger.Info("complete DeepSeek login manually in Chromium; CAPTCHA and confirmations are not automated", "timeout", defaultLoginTimeout)
+	logger.Info("войдите в DeepSeek вручную в окне Chromium: капча и подтверждения не автоматизированы", "timeout", defaultLoginTimeout)
 	if _, err := session.page.WaitForFunction(visibleElementJS, composerSelector, playwright.PageWaitForFunctionOptions{
 		Polling: "raf", Timeout: playwright.Float(operationTimeout(loginCtx, 0)),
 	}); err != nil {
@@ -44,7 +44,7 @@ func Login(ctx context.Context, cfg Config, logger *slog.Logger) error {
 		}
 		return fmt.Errorf("wait for manual DeepSeek login: %w", err)
 	}
-	logger.Info("DeepSeek login completed; persistent browser profile saved", "profile_dir", cfg.ProfileDir)
+	logger.Info("вход в DeepSeek выполнен, профиль браузера сохранён", "profile_dir", cfg.ProfileDir)
 	return nil
 }
 
@@ -63,9 +63,9 @@ func resetProfile(profileDir string, logger *slog.Logger) error {
 	if err := os.RemoveAll(profileDir); err != nil {
 		return fmt.Errorf("remove DeepSeek browser profile: %w", err)
 	}
-	logger.Info("DeepSeek browser profile removed before manual login", "profile_dir", profileDir)
+	logger.Info("профиль браузера DeepSeek удалён перед ручным входом", "profile_dir", profileDir)
 	if cooldown {
-		logger.Warn("DeepSeek block cooldown was cleared together with the profile", "profile_dir", profileDir)
+		logger.Warn("пауза блокировки DeepSeek снята вместе с профилем", "profile_dir", profileDir)
 	}
 	return nil
 }

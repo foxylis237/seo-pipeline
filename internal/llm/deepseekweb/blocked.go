@@ -70,9 +70,9 @@ func writeBlockedUntil(profileDir string, until time.Time, reason string) error 
 func (c *Client) blockAccount(reason string) error {
 	until := c.pace.now().Add(blockCooldown)
 	if err := writeBlockedUntil(c.cfg.ProfileDir, until, reason); err != nil {
-		c.logger.Warn("DeepSeek block marker was not saved", "error", err)
+		c.log().Warn("отметка блокировки DeepSeek не сохранена", "error", err)
 	}
-	c.logger.Error("DeepSeek account is unavailable",
+	c.log().Error("аккаунт DeepSeek недоступен",
 		"reason", reason, "blocked_until", until.UTC().Format(time.RFC3339), "cooldown", blockCooldown.String())
 	return accountUnavailableError(reason)
 }

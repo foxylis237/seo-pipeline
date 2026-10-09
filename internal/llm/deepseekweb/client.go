@@ -14,8 +14,10 @@ import (
 )
 
 type Client struct {
-	cfg     Config
-	logger  *slog.Logger
+	cfg    Config
+	logger *slog.Logger
+	// reqLog несёт статью и стадию текущего запроса; запросы сериализует access.
+	reqLog  *slog.Logger
 	access  chan struct{}
 	mu      sync.Mutex
 	session *browserSession
@@ -37,7 +39,7 @@ func NewClient(cfg Config, logger *slog.Logger) (*Client, error) {
 		return nil, err
 	}
 	return &Client{
-		cfg: cfg, logger: logger.With("provider_type", "deepseek_web"), access: make(chan struct{}, 1),
+		cfg: cfg, logger: logger, access: make(chan struct{}, 1),
 		pace: defaultPacing(),
 	}, nil
 }
@@ -52,29 +54,29 @@ func (c *Client) Generate(ctx context.Context, request llm.Request) (llm.Respons
 	case <-ctx.Done():
 		return llm.Response{}, ctx.Err()
 	}
+	c.reqLog = c.logger.With("article_id", request.ArticleID, "stage", request.Stage)
+	defer func() { c.reqLog = nil }()
 	started := time.Now()
-	c.logger.Info("DeepSeek Web generation started", "model", request.Model)
 	response, err := c.generate(ctx, request)
 	c.markRequestFinished()
 	if err != nil {
-		c.logger.Warn("DeepSeek Web generation failed", "model", request.Model, "duration_ms", time.Since(started).Milliseconds(), "error", err)
+		c.log().Warn("генерация DeepSeek не удалась", "model", request.Model, "duration_ms", time.Since(started).Milliseconds(), "error", err)
 		return llm.Response{}, err
 	}
-	c.logger.Info("DeepSeek Web generation completed", "model", request.Model, "duration_ms", time.Since(started).Milliseconds(), "response_chars", len([]rune(response.Text)))
 	return response, nil
 }
 
 func (c *Client) generate(ctx context.Context, request llm.Request) (llm.Response, error) {
 	// Проверка до ensureSession: пока действует cooldown, Chromium не запускается вовсе.
 	if until, reason, blocked := readBlockedUntil(c.cfg.ProfileDir, c.pace.now()); blocked {
-		c.logger.Warn("DeepSeek request rejected by cooldown",
+		c.log().Warn("запрос к DeepSeek отклонён: аккаунт на паузе",
 			"blocked_until", until.UTC().Format(time.RFC3339), "reason", reason)
 		return llm.Response{}, accountUnavailableError(fmt.Sprintf(
 			"cooldown until %s (%s)", until.UTC().Format(time.RFC3339), reason))
 	}
 	session, err := c.ensureSession()
 	if err != nil {
-		c.logger.Warn("DeepSeek browser start failed", "error", err)
+		c.log().Warn("браузер DeepSeek не запустился", "error", err)
 		return llm.Response{}, temporaryError("start DeepSeek browser", err)
 	}
 	page := session.page
@@ -89,9 +91,9 @@ func (c *Client) generate(ctx context.Context, request llm.Request) (llm.Respons
 			return llm.Response{}, c.browserError(ctx, "open DeepSeek Chat", err)
 		}
 		c.markChatOpened(request.ArticleID)
-		c.stage("open_page", "url", c.cfg.ChatURL, "article_id", request.ArticleID)
+		c.step("open_page", "url", c.cfg.ChatURL)
 	} else {
-		c.stage("continue_chat", "article_id", request.ArticleID)
+		c.step("continue_chat")
 	}
 	if reason, blocked := c.detectBlocked(page); blocked {
 		return llm.Response{}, c.handleUnavailable(ctx, reason)
@@ -113,7 +115,7 @@ func (c *Client) generate(ctx context.Context, request llm.Request) (llm.Respons
 	}); err != nil {
 		return llm.Response{}, c.browserError(ctx, "find DeepSeek prompt input", err)
 	}
-	c.stage("input_found")
+	c.step("input_found")
 
 	// Режим, поиск и документы — до снимка треда: они меняют страницу, но сообщением не являются.
 	c.applyMode(page, request, newChat)
@@ -143,7 +145,7 @@ func (c *Client) generate(ctx context.Context, request llm.Request) (llm.Respons
 	if text == "" {
 		return llm.Response{}, temporaryError("DeepSeek returned an empty response", nil)
 	}
-	c.stage("answer_received",
+	c.step("answer_received",
 		"source", source,
 		"response_chars", len([]rune(text)),
 		"has_markdown_headings", containsMarkdownHeading(text),
@@ -195,7 +197,7 @@ func (c *Client) waitForAnswer(ctx context.Context, page playwright.Page, mark a
 			return fmt.Errorf("wait for complete DeepSeek answer: %w", ctxErr)
 		}
 		state = responseState(page, mark)
-		c.stage("waiting_response", "elapsed", time.Since(started).Round(time.Second).String(), "state", state)
+		c.step("waiting_response", "duration_ms", time.Since(started).Milliseconds(), "state", state)
 	}
 }
 
@@ -213,17 +215,17 @@ func (c *Client) waitForAnswerActions(ctx context.Context, page playwright.Page)
 		wait = min(wait, time.Until(deadline))
 	}
 	if wait <= 0 {
-		c.stage("answer_actions_missing", "waited", "0s")
+		c.step("answer_actions_missing", "duration_ms", 0)
 		return
 	}
 	started := time.Now()
 	if _, err := page.WaitForFunction(answerActionsReadyJS, map[string]any{"answerSelector": answerSelector},
 		playwright.PageWaitForFunctionOptions{Timeout: playwright.Float(float64(wait.Milliseconds()))}); err != nil {
-		c.logger.Warn("DeepSeek answer action panel did not appear, the answer may be cut off",
-			"waited", time.Since(started).Round(time.Second).String(), "error", err.Error())
+		c.log().Warn("панель действий под ответом DeepSeek не появилась, ответ может быть оборван",
+			"duration_ms", time.Since(started).Milliseconds(), "error", err.Error())
 		return
 	}
-	c.stage("answer_actions_ready", "waited", time.Since(started).Round(time.Second).String())
+	c.step("answer_actions_ready", "duration_ms", time.Since(started).Milliseconds())
 }
 
 // readAnswerSources собирает все доступные представления последнего ответа.
@@ -245,7 +247,7 @@ func (c *Client) readAnswerSources(page playwright.Page) (answerSources, error) 
 
 	clipboard, err := c.copyAnswerToClipboard(page)
 	if err != nil {
-		c.stage("clipboard_unavailable", "error", err.Error())
+		c.step("clipboard_unavailable", "error", err.Error())
 		return sources, nil
 	}
 	sources.Clipboard = clipboard
@@ -355,9 +357,17 @@ func responseState(page playwright.Page, mark answerMark) string {
 	return "unknown"
 }
 
-// stage writes one step of the DeepSeek run in the format the operator greps for.
-func (c *Client) stage(name string, fields ...any) {
-	c.logger.Info("[deepseek]", append([]any{"stage", name}, fields...)...)
+// step writes one step of the DeepSeek run.
+func (c *Client) step(name string, fields ...any) {
+	c.log().Info("шаг DeepSeek", append([]any{"step", name}, fields...)...)
+}
+
+// log returns the logger of the current request, outside a request the client's own.
+func (c *Client) log() *slog.Logger {
+	if c.reqLog != nil {
+		return c.reqLog
+	}
+	return c.logger
 }
 
 // shouldOpenNewChat решает, начинать ли новую беседу: в режиме одного диалога — только при
@@ -412,7 +422,7 @@ func (c *Client) browserError(ctx context.Context, operation string, err error) 
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return fmt.Errorf("%s: %w", operation, ctxErr)
 	}
-	c.logger.Warn("DeepSeek browser operation failed", "operation", operation, "error", err)
+	c.log().Warn("операция в браузере DeepSeek не удалась", "step", operation, "error", err)
 	_ = c.resetSession()
 	return temporaryError(operation, err)
 }

@@ -86,11 +86,11 @@ func (c *Client) WaitBeforeRequest(ctx context.Context) error {
 		return nil
 	}
 	if longBreak {
-		c.logger.Info("DeepSeek Web: перерыв после серии запросов",
+		c.logger.Info("DeepSeek: перерыв после серии запросов",
 			"requests", sinceBreak, "wait_ms", wait.Milliseconds())
 		return c.pace.sleep(ctx, wait)
 	}
-	c.logger.Info("DeepSeek Web request throttled",
+	c.logger.Info("DeepSeek: пауза между запросами",
 		"wait_ms", wait.Milliseconds(),
 		"interval_ms", interval.Milliseconds(),
 		"since_previous_ms", elapsed.Milliseconds(),
