@@ -164,11 +164,12 @@ func prepareArticle(
 		selected,
 		keyssoService,
 		arsenkin.New(arsenkin.Config{
-			ArticleID: selected.ID,
-			Email:     cfg.ArsenkinEmail,
-			Password:  cfg.ArsenkinPassword,
-			Headless:  cfg.ArsenkinHeadless,
-			DebugDir:  debugDirs.arsenkin,
+			ArticleID:  selected.ID,
+			ExternalID: selected.ExternalID,
+			Email:      cfg.ArsenkinEmail,
+			Password:   cfg.ArsenkinPassword,
+			Headless:   cfg.ArsenkinHeadless,
+			DebugDir:   debugDirs.arsenkin,
 		}, logger),
 		fallback,
 	)

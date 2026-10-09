@@ -93,10 +93,11 @@ type Result struct {
 }
 
 type Config struct {
-	ArticleID int64
-	Email     string
-	Password  string
-	Headless  bool
+	ArticleID  int64
+	ExternalID string
+	Email      string
+	Password   string
+	Headless   bool
 	// DebugDir — корень диагностики интеграции; пустой — общий каталог по умолчанию.
 	DebugDir string
 }
@@ -138,7 +139,7 @@ type Service struct {
 }
 
 func New(cfg Config, logger *slog.Logger) *Service {
-	return &Service{cfg: cfg, logger: logger.With("article_id", cfg.ArticleID, "integration", "arsenkin")}
+	return &Service{cfg: cfg, logger: logger.With("article_id", cfg.ArticleID, "external_id", cfg.ExternalID, "stage", "arsenkin")}
 }
 
 // CollectResearch выполняет Wordstat и Copywriters в одном browser context.
@@ -395,7 +396,7 @@ func (s *Service) runWordstat(ctx context.Context, queries []string) ([]KeywordF
 	if err := s.waitWordstatTaskCompleted(ctx, taskID); err != nil {
 		return nil, err
 	}
-	s.log(ctx, slog.LevelInfo, "progress 100", "wordstat_progress")
+	s.log(ctx, slog.LevelInfo, "прогресс Wordstat", "wordstat_progress", "progress", 100)
 	s.log(ctx, slog.LevelInfo, "состояние Wordstat после ожидания", "wordstat_result",
 		"known_task_count", len(knownTaskIDs), "task_id", taskID)
 	result, err := s.downloadWordstatResult(ctx, taskID)
@@ -1019,7 +1020,7 @@ func (s *Service) waitWordstatTaskCompleted(ctx context.Context, taskID string) 
 		}
 		if current, progressErr := s.currentProgress(); progressErr == nil && current > 0 {
 			for _, threshold := range progress.crossed(current) {
-				s.log(ctx, slog.LevelInfo, fmt.Sprintf("progress %d", threshold), "wordstat_progress", "task_id", taskID)
+				s.log(ctx, slog.LevelInfo, "прогресс Wordstat", "wordstat_progress", "progress", threshold, "task_id", taskID)
 			}
 		}
 		if reloadErr := s.reloadWordstatHistory(ctx); reloadErr != nil {
@@ -1166,14 +1167,14 @@ func (s *Service) runCopywriters(ctx context.Context, keywords []KeywordFrequenc
 			return Result{}, err
 		}
 		if progress >= threshold {
-			s.log(ctx, slog.LevelInfo, fmt.Sprintf("Copywriters progress %d", threshold), "copywriters_progress")
+			s.log(ctx, slog.LevelInfo, "прогресс Copywriters", "copywriters_progress", "progress", threshold)
 		}
 	}
 	if err := s.waitCopywritersResult(ctx, previousTask.ID); err != nil {
 		s.saveDebugArtifacts(ctx, "copywriters_result", err, debugState{SubmittedCount: len(copywriterQueries)})
 		return Result{}, err
 	}
-	s.log(ctx, slog.LevelInfo, "Copywriters progress 100", "copywriters_progress")
+	s.log(ctx, slog.LevelInfo, "прогресс Copywriters", "copywriters_progress", "progress", 100)
 
 	currentTask, err := s.copywritersTask()
 	if err != nil {
@@ -1822,9 +1823,9 @@ func (s *Service) stageError(stage string, err error) error {
 	return &StageError{ArticleID: s.cfg.ArticleID, Stage: stage, CurrentURL: s.currentURL(), Duration: time.Since(s.startedAt), Err: err}
 }
 
-// log пишет журнал с контекстом вызывающего.
-func (s *Service) log(ctx context.Context, level slog.Level, message, stage string, fields ...any) {
-	attributes := []any{"stage", stage, "current_url", s.currentURL(), "duration_ms", time.Since(s.startedAt).Milliseconds()}
+// log пишет запись шага с контекстом вызывающего.
+func (s *Service) log(ctx context.Context, level slog.Level, message, step string, fields ...any) {
+	attributes := []any{"step", step, "url", s.currentURL()}
 	s.logger.Log(ctx, level, message, append(attributes, fields...)...)
 }
 
