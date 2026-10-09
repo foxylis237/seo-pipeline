@@ -107,7 +107,6 @@ func (c *OpenAICompatibleClient) generateMessages(ctx context.Context, request R
 	httpRequest.Header.Set("Content-Type", "application/json")
 
 	requestStarted := time.Now()
-	c.logger.Info("HTTP request started", "provider", c.provider, "model", request.Model)
 	httpResponse, err := c.httpClient.Do(httpRequest)
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
@@ -116,15 +115,10 @@ func (c *OpenAICompatibleClient) generateMessages(ctx context.Context, request R
 		return Response{}, fmt.Errorf("execute %s HTTP request during Do: %w", c.provider, err)
 	}
 	defer httpResponse.Body.Close()
-	c.logger.Info("response headers received",
-		"provider", c.provider, "model", request.Model, "status_code", httpResponse.StatusCode,
-		"time_to_headers_ms", time.Since(requestStarted).Milliseconds(),
-	)
-	bodyReadStarted := time.Now()
-	c.logger.Info("response body reading started", "provider", c.provider, "model", request.Model, "status_code", httpResponse.StatusCode)
+	timeToHeaders := time.Since(requestStarted)
 	if httpResponse.StatusCode < http.StatusOK || httpResponse.StatusCode >= http.StatusMultipleChoices {
 		body, err := io.ReadAll(io.LimitReader(httpResponse.Body, maxErrorBody))
-		c.logBodyRead(request.Model, httpResponse.StatusCode, bodyReadStarted, len(body), err)
+		c.logResponseRead(request, httpResponse.StatusCode, requestStarted, timeToHeaders, len(body), err)
 		if err != nil {
 			if ctxErr := ctx.Err(); ctxErr != nil {
 				err = ctxErr
@@ -136,7 +130,7 @@ func (c *OpenAICompatibleClient) generateMessages(ctx context.Context, request R
 	}
 
 	body, err := io.ReadAll(httpResponse.Body)
-	c.logBodyRead(request.Model, httpResponse.StatusCode, bodyReadStarted, len(body), err)
+	c.logResponseRead(request, httpResponse.StatusCode, requestStarted, timeToHeaders, len(body), err)
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			err = ctxErr
@@ -147,7 +141,6 @@ func (c *OpenAICompatibleClient) generateMessages(ctx context.Context, request R
 	if err := json.Unmarshal(body, &decoded); err != nil {
 		return Response{}, fmt.Errorf("decode %s response: %w", c.provider, err)
 	}
-	c.logger.Info("response JSON decoded", "provider", c.provider, "model", request.Model, "status_code", httpResponse.StatusCode)
 	if len(decoded.Choices) == 0 {
 		return Response{}, fmt.Errorf("%s returned no choices", c.provider)
 	}
@@ -207,10 +200,11 @@ func (c *openAICompatibleChat) Close() error {
 
 const maxErrorBody = 32 << 10
 
-func (c *OpenAICompatibleClient) logBodyRead(model string, statusCode int, started time.Time, size int, err error) {
-	c.logger.Info("response body read",
-		"provider", c.provider, "model", model, "status_code", statusCode,
-		"body_read_ms", time.Since(started).Milliseconds(), "response_size_bytes", size, "success", err == nil,
+func (c *OpenAICompatibleClient) logResponseRead(request Request, statusCode int, started time.Time, timeToHeaders time.Duration, size int, err error) {
+	c.logger.Info("HTTP-ответ модели прочитан",
+		"article_id", request.ArticleID, "stage", request.Stage, "provider", c.provider, "model", request.Model,
+		"status_code", statusCode, "time_to_headers_ms", timeToHeaders.Milliseconds(),
+		"duration_ms", time.Since(started).Milliseconds(), "response_size_bytes", size, "success", err == nil,
 	)
 }
 

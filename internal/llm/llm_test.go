@@ -77,12 +77,12 @@ func TestRouterHeartbeatStopsAfterCompletion(t *testing.T) {
 				defer cancel()
 			}
 			_, _ = router.Generate(ctx, Call{Stage: "structure", ArticleID: 7, Data: struct{ Title string }{"Тема"}})
-			before := strings.Count(logs.String(), "LLM request still running")
+			before := strings.Count(logs.String(), "запрос к модели ещё идёт")
 			if before == 0 {
 				t.Fatalf("heartbeat was not logged: %s", logs.String())
 			}
 			time.Sleep(8 * time.Millisecond)
-			after := strings.Count(logs.String(), "LLM request still running")
+			after := strings.Count(logs.String(), "запрос к модели ещё идёт")
 			if after != before {
 				t.Fatalf("heartbeat continued after completion: before=%d after=%d", before, after)
 			}
@@ -447,7 +447,7 @@ func TestRouterFallsBackToSecondProviderOnQuota(t *testing.T) {
 	}
 	output := logs.String()
 	for _, want := range []string{
-		`msg="LLM fallback selected"`, "article_id=2", "stage=article",
+		`msg="переход на запасного провайдера"`, "article_id=2", "stage=article",
 		"provider=deepseek_web", "target_index=1", "reason=provider_fallback", "failed_provider=gemini",
 	} {
 		if !strings.Contains(output, want) {
@@ -477,5 +477,35 @@ func TestRouterKeepsProviderOnBusinessError(t *testing.T) {
 	}
 	if reserve.calls != 0 {
 		t.Fatalf("резервный провайдер вызван %d раз при ошибке валидации", reserve.calls)
+	}
+}
+
+func TestRouterLogsOneRecordPerEventForBrowserProvider(t *testing.T) {
+	temperature := 0.3
+	var logs bytes.Buffer
+	router := NewRouter(config.LLMConfig{
+		Providers: map[string]config.LLMProviderConfig{"deepseek_web": {Type: "deepseek_web"}},
+		Stages: map[string]config.LLMStageConfig{"article": {
+			Targets: []config.LLMTargetConfig{{Provider: "deepseek_web", Model: "deepseek-web"}}, PromptTemplate: "{{.Title}}",
+			Temperature: &temperature, MaxTokens: 100, Timeout: time.Second,
+		}},
+	}, map[string]Client{"deepseek_web": &fakeClient{delay: 12 * time.Millisecond}}, slog.New(slog.NewJSONHandler(&logs, nil)))
+	router.heartbeatInterval = 2 * time.Millisecond
+
+	chat, err := router.NewStageChatFactory("article").NewChat(context.Background(), 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := chat.Generate(context.Background(), "prompt"); err != nil {
+		t.Fatal(err)
+	}
+	output := logs.String()
+	if !strings.Contains(output, `"msg":"ответ модели получен","article_id":5,"stage":"article"`) {
+		t.Fatalf("completed record lacks article_id and stage: %s", output)
+	}
+	for _, unwanted := range []string{"запрос к модели ещё идёт", "input_tokens", "bound", "LLM "} {
+		if strings.Contains(output, unwanted) {
+			t.Errorf("log contains %q: %s", unwanted, output)
+		}
 	}
 }

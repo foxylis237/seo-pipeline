@@ -124,13 +124,15 @@ func TestOpenAICompatibleClientReadsSlowResponseAndLogsPhases(t *testing.T) {
 	}
 	output := logs.String()
 	for _, expected := range []string{
-		"HTTP request started", "response headers received", "response body reading started",
-		"response body read", "response JSON decoded", `"status_code":200`,
-		`"time_to_headers_ms":`, `"body_read_ms":`, `"response_size_bytes":`,
+		"HTTP-ответ модели прочитан", `"status_code":200`,
+		`"time_to_headers_ms":`, `"duration_ms":`, `"response_size_bytes":`,
 	} {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("log does not contain %q: %s", expected, output)
 		}
+	}
+	if records := strings.Count(output, "\n"); records != 1 {
+		t.Fatalf("one HTTP request logged %d records: %s", records, output)
 	}
 	if strings.Contains(output, "slow response") || strings.Contains(output, "secret") {
 		t.Fatalf("log leaked response or key: %s", output)

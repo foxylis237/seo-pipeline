@@ -222,7 +222,7 @@ func (r *Router) generatePrompt(ctx context.Context, call Call, prompt string) (
 		}
 		// Логируем провайдера, на которого переходим, а не отказавший.
 		next := stage.Targets[targetIndex+1]
-		r.logger.Warn("LLM fallback selected",
+		r.logger.Warn("переход на запасного провайдера",
 			"article_id", call.ArticleID, "stage", call.Stage,
 			"provider", next.Provider, "model", next.Model, "target_index", targetIndex+1,
 			"reason", "provider_fallback", "failed_provider", target.Provider,
@@ -308,8 +308,6 @@ func (c *stageChat) Generate(ctx context.Context, prompt string) (Response, erro
 	}
 	if c.bound == nil {
 		c.bound = &config.LLMTargetConfig{Provider: result.Provider, Model: result.Model}
-		c.factory.router.logger.Info("LLM chat bound to provider",
-			"article_id", c.articleID, "stage", stage, "provider", result.Provider, "model", result.Model)
 	}
 	c.history = append(c.history, Message{Role: "user", Content: prompt}, Message{Role: "assistant", Content: result.Text})
 	c.next++
@@ -393,7 +391,7 @@ func (r *Router) generateTarget(ctx context.Context, call Call, prompt string, s
 				remaining = 0
 			}
 		}
-		r.logger.Info("LLM request attempt started",
+		r.logger.Info("попытка запроса к модели",
 			"article_id", call.ArticleID, "stage", call.Stage, "provider", target.Provider,
 			"model", target.Model, "target_index", targetIndex, "attempt", attempt,
 			"remaining_ms", remaining.Milliseconds(), "attempt_timeout_ms", attemptTimeout.Milliseconds(),
@@ -407,14 +405,16 @@ func (r *Router) generateTarget(ctx context.Context, call Call, prompt string, s
 		cancelAttempt()
 		fields := []any{"article_id", call.ArticleID, "stage", call.Stage, "provider", target.Provider, "model", target.Model, "target_index", targetIndex, "attempt", attempt, "duration_ms", time.Since(started).Milliseconds(), "success", requestErr == nil}
 		if requestErr == nil {
-			fields = append(fields, "input_tokens", response.InputTokens, "output_tokens", response.OutputTokens)
-			r.logger.Info("LLM request completed", fields...)
+			if response.InputTokens > 0 || response.OutputTokens > 0 {
+				fields = append(fields, "input_tokens", response.InputTokens, "output_tokens", response.OutputTokens)
+			}
+			r.logger.Info("ответ модели получен", fields...)
 			return RoutedResponse{Response: response, Prompt: prompt, Provider: target.Provider, Model: target.Model}, nil
 		}
 		retryable := isTemporary(requestErr)
 		statusCode, errorType, providerMessage := errorLogFields(requestErr)
 		fields = append(fields, "status_code", statusCode, "error_type", errorType, "provider_message", providerMessage, "retryable", retryable)
-		r.logger.Warn("LLM request failed", fields...)
+		r.logger.Warn("запрос к модели не удался", fields...)
 		if attempt == 3 || !retryable {
 			return RoutedResponse{}, routedError(call.Stage, target.Provider, target.Model, requestErr)
 		}
@@ -495,6 +495,10 @@ func (r *Router) Prepare(call Call) (PreparedCall, error) {
 }
 
 func (r *Router) startHeartbeat(ctx context.Context, call Call, provider, model string, attempt int, started time.Time) func() {
+	// У браузерного провайдера свой пульс, с состоянием страницы.
+	if r.config.Providers[provider].Type == browserProviderType {
+		return func() {}
+	}
 	stop := make(chan struct{})
 	done := make(chan struct{})
 	go func() {
@@ -511,9 +515,9 @@ func (r *Router) startHeartbeat(ctx context.Context, call Call, provider, model 
 						remaining = 0
 					}
 				}
-				r.logger.Info("LLM request still running",
+				r.logger.Info("запрос к модели ещё идёт",
 					"article_id", call.ArticleID, "stage", call.Stage, "provider", provider,
-					"model", model, "attempt", attempt, "elapsed_ms", time.Since(started).Milliseconds(),
+					"model", model, "attempt", attempt, "duration_ms", time.Since(started).Milliseconds(),
 					"remaining_ms", remaining.Milliseconds(),
 				)
 			case <-ctx.Done():
