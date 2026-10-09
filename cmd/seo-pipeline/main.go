@@ -219,7 +219,7 @@ func main() {
 	debugDirs := newDiagnosticsDirs(profile)
 
 	taskStarted := time.Now()
-	taskLogger.Info("task started", "stage", "start")
+	taskLogger.Info("запуск начат", "frame", "start")
 	// waitBackground дожидается фоновых задач перед выходом. Отдельно от defer потому, что
 	// команда завершается через os.Exit, который defer не выполняет.
 	waitBackground := func() {}
@@ -425,7 +425,7 @@ func main() {
 		if pipelineCfg.GoogleDocs {
 			promptPublisher = newGooglePublisher(ctx, googleConfig(true, debugDirs.google, profile.GoogleFolderURL), articleRepository, taskLogger)
 		} else {
-			taskLogger.Info("выгрузка промпта в Google Docs выключена конфигом задачи", "stage", "start")
+			taskLogger.Info("выгрузка промпта в Google Docs выключена конфигом задачи")
 		}
 		defer promptPublisher.Wait()
 		// Тот же Wait, но доступный аварийному выходу: упавшая статья заканчивает команду
@@ -691,11 +691,11 @@ func main() {
 				"error", stageErr.err,
 			)
 		} else {
-			taskLogger.Error("task failed", "stage", "failed", "duration_ms", time.Since(taskStarted).Milliseconds(), "error", err)
+			taskLogger.Error("запуск упал", "duration_ms", time.Since(taskStarted).Milliseconds(), "error", err)
 		}
 		os.Exit(1)
 	}
-	taskLogger.Info("task completed", "stage", "complete", "duration_ms", time.Since(taskStarted).Milliseconds())
+	taskLogger.Info("запуск завершён", "frame", "end", "duration_ms", time.Since(taskStarted).Milliseconds())
 }
 
 // isArticleOperation reports an operation that works on one article at a time and therefore

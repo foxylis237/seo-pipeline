@@ -40,9 +40,9 @@ func runRegenerate(
 	if err != nil {
 		return err
 	}
-	logger.Info("article", "external_id", externalID, "action", "regenerate_started",
-		"title", selected.Title, "old_status", selected.Status,
-		"old_current_step", optionalText(selected.CurrentStep))
+	logger.Info("перегенерация статьи начата", "external_id", externalID,
+		"title", selected.Title, "status_before", selected.Status,
+		"current_step_before", optionalText(selected.CurrentStep))
 
 	if err := repository.ResetGenerationState(ctx, selected.ID); err != nil {
 		return err
@@ -51,7 +51,7 @@ func runRegenerate(
 	if err != nil {
 		return fmt.Errorf("удалить сгенерированные файлы статьи external_id=%s: %w", externalID, err)
 	}
-	logger.Info("article", "external_id", externalID, "action", "state_reset",
+	logger.Info("состояние генерации сброшено", "external_id", externalID,
 		"removed_count", len(removed), "removed", removed)
 
 	if err := runPipeline(ctx, externalID); err != nil {
@@ -94,7 +94,7 @@ func verifyRegenerated(
 		return fmt.Errorf("пересоздание статьи external_id=%s не завершено: %s",
 			externalID, strings.Join(problems, "; "))
 	}
-	logger.Info("article", "external_id", externalID, "action", "completed",
+	logger.Info("перегенерация статьи завершена", "external_id", externalID,
 		"status", selected.Status, "html_path", result.HTMLPath, "result_path", resultPath)
 	return nil
 }

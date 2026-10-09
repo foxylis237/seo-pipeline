@@ -39,25 +39,25 @@ func runRetry(ctx context.Context, repository retryRepository, externalID string
 		articleLogger := logger.With("article_id", item.ID, "external_id", item.ExternalID)
 		if item.Status == "completed" {
 			skipped++
-			articleLogger.Warn("article retry skipped", "reason", "already_completed")
+			articleLogger.Info("повтор статьи пропущен", "reason", "already_completed")
 			continue
 		}
 		if item.ErrorMessage == nil || strings.TrimSpace(*item.ErrorMessage) == "" {
 			skipped++
-			articleLogger.Info("article retry skipped", "reason", "no_recorded_error")
+			articleLogger.Info("повтор статьи пропущен", "reason", "no_recorded_error")
 			continue
 		}
-		articleLogger.Info("article retry started", "status", item.Status, "current_step", optionalText(item.CurrentStep))
+		articleLogger.Info("повтор статьи начат", "status", item.Status, "current_step", optionalText(item.CurrentStep))
 		cleared, err := repository.ClearArticleErrorForRetry(ctx, item.ID)
 		if err != nil {
 			failed++
 			batchErr = errors.Join(batchErr, err)
-			articleLogger.Error("article retry failed", "error", err)
+			articleLogger.Error("повтор статьи упал", "error", err)
 			continue
 		}
 		if !cleared {
 			skipped++
-			articleLogger.Info("article retry skipped", "reason", "no_recorded_error")
+			articleLogger.Info("повтор статьи пропущен", "reason", "no_recorded_error")
 			continue
 		}
 		if err := runDemo(ctx, item.ExternalID); err != nil {
@@ -66,16 +66,16 @@ func runRetry(ctx context.Context, repository retryRepository, externalID string
 			}
 			failed++
 			batchErr = errors.Join(batchErr, fmt.Errorf("retry article_id=%d external_id=%s: %w", item.ID, item.ExternalID, err))
-			articleLogger.Error("article retry failed", "error", err)
+			articleLogger.Error("повтор статьи упал", "error", err)
 			if isGracefulCancellation(ctx, err) {
 				break
 			}
 			continue
 		}
 		completed++
-		articleLogger.Info("article retry completed")
+		articleLogger.Info("повтор статьи завершён")
 	}
-	logger.Info("retry failed articles finished", "total", len(selected), "completed", completed, "failed", failed, "skipped", skipped)
+	logger.Info("повтор упавших статей завершён", "total", len(selected), "completed", completed, "failed", failed, "skipped", skipped)
 	return batchErr
 }
 

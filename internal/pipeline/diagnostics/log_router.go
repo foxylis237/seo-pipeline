@@ -109,7 +109,7 @@ func (r *ArticleLogRouter) handlerFor(externalID string) slog.Handler {
 		return nil
 	}
 	handler := r.newFile(file)
-	slog.New(handler).Info("article log opened", "external_id", externalID, "version", r.version)
+	slog.New(handler).Info("лог статьи открыт", "external_id", externalID, "version", r.version)
 	r.files[externalID] = file
 	r.handlers[externalID] = handler
 	r.logPaths[externalID] = relativePath

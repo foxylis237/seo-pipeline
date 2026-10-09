@@ -61,7 +61,7 @@ func newPrettyHandler(out io.Writer, level slog.Level, width int, color bool) sl
 			// Постоянны весь запуск и печатаются в шапке.
 			"task": {}, "operation": {},
 			// Служебные метки этапа: значок уровня и текст сообщения уже говорят то же самое.
-			"stage": {},
+			"stage": {}, "frame": {},
 			// Внутренний articles.id: в строке уже стоит external_id, которым пользуются в
 			// командах. Для сверки с базой он остаётся в logs/<операция>.log и в json.
 			"article_id": {},
@@ -103,13 +103,12 @@ func (h *prettyHandler) Handle(_ context.Context, record slog.Record) error {
 		return true
 	})
 
-	// Начало и конец запуска — это рамка, а не событие. Распознаются по структурному полю
-	// stage, а не по тексту сообщения: текст меняют, не задумываясь о том, кто его читает.
+	// Начало и конец запуска — рамка, а не событие; узнаётся по своему полю, а не по stage.
 	if record.Level < slog.LevelWarn {
-		switch fields["stage"] {
+		switch fields["frame"] {
 		case "start":
 			return h.write(h.header(fields))
-		case "complete":
+		case "end":
 			return h.write(h.footer(fields))
 		}
 	}

@@ -1144,9 +1144,9 @@ func (r *ArticleRepository) SaveError(ctx context.Context, articleID int64, proc
 	operation := classifyErrorOperation(step, processingErr)
 	retryable := isRetryableError(processingErr)
 	if r.logger != nil {
-		r.logger.Error("article processing failed",
-			"article_id", articleID, "external_id", externalID, "step", optionalString(step),
-			"operation", optionalString(operation), "retryable", retryable, "error", processingErr,
+		r.logger.Error("ошибка статьи сохранена",
+			"article_id", articleID, "external_id", externalID, "current_step", optionalString(step),
+			"error_operation", optionalString(operation), "retryable", retryable, "error", processingErr,
 		)
 	}
 	if err := r.RecordError(ctx, article.ErrorRecord{

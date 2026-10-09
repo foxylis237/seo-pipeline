@@ -21,11 +21,11 @@ func TestPrettyHandlerRendersImportRun(t *testing.T) {
 	var out bytes.Buffer
 	logger := newPrettyLogger(&out, 76).With("task", "task_1", "operation", "import")
 
-	logger.Info("task started", "stage", "start")
+	logger.Info("запуск начат", "frame", "start")
 	logger.Info("новая статья импортирована", "article_id", 1, "external_id", "37",
 		"title", "Как стать логопедом: обучение, обязанности, зарплата и карьерные перспективы")
 	logger.Info("импорт статей завершён", "viewed_count", 2, "imported_count", 2)
-	logger.Info("task completed", "stage", "complete", "duration_ms", 1)
+	logger.Info("запуск завершён", "frame", "end", "duration_ms", 1)
 
 	report := out.String()
 	if !strings.Contains(report, "task_1 · import") {
@@ -35,7 +35,7 @@ func TestPrettyHandlerRendersImportRun(t *testing.T) {
 	if strings.Contains(report, "task=task_1") || strings.Contains(report, "operation=import") {
 		t.Fatalf("постоянные поля повторяются в строках:\n%s", report)
 	}
-	if strings.Contains(report, "task started") || strings.Contains(report, "task completed") {
+	if strings.Contains(report, "запуск начат") || strings.Contains(report, "запуск завершён") {
 		t.Fatalf("служебные записи должны стать рамкой, а не строками:\n%s", report)
 	}
 	if !strings.Contains(report, "[37]") {
@@ -43,6 +43,22 @@ func TestPrettyHandlerRendersImportRun(t *testing.T) {
 	}
 	if !strings.Contains(report, "готово · 1 мс") {
 		t.Fatalf("нет подвала с временем работы:\n%s", report)
+	}
+}
+
+func TestPrettyHandlerFramesOnlyByFrameField(t *testing.T) {
+	var out bytes.Buffer
+	logger := newPrettyLogger(&out, 76).With("task", "obuch_1", "operation", "run")
+
+	logger.Info("этап Keys.so начат", "external_id", "46", "stage", "start")
+	logger.Info("выгрузка промпта в Google Docs выключена конфигом задачи", "stage", "complete")
+
+	report := out.String()
+	if !strings.Contains(report, "этап Keys.so начат") || !strings.Contains(report, "выгрузка промпта") {
+		t.Fatalf("запись со stage=start|complete стала рамкой вместо строки:\n%s", report)
+	}
+	if strings.Contains(report, "obuch_1 · run") || strings.Contains(report, "готово") {
+		t.Fatalf("рамка нарисована без frame:\n%s", report)
 	}
 }
 

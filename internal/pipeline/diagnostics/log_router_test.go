@@ -93,7 +93,7 @@ func TestRouterStartsArticleLogWithVersion(t *testing.T) {
 	}
 
 	first, _, _ := strings.Cut(readStageLog(t, root, "52-kak-stat-logopedom"), "\n")
-	if !strings.Contains(first, "article log opened") || !strings.Contains(first, "version=v-test") {
+	if !strings.Contains(first, "лог статьи открыт") || !strings.Contains(first, "version=v-test") {
 		t.Fatalf("лог статьи начинается не с версии: %q", first)
 	}
 	if strings.Contains(stdout.String(), "version=") {

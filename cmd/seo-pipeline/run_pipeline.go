@@ -224,17 +224,17 @@ func runFullPipeline(
 	}
 	logArticleStart(logger, externalID, state)
 	if nextStage(state) == stageDone {
-		logger.Info("article", "external_id", externalID, "action", "skipped", "reason", "already_completed")
+		logger.Info("статья уже готова", "external_id", externalID)
 		return nil
 	}
 	for _, done := range completedStages(state) {
-		logger.Info("article", "external_id", externalID, "stage", string(done),
-			"action", "skipped", "reason", "already_completed")
+		logger.Info("этап пропущен", "external_id", externalID, "stage", string(done),
+			"reason", "already_completed")
 	}
 	for iteration := 1; ; iteration++ {
 		stage := nextStage(state)
 		if stage == stageDone {
-			logger.Info("article", "external_id", externalID, "action", "completed", "status", state.Status)
+			logger.Info("статья завершена", "external_id", externalID, "status", state.Status)
 			return nil
 		}
 		if iteration > maxStageIterations {
@@ -243,7 +243,7 @@ func runFullPipeline(
 				externalID, maxStageIterations, stage,
 			)
 		}
-		logger.Info("article", "external_id", externalID, "stage", string(stage), "action", "started")
+		logger.Info("этап начат", "external_id", externalID, "stage", string(stage))
 		if err := execute(ctx, stage, externalID); err != nil {
 			return err
 		}
@@ -256,7 +256,7 @@ func runFullPipeline(
 				externalID, stage,
 			)
 		}
-		logger.Info("article", "external_id", externalID, "stage", string(stage), "action", "completed")
+		logger.Info("этап завершён", "external_id", externalID, "stage", string(stage))
 	}
 }
 
@@ -337,7 +337,7 @@ func shortenPlanError(message string) string {
 
 // logArticleStart печатает состояние статьи перед возобновлением.
 func logArticleStart(logger *slog.Logger, externalID string, state pipelineState) {
-	fields := []any{"external_id", externalID, "status", state.Status, "action", "start"}
+	fields := []any{"external_id", externalID, "status", state.Status}
 	if state.CurrentStep != "" {
 		fields = append(fields, "current_step", state.CurrentStep)
 	}
@@ -345,5 +345,5 @@ func logArticleStart(logger *slog.Logger, externalID string, state pipelineState
 		fields = append(fields, "previous_error", state.ErrorMessage, "retry_started", true)
 	}
 	fields = append(fields, "resume_from", string(nextStage(state)))
-	logger.Info("article", fields...)
+	logger.Info("состояние статьи перед прогоном", fields...)
 }

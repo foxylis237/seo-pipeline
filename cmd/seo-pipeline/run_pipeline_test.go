@@ -328,3 +328,76 @@ func TestRunFullPipelineCompletesWithoutMetadata(t *testing.T) {
 		t.Fatalf("выполнены этапы %v, ожидались %v", executed, want)
 	}
 }
+
+type capturedRecord struct {
+	msg  string
+	keys []string
+	attr map[string]string
+}
+
+type captureHandler struct {
+	attrs   []slog.Attr
+	records *[]capturedRecord
+}
+
+func (h captureHandler) Enabled(context.Context, slog.Level) bool { return true }
+
+func (h captureHandler) Handle(_ context.Context, record slog.Record) error {
+	captured := capturedRecord{msg: record.Message, attr: map[string]string{}}
+	add := func(attr slog.Attr) bool {
+		captured.keys = append(captured.keys, attr.Key)
+		captured.attr[attr.Key] = attr.Value.String()
+		return true
+	}
+	for _, attr := range h.attrs {
+		add(attr)
+	}
+	record.Attrs(add)
+	*h.records = append(*h.records, captured)
+	return nil
+}
+
+func (h captureHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	h.attrs = append(append([]slog.Attr(nil), h.attrs...), attrs...)
+	return h
+}
+
+func (h captureHandler) WithGroup(string) slog.Handler { return h }
+
+func TestRunFullPipelineLogsOneKeyOnceAndStageAsStageName(t *testing.T) {
+	repository := &fakeRunRepository{state: readyThrough(stageArticle)}
+	repository.state.Status = "failed"
+	repository.state.ErrorMessage = "обрыв"
+	execute := func(_ context.Context, stage pipelineStage, _ string) error {
+		repository.advance(stage)
+		return nil
+	}
+	var records []capturedRecord
+	logger := slog.New(captureHandler{records: &records}).With("task", "pprof_1", "operation", "run")
+
+	if err := runFullPipeline(context.Background(), repository, execute, logger, "37", false); err != nil {
+		t.Fatal(err)
+	}
+	stages := map[string]bool{}
+	for _, stage := range []pipelineStage{stagePrepare, stageStructure, stageArticle, stageReview, stageFix, stageHTML, stageResult} {
+		stages[string(stage)] = true
+	}
+	for _, record := range records {
+		seen := map[string]bool{}
+		for _, key := range record.keys {
+			if seen[key] {
+				t.Errorf("%q: ключ %s дважды в одной записи", record.msg, key)
+			}
+			seen[key] = true
+		}
+		if stage, found := record.attr["stage"]; found && !stages[stage] {
+			t.Errorf("%q: stage=%s не имя стадии", record.msg, stage)
+		}
+		if record.msg == "article" || seen["action"] {
+			t.Errorf("%q: событие спрятано в поле, а не в сообщении: %v", record.msg, record.attr)
+		}
+	}
+	if len(records) == 0 {
+		t.Fatal("прогон не оставил ни одной записи")
+	}
+}

@@ -213,14 +213,14 @@ func collectPreparedResearch(
 		"article_id", selected.ID,
 		"external_id", selected.ExternalID,
 		"title", selected.Title,
-		"model", cfg.GeminiModel,
+		"stage", "prepare",
 	)
-	articleLogger.Info("обработка статьи начата", "stage", "article_start")
+	articleLogger.Info("подготовка статьи начата")
 	if err := articleRepository.PrepareArticleForRun(ctx, selected.ID); err != nil {
 		if errors.Is(ctx.Err(), context.Canceled) && errors.Is(err, context.Canceled) {
 			return "reset", err
 		}
-		articleLogger.Error("ошибка сброса данных статьи", "stage", "reset", "error", err)
+		articleLogger.Error("ошибка сброса данных статьи", "step", "reset", "error", err)
 		return "reset", err
 	}
 	trace, err := articleRepository.GetArticleTrace(ctx, selected.ID)
@@ -228,7 +228,7 @@ func collectPreparedResearch(
 		if errors.Is(ctx.Err(), context.Canceled) && errors.Is(err, context.Canceled) {
 			return "identity_trace", err
 		}
-		articleLogger.Error("не удалось прочитать идентичность статьи", "stage", "identity_trace", "error", err)
+		articleLogger.Error("не удалось прочитать идентичность статьи", "step", "identity_trace", "error", err)
 		return "identity_trace", err
 	}
 	report.UseTrace(trace)
@@ -243,7 +243,6 @@ func collectPreparedResearch(
 	saveArticleInputDiagnostics(ctx, articleRepository, logger, artifacts, selected)
 	stageStarted := time.Now()
 	stageLogger := logger.With("article_id", selected.ID, "integration", "keysso")
-	stageLogger.Info("обработка статьи начата", keyssoLogFields("article_start", stageStarted, "", 0, 0)...)
 
 	collectResult, source, failedStage, err := collectCleanedKeywords(
 		ctx, articleRepository, logger, stageLogger, artifacts, selected, trace, keyssoService, fallback, report, stageStarted,
@@ -346,7 +345,7 @@ func collectPreparedResearch(
 	printKeysSOResult(os.Stdout, selected, source, collectResult)
 	printArsenkinResult(os.Stdout, selected, arsenkinResult)
 
-	articleLogger.Info("подготовка статьи завершена", "stage", "complete", "duration_ms", time.Since(articleStarted).Milliseconds())
+	articleLogger.Info("подготовка статьи завершена", "duration_ms", time.Since(articleStarted).Milliseconds())
 
 	return "", nil
 }

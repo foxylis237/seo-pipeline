@@ -370,3 +370,18 @@ func TestPProf1KeepsBaseArticlePromptRenderable(t *testing.T) {
 		}
 	}
 }
+
+func TestSchemeChoiceIsLoggedOncePerArticle(t *testing.T) {
+	clock := time.Date(2026, 8, 7, 12, 0, 0, 0, time.UTC)
+	var logs bytes.Buffer
+	mode := testMode(t, &clock, &logs)
+	mode.routers = map[schemeName]*llm.Router{schemeGemini: {}, schemeDeepSeek: {}}
+
+	mode.pipelineFor("46")
+	mode.routerFor("46")
+	mode.pipelineFor("47")
+
+	if got := strings.Count(logs.String(), "схема статьи выбрана"); got != 2 {
+		t.Fatalf("записей выбора схемы %d, want 2 (по одной на статью):\n%s", got, logs.String())
+	}
+}

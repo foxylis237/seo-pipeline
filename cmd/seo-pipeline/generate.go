@@ -40,7 +40,7 @@ func runSelectedArticles(
 	succeeded := 0
 	failedIDs := make([]int64, 0)
 	var batchErr error
-	logger.Info("batch operation started", "stage", "batch_start", "found_count", len(selected))
+	logger.Info("пачка статей начата", "found_count", len(selected))
 	for _, selectedArticle := range selected {
 		step := ""
 		if selectedArticle.CurrentStep != nil {
@@ -49,16 +49,15 @@ func runSelectedArticles(
 		articleLogger := logger.With(
 			"article_id", selectedArticle.ID,
 			"external_id", selectedArticle.ExternalID,
-			"operation", operation,
 			// Статус и этап — на момент выборки: итог статьи пишет её собственный лог, а
 			// под этими именами строка «completed» читалась как «status=failed».
 			"status_before", selectedArticle.Status,
-			"step_before", step,
+			"current_step_before", step,
 		)
 		articleStarted := time.Now()
-		articleLogger.Info("batch article started", "stage", "article_start")
+		articleLogger.Info("статья начата", "title", selectedArticle.Title)
 		if err := runArticle(ctx, selectedArticle.ExternalID); err != nil {
-			articleLogger.Error("batch article failed", "stage", "article_failed", "duration_ms", time.Since(articleStarted).Milliseconds(), "error", err)
+			articleLogger.Error("статья упала", "duration_ms", time.Since(articleStarted).Milliseconds(), "error", err)
 			if isGracefulCancellation(ctx, err) {
 				return errors.Join(batchErr, err)
 			}
@@ -67,11 +66,10 @@ func runSelectedArticles(
 			continue
 		}
 		succeeded++
-		articleLogger.Info("batch article completed", "stage", "article_complete", "duration_ms", time.Since(articleStarted).Milliseconds())
+		articleLogger.Info("статья завершена", "duration_ms", time.Since(articleStarted).Milliseconds())
 	}
 	logger.Info(
-		"batch operation completed",
-		"stage", "batch_complete",
+		"пачка статей завершена",
 		"found_count", len(selected),
 		"succeeded_count", succeeded,
 		"skipped_count", 0,

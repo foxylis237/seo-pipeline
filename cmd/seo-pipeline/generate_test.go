@@ -88,3 +88,28 @@ func TestRunBatchOperationReturnsSelectionErrorBeforeProcessing(t *testing.T) {
 		t.Fatalf("error = %v, called = %v", err, called)
 	}
 }
+
+func TestBatchArticleRecordsDoNotRepeatRootKeys(t *testing.T) {
+	var records []capturedRecord
+	logger := slog.New(captureHandler{records: &records}).With("task", "pprof_1", "operation", "run")
+	selected := []article.Article{{ID: 1, ExternalID: "37", Status: "failed"}}
+
+	err := runSelectedArticles(context.Background(), selected, "run", func(context.Context, string) error {
+		return errors.New("обрыв")
+	}, logger)
+	if err == nil {
+		t.Fatal("ошибка статьи потерялась")
+	}
+	for _, record := range records {
+		seen := map[string]bool{}
+		for _, key := range record.keys {
+			if seen[key] {
+				t.Errorf("%q: ключ %s дважды в одной записи", record.msg, key)
+			}
+			seen[key] = true
+		}
+		if _, found := record.attr["stage"]; found {
+			t.Errorf("%q: веха пачки записана в stage=%s", record.msg, record.attr["stage"])
+		}
+	}
+}

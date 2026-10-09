@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/foxylis237/seo-pipeline/internal/config"
@@ -144,6 +145,24 @@ type articleMode struct {
 	// restart переделывает статью целиком после переключения режима. Поле нужно, чтобы
 	// проверять переключение без настоящих конвейеров; по умолчанию — полный прогон.
 	restart func(context.Context, *generation.Pipeline, string) error
+
+	loggedMu sync.Mutex
+	logged   map[string]schemeName
+}
+
+// logScheme writes the scheme choice once per article; a switched scheme is logged again.
+func (m *articleMode) logScheme(externalID string, routing resolvedRouting) {
+	m.loggedMu.Lock()
+	defer m.loggedMu.Unlock()
+	if m.logged == nil {
+		m.logged = map[string]schemeName{}
+	}
+	if previous, found := m.logged[externalID]; found && previous == routing.Scheme {
+		return
+	}
+	m.logged[externalID] = routing.Scheme
+	m.logger.Info("схема статьи выбрана",
+		"external_id", externalID, "mode", string(routing.Scheme), "reason", routing.Reason)
 }
 
 // pipelineFor возвращает схему для новой статьи и объясняет выбор в логе.
@@ -156,13 +175,12 @@ func (m *articleMode) pipelineFor(externalID string) (schemeName, *generation.Pi
 	if !found {
 		// Клиент нужной схемы не создан при старте — например, маркер выключения Gemini
 		// истёк уже во время прогона. Молча подменять схему нельзя: в логе останется след.
-		m.logger.Warn("scheme is unavailable in this process, falling back to DeepSeek-only",
+		m.logger.Warn("схема недоступна в этом процессе, статья идёт схемой DeepSeek",
 			"external_id", externalID, "requested_scheme", string(routing.Scheme),
 			"reason", routing.Reason, "mode", string(schemeDeepSeek))
 		return schemeDeepSeek, m.pipelines[schemeDeepSeek]
 	}
-	m.logger.Info("article scheme selected",
-		"external_id", externalID, "mode", string(routing.Scheme), "reason", routing.Reason)
+	m.logScheme(externalID, routing)
 	return routing.Scheme, pipeline
 }
 
@@ -171,11 +189,10 @@ func (m *articleMode) pipelineFor(externalID string) (schemeName, *generation.Pi
 func (m *articleMode) routerFor(externalID string) *llm.Router {
 	routing := m.resolver.Resolve()
 	if router, found := m.routers[routing.Scheme]; found {
-		m.logger.Info("article scheme selected",
-			"external_id", externalID, "mode", string(routing.Scheme), "reason", routing.Reason)
+		m.logScheme(externalID, routing)
 		return router
 	}
-	m.logger.Warn("scheme is unavailable in this process, falling back to DeepSeek-only",
+	m.logger.Warn("схема недоступна в этом процессе, статья идёт схемой DeepSeek",
 		"external_id", externalID, "requested_scheme", string(routing.Scheme),
 		"reason", routing.Reason, "mode", string(schemeDeepSeek))
 	return m.routers[schemeDeepSeek]
