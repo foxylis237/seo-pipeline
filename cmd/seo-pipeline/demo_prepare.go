@@ -33,7 +33,7 @@ func (r demoPrepareRepository) PrepareArticleForRun(context.Context, int64) erro
 // возвращается вызывающему и попадает в итог demo-сборки, а не в состояние статьи.
 func (r demoPrepareRepository) SaveError(_ context.Context, articleID int64, processingErr error) error {
 	r.logger.Warn("ошибка prepare не записана в статью: demo-сборка не меняет её состояние",
-		"article_id", articleID, "stage", "demo_prepare", "error", processingErr)
+		"article_id", articleID, "stage", "prepare", "error", processingErr)
 	return nil
 }
 
@@ -57,7 +57,7 @@ func runDemoPrepare(
 	if err != nil {
 		return err
 	}
-	logger.Info("research отсутствует, запускается prepare", "stage", "demo_prepare",
+	logger.Info("данных research нет, запускается prepare", "stage", "prepare",
 		"article_id", selected.ID, "external_id", externalID)
 	return prepareArticle(ctx, demoPrepareRepository{ArticleRepository: articleRepository, logger: logger},
 		cfg, logger, writer, logRouter, newFallback, debugDirs, selected)

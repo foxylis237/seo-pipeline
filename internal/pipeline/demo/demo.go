@@ -138,8 +138,8 @@ func (b *Builder) Build(ctx context.Context, externalID string) error {
 	if err := publish(staging, filepath.Join(articleDirectory, FolderName)); err != nil {
 		return errors.Join(stageErr, err)
 	}
-	b.logger.Info("DEMO собран", "external_id", externalID, "stage", "demo_build",
-		"demo_path", filepath.ToSlash(filepath.Join(state.directory, FolderName)))
+	b.logger.Info("сборка DEMO завершена", "external_id", externalID, "step", "build",
+		"path", filepath.ToSlash(filepath.Join(state.directory, FolderName)))
 	return stageErr
 }
 

@@ -89,7 +89,7 @@ func (b *Builder) load(ctx context.Context, externalID string) (articleState, er
 		state.saved = saved
 	} else {
 		b.logger.Warn("сохранённые артефакты статьи не прочитаны", "external_id", externalID,
-			"stage", "demo_load", "error", savedErr)
+			"step", "load", "error", savedErr)
 	}
 	b.loadResearch(ctx, externalID, &state)
 	return state, nil
@@ -112,8 +112,8 @@ func (b *Builder) loadResearch(ctx context.Context, externalID string, state *ar
 	if state.researchErr == nil {
 		state.researchErr = fmt.Errorf("research статьи external_id %s недоступен: %w", externalID, err)
 	}
-	b.logger.Warn("research статьи недоступен, стадии без него соберутся частично",
-		"external_id", externalID, "stage", "demo_load", "error", err)
+	b.logger.Warn("данные research статьи недоступны, стадии без них соберутся частично",
+		"external_id", externalID, "step", "load", "error", err)
 	if fallback, fallbackErr := b.repository.GetDemoGenerationInput(ctx, externalID); fallbackErr == nil {
 		state.research = fallback
 	}
@@ -138,7 +138,7 @@ func (b *Builder) structure(ctx context.Context, state articleState, staging str
 		return text, nil
 	}
 	if !state.hasResearch {
-		b.logger.Warn("структура пропущена: research не собран", "external_id", state.externalID, "stage", "demo_structure")
+		b.logger.Warn("структура пропущена: research не собран", "external_id", state.externalID, "stage", "structure")
 		return "", nil
 	}
 	call := b.structureCall(state)
@@ -231,12 +231,12 @@ func (b *Builder) articleInfo(ctx context.Context, state articleState, staging, 
 		return b.parseDemoMetadata(state, saved), nil
 	}
 	if strings.TrimSpace(articleText) == "" {
-		b.logger.Warn("информация для публикации пропущена: статьи нет", "external_id", state.externalID, "stage", "demo_info")
+		b.logger.Warn("информация для публикации пропущена: статьи нет", "external_id", state.externalID, "stage", "info")
 		return nil, nil
 	}
 	if !b.generator.HasStage(infoStage) {
 		b.logger.Info("информация для публикации пропущена: у задачи нет стадии info",
-			"external_id", state.externalID, "stage", "demo_info")
+			"external_id", state.externalID, "stage", "info")
 		return nil, nil
 	}
 	call := llm.Call{Stage: infoStage, ArticleID: state.result.Article.ID, Data: struct {
@@ -266,12 +266,12 @@ func (b *Builder) parseDemoMetadata(state articleState, text string) *article.Ar
 	if err == nil && (parsed.TLDR != "" || parsed.FAQ != "") {
 		if parsed.FallbackUsed {
 			b.logger.Warn("метаданные DEMO разобраны нестрогим разбором", "external_id", state.externalID,
-				"stage", "demo_info", "has_tldr", parsed.TLDR != "", "has_faq", parsed.FAQ != "")
+				"stage", "info", "has_tldr", parsed.TLDR != "", "has_faq", parsed.FAQ != "")
 		}
 		return &parsed
 	}
 	b.logger.Warn("метаданные DEMO не разобраны, ответ стадии info целиком помещён в TL;DR",
-		"external_id", state.externalID, "stage", "demo_info", "error", err)
+		"external_id", state.externalID, "stage", "info", "error", err)
 	return &article.ArticleInfo{TLDR: strings.TrimSpace(text)}
 }
 
@@ -307,7 +307,7 @@ func (b *Builder) copyPrepare(state articleState, staging string) {
 	entries, err := os.ReadDir(source)
 	if err != nil {
 		if !os.IsNotExist(err) {
-			b.logger.Warn("данные prepare не прочитаны", "external_id", state.externalID, "stage", "demo_prepare", "error", err)
+			b.logger.Warn("данные prepare не прочитаны", "external_id", state.externalID, "stage", "prepare", "error", err)
 		}
 		return
 	}
@@ -318,12 +318,12 @@ func (b *Builder) copyPrepare(state articleState, staging string) {
 		content, readErr := os.ReadFile(filepath.Join(source, entry.Name()))
 		if readErr != nil {
 			b.logger.Warn("файл prepare не скопирован", "external_id", state.externalID,
-				"stage", "demo_prepare", "file", entry.Name(), "error", readErr)
+				"stage", "prepare", "file", entry.Name(), "error", readErr)
 			continue
 		}
 		if writeErr := writeDemoFile(staging, filepath.Join(prepareFolder, entry.Name()), string(content)); writeErr != nil {
 			b.logger.Warn("файл prepare не записан", "external_id", state.externalID,
-				"stage", "demo_prepare", "file", entry.Name(), "error", writeErr)
+				"stage", "prepare", "file", entry.Name(), "error", writeErr)
 		}
 	}
 }
@@ -343,13 +343,13 @@ func (b *Builder) readProduction(state articleState, relativePath string) (strin
 	}
 	if !strings.HasPrefix(filepath.ToSlash(relativePath), state.directory+"/") {
 		b.logger.Warn("артефакт принадлежит другой статье и пропущен", "external_id", state.externalID,
-			"stage", "demo_build", "path", relativePath)
+			"step", "build", "path", relativePath)
 		return "", false
 	}
 	text, err := b.artifacts.Read(relativePath)
 	if err != nil {
 		b.logger.Warn("артефакт не прочитан", "external_id", state.externalID,
-			"stage", "demo_build", "path", relativePath, "error", err)
+			"step", "build", "path", relativePath, "error", err)
 		return "", false
 	}
 	if strings.TrimSpace(text) == "" {
@@ -365,7 +365,7 @@ func (b *Builder) copyProduction(state articleState, relativePath, staging, name
 	}
 	if err := writeDemoFile(staging, name, text); err != nil {
 		b.logger.Warn("файл DEMO не записан", "external_id", state.externalID,
-			"stage", "demo_build", "file", name, "error", err)
+			"step", "build", "file", name, "error", err)
 		return false
 	}
 	return true
