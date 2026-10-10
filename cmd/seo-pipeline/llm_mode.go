@@ -98,7 +98,7 @@ func loadStageConfigs(profile tasks.Profile, logger *slog.Logger, requireCredent
 	}
 	if mode == "deepseek" {
 		configs.geminiAbsenceReason = "LLM_MODE=deepseek"
-		logger.Info("LLM mode is pinned to DeepSeek-only", "config", profile.LLMOverlayPath, "reason", configs.geminiAbsenceReason)
+		logger.Info("схема закреплена конфигом: только DeepSeek", "config", profile.LLMOverlayPath, "reason", configs.geminiAbsenceReason)
 		return configs, nil
 	}
 
@@ -107,7 +107,7 @@ func loadStageConfigs(profile tasks.Profile, logger *slog.Logger, requireCredent
 		// Отсутствие ключа или сломанная схема Gemini не должны останавливать работу:
 		// DeepSeek-only остаётся рабочим режимом.
 		configs.geminiAbsenceReason = "схема Gemini не загрузилась: " + err.Error()
-		logger.Warn("Gemini scheme is unavailable, every article will use DeepSeek-only", "error", err)
+		logger.Warn("схема Gemini недоступна, все статьи пойдут схемой DeepSeek", "error", err)
 		return configs, nil
 	}
 	configs.gemini, configs.geminiFound = gemini, true
@@ -227,9 +227,9 @@ func (m *articleMode) guard(ctx context.Context, externalID string, scheme schem
 	}
 	until, saveErr := m.availability.disable(exhaustionReason(err))
 	if saveErr != nil {
-		m.logger.Error("Gemini state was not saved, the next run may try Gemini again", "error", saveErr)
+		m.logger.Error("состояние Gemini не сохранено, следующий запуск может снова попробовать Gemini", "error", saveErr)
 	}
-	m.logger.Warn("Gemini is disabled, the article restarts from scratch through DeepSeek-only",
+	m.logger.Warn("Gemini отключён, статья начинается заново схемой DeepSeek",
 		"external_id", externalID, "reason", exhaustionReason(err),
 		"gemini_disabled_until", until.UTC().Format(time.RFC3339), "ttl", geminiUnavailableTTL.String(),
 		"mode", string(schemeDeepSeek), "error", err)

@@ -189,7 +189,7 @@ type generationDeps struct {
 func buildLLM(ctx context.Context, configs stageConfigs, availability geminiAvailability, deps generationDeps) (*articleMode, func() error, error) {
 	resolver := newLLMResolver(configs, availability)
 	routing := resolver.Resolve()
-	deps.logger.Info("LLM routing resolved", "mode", string(routing.Scheme), "reason", routing.Reason)
+	deps.logger.Info("маршрутизация LLM выбрана", "mode", string(routing.Scheme), "reason", routing.Reason)
 
 	// Схема DeepSeek-only нужна всегда: на неё уходит статья после исчерпания квоты Gemini.
 	// Клиенты общие для схем — браузерный профиль один, и второй экземпляр не получил бы flock.

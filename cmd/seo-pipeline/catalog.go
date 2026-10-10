@@ -208,7 +208,7 @@ func runCatalogSync(
 	ctx context.Context, site catalog.Site, source catalog.Source, store catalog.Store,
 	logger *slog.Logger, out io.Writer,
 ) error {
-	logger.Info("сбор каталога услуг начат", "stage", "catalog_sync", "site", site.Key())
+	logger.Info("сбор каталога услуг начат", "site", site.Key())
 	stats, err := catalog.Sync(ctx, site, source, store)
 	if err != nil {
 		return err
@@ -231,7 +231,7 @@ func runCatalogSync(
 			fmt.Fprintf(out, "  %s\n", skipped)
 		}
 	}
-	logger.Info("сбор каталога услуг завершён", "stage", "catalog_sync", "site", site.Key(),
+	logger.Info("сбор каталога услуг завершён", "site", site.Key(),
 		"programs", stats.Programs, "professions", stats.Professions,
 		"skipped", len(stats.SkippedNoIndustry))
 	return nil

@@ -295,7 +295,7 @@ func runDryRun(
 			!profile.WithoutMetadataStage, slices.Contains(profile.LLMStages, string(stageReview))); err != nil {
 			return err
 		}
-		logger.Info("dry-run article verified", "article_id", selected.ID, "external_id", selected.ExternalID, "status", "completed", "result_path", paths.ResultPath)
+		logger.Info("статья офлайн-прогона проверена", "article_id", selected.ID, "external_id", selected.ExternalID, "status", "completed", "path", paths.ResultPath)
 	}
 	return nil
 }

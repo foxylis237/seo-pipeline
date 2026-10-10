@@ -95,6 +95,6 @@ func verifyRegenerated(
 			externalID, strings.Join(problems, "; "))
 	}
 	logger.Info("перегенерация статьи завершена", "external_id", externalID,
-		"status", selected.Status, "html_path", result.HTMLPath, "result_path", resultPath)
+		"status", selected.Status, "path", resultPath, "html_path", result.HTMLPath)
 	return nil
 }

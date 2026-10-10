@@ -119,21 +119,21 @@ func runResetArticle(
 	}
 	if !confirmed {
 		fmt.Fprintln(options.Out, "Подтверждение не получено. Ничего не удалено.")
-		logger.Info("сброс статьи отменён", "stage", "confirm",
+		logger.Info("сброс статьи отменён", "step", "confirm",
 			"article_id", selected.ID, "external_id", selected.ExternalID)
 		return nil
 	}
 
-	logger.Info("сброс статьи начат", "stage", "database",
+	logger.Info("сброс статьи начат", "step", "database",
 		"article_id", selected.ID, "external_id", selected.ExternalID,
-		"old_status", selected.Status, "old_current_step", optionalText(selected.CurrentStep))
+		"status_before", selected.Status, "current_step_before", optionalText(selected.CurrentStep))
 	if err := articleRepository.ResetArticleState(ctx, selected.ID); err != nil {
 		return err
 	}
-	logger.Info("состояние статьи сброшено", "stage", "database", "article_id", selected.ID)
+	logger.Info("состояние статьи сброшено", "step", "database", "article_id", selected.ID)
 
 	removed, err := artifacts.ClearArticleArtifacts(externalID)
-	logger.Info("файлы статьи удалены", "stage", "files",
+	logger.Info("файлы статьи удалены", "step", "files",
 		"article_id", selected.ID, "removed_count", len(removed), "removed", removed)
 	if err != nil {
 		return fmt.Errorf(
@@ -222,15 +222,15 @@ func runReset(ctx context.Context, articleRepository resetRepository, options re
 	}
 	if !confirmed {
 		fmt.Fprintln(options.Out, "Подтверждение не получено. Ничего не удалено.")
-		logger.Info("сброс отменён", "stage", "confirm")
+		logger.Info("сброс отменён", "step", "confirm")
 		return nil
 	}
 
-	logger.Info("очистка базы данных начата", "stage", "database")
+	logger.Info("очистка базы данных начата", "step", "database")
 	if err := articleRepository.Reset(ctx); err != nil {
 		return err
 	}
-	logger.Info("очистка базы данных завершена", "stage", "database")
+	logger.Info("очистка базы данных завершена", "step", "database")
 
 	// Каждый каталог чистится независимо: сбой на одном не должен отменять остальные,
 	// иначе повторный reset пришлось бы запускать ради каталога, который и так был бы пуст.
@@ -240,7 +240,7 @@ func runReset(ctx context.Context, articleRepository resetRepository, options re
 			failures = append(failures, clearErr)
 			continue
 		}
-		logger.Info("каталог очищен", "stage", "files", "path", target.path)
+		logger.Info("каталог очищен", "step", "files", "path", target.path)
 	}
 	if err := errors.Join(failures...); err != nil {
 		return fmt.Errorf("база данных очищена, файлы удалены не полностью — повторите reset: %w", err)

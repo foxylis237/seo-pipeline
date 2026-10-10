@@ -167,7 +167,7 @@ func TestQuotaDisablesGeminiForADayAndRestartsArticle(t *testing.T) {
 		t.Fatalf("следующая статья ушла в %q", scheme)
 	}
 	output := logs.String()
-	for _, expected := range []string{"Gemini is disabled", "gemini_disabled_until", "deepseek_only"} {
+	for _, expected := range []string{"Gemini отключён", "gemini_disabled_until", "deepseek_only"} {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("в логе нет %q: %s", expected, output)
 		}

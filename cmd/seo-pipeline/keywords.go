@@ -76,7 +76,7 @@ func runKeywords(
 	if err := articleRepository.SaveManualKeywords(ctx, selected.ID, parsed.Keywords); err != nil {
 		return err
 	}
-	logger.Info("ручные запросы сохранены", "stage", "manual_keywords",
+	logger.Info("ручные запросы сохранены",
 		"article_id", selected.ID, "external_id", selected.ExternalID,
 		"keywords_count", len(parsed.Keywords), "duplicates_dropped", parsed.Duplicates)
 

@@ -84,21 +84,21 @@ func runClear(
 	}
 	if !confirmed {
 		fmt.Fprintln(options.Out, "Подтверждение не получено. Ничего не удалено.")
-		logger.Info("очистка статьи отменена", "stage", "confirm",
+		logger.Info("очистка статьи отменена", "step", "confirm",
 			"article_id", selected.ID, "external_id", selected.ExternalID)
 		return nil
 	}
 
-	logger.Info("очистка статьи начата", "stage", "database",
+	logger.Info("очистка статьи начата", "step", "database",
 		"article_id", selected.ID, "external_id", selected.ExternalID,
-		"old_status", selected.Status, "old_current_step", optionalText(selected.CurrentStep))
+		"status_before", selected.Status, "current_step_before", optionalText(selected.CurrentStep))
 	if err := articleRepository.ClearArticleState(ctx, selected.ID); err != nil {
 		return err
 	}
-	logger.Info("состояние статьи очищено", "stage", "database", "article_id", selected.ID)
+	logger.Info("состояние статьи очищено", "step", "database", "article_id", selected.ID)
 
 	removed, err := artifacts.ClearArticleArtifacts(externalID)
-	logger.Info("файлы статьи удалены", "stage", "files",
+	logger.Info("файлы статьи удалены", "step", "files",
 		"article_id", selected.ID, "removed_count", len(removed), "removed", removed)
 	if err != nil {
 		return fmt.Errorf(

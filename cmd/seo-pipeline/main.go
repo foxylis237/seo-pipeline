@@ -124,7 +124,7 @@ func main() {
 	pool, err := storage.NewPostgres(ctx, databaseURL)
 	if err != nil {
 		if isGracefulCancellation(ctx, err) {
-			logger.Info("завершение приложения по сигналу", "stage", "shutdown")
+			logger.Info("завершение приложения по сигналу", "step", "shutdown")
 			return
 		}
 		logger.Error("не удалось подключиться к PostgreSQL", "error", err)
@@ -144,7 +144,7 @@ func main() {
 			profile: profile, command: command, cfg: cfg, pool: pool, logger: auditLogger, output: os.Stdout,
 		}); auditErr != nil {
 			if isGracefulCancellation(ctx, auditErr) {
-				auditLogger.Info("завершение приложения по сигналу", "stage", "shutdown")
+				auditLogger.Info("завершение приложения по сигналу", "step", "shutdown")
 				return
 			}
 			auditLogger.Error("операция не выполнена", "error", auditErr)
@@ -161,7 +161,7 @@ func main() {
 		WithoutTLDR:       profile.MetadataFAQOnly,
 	}); err != nil {
 		if isGracefulCancellation(ctx, err) {
-			logger.Info("завершение приложения по сигналу", "stage", "shutdown")
+			logger.Info("завершение приложения по сигналу", "step", "shutdown")
 			return
 		}
 		logger.Error("схема PostgreSQL не согласована с кодом", "error", err)
@@ -182,7 +182,7 @@ func main() {
 	}
 	defer func() {
 		if closeErr := logRouter.Close(); closeErr != nil {
-			logger.Warn("не удалось закрыть логи статей", "stage", "shutdown", "error", closeErr)
+			logger.Warn("не удалось закрыть логи статей", "step", "shutdown", "error", closeErr)
 		}
 	}()
 	taskLogger := slog.New(logRouter.Handler(logger.Handler())).With("task", profile.Name, "operation", command.Name)
@@ -412,9 +412,9 @@ func main() {
 		// Истёкший маркер снимается один раз при старте, а не при выборе схемы: выбор обязан
 		// быть чистым, иначе на batch-прогоне он повторяет одну и ту же запись в лог.
 		if until, reason, removed, expireErr := availability.expire(); expireErr != nil {
-			taskLogger.Warn("Gemini state file was not removed", "error", expireErr)
+			taskLogger.Warn("файл состояния Gemini не удалён", "error", expireErr)
 		} else if removed {
-			taskLogger.Info("Gemini is available again, its disable period has expired",
+			taskLogger.Info("Gemini снова доступен: срок отключения истёк",
 				"was_disabled_until", until.UTC().Format(time.RFC3339), "previous_reason", reason)
 		}
 		// Публикация промпта идёт рядом с генерацией и не задерживает её. Wait обязателен:
@@ -661,7 +661,7 @@ func main() {
 	if err != nil {
 		waitBackground()
 		if isGracefulCancellation(ctx, err) {
-			taskLogger.Info("завершение приложения по сигналу", "stage", "shutdown")
+			taskLogger.Info("завершение приложения по сигналу", "step", "shutdown")
 			return
 		}
 		var arsenkinErr *arsenkin.StageError
