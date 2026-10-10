@@ -106,7 +106,7 @@ func reviewData(_ article.GenerationInput, page string) any {
 // запрещает любые ссылки — внутренние и внешние. Колонка links книги в промпт pprof_2 не
 // уходит; передавать её сюда «на всякий случай» значило бы держать поле, которого нет в
 // шаблоне, а расхождение полей и плейсхолдеров ловится только глазами.
-func htmlData(_ article.GenerationInput, finalText string) any {
+func htmlData(finalText string) any {
 	return struct {
 		Article string
 	}{finalText}

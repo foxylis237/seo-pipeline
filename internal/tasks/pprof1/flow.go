@@ -378,7 +378,7 @@ func (f *Flow) RunHTML(ctx context.Context, externalID string) error {
 	// Названия программ снимаются со страниц сайта один раз: их видит и промпт, и код,
 	// дописывающий недостающие ссылки, — анкором становится ровно название программы.
 	named := f.namedLinks(ctx, logger, input.Links)
-	prompt, err := f.Render(StageHTML, htmlData(input, finalText, named))
+	prompt, err := f.Render(StageHTML, htmlData(finalText, named))
 	if err != nil {
 		return f.Fail(ctx, logger, input.Article, "html_generation", err)
 	}

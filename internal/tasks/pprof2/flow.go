@@ -307,7 +307,7 @@ func (f *Flow) RunHTML(ctx context.Context, externalID string) error {
 		return f.Fail(ctx, logger, input.Article, "html_generation", err)
 	}
 
-	prompt, err := f.Render(StageHTML, htmlData(input, finalText))
+	prompt, err := f.Render(StageHTML, htmlData(finalText))
 	if err != nil {
 		return f.Fail(ctx, logger, input.Article, "html_generation", err)
 	}
