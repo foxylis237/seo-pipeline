@@ -398,14 +398,8 @@ func (f *Flow) completeHTMLPage(logger *slog.Logger, page, markup string) string
 	// инструкцию вёрстке, текстом. В разметке её к этому моменту нет по построению: она уже
 	// стала таблицей.
 	lead := generation.DropBlockMarkerLines(page)
-	if !generation.LeadKept(lead, markup) {
-		markup = generation.RestoreLead(lead, markup)
-		logger.Warn("вводный абзац возвращён в разметку кодом", "stage", StageHTML)
-	}
-	if left := generation.LeftoverBlockMarkers(markup); len(left) > 0 {
-		logger.Warn("вёрстка не узнала метки визуальных блоков, они остались в разметке текстом",
-			"stage", StageHTML, "markers", strings.Join(left, ", "))
-	}
+	markup = taskflow.KeepLead(logger, StageHTML, lead, markup)
+	taskflow.WarnLeftoverMarkers(logger, StageHTML, markup)
 	return markup
 }
 

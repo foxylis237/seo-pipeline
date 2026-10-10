@@ -520,14 +520,8 @@ func (f *Flow) RunHTML(ctx context.Context, externalID string) error {
 func (f *Flow) completeHTMLPage(logger *slog.Logger, page, markup string) string {
 	markup = generation.LinkSources(generation.RestoreStatsList(page,
 		generation.CleanPlainBlogMarkup(generation.DropHeading1(markup))))
-	if !generation.LeadKept(page, markup) {
-		markup = generation.RestoreLead(page, markup)
-		logger.Warn("вводный абзац возвращён в разметку кодом", "stage", StageHTML)
-	}
-	if left := generation.LeftoverBlockMarkers(markup); len(left) > 0 {
-		logger.Warn("вёрстка не узнала метки визуальных блоков, они остались в разметке текстом",
-			"stage", StageHTML, "markers", strings.Join(left, ", "))
-	}
+	markup = taskflow.KeepLead(logger, StageHTML, page, markup)
+	taskflow.WarnLeftoverMarkers(logger, StageHTML, markup)
 	return markup
 }
 
