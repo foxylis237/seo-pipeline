@@ -1,11 +1,11 @@
 []
-  error: usage: seo-pipeline <obuch-1|obuch-2|pprof-1|pprof-2|pprof-audit-1|pprof-audit-2|task-1|login> <operation> [arguments]; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: usage: seo-pipeline <obuch-1|obuch-2|pprof-1|pprof-2|pprof-audit-1|pprof-audit-2|task-1|login> <operation> [arguments]; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["unknown"]
-  error: unknown task "unknown"; available tasks: obuch-1, obuch-2, pprof-1, pprof-2, pprof-audit-1, pprof-audit-2, task-1; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown task "unknown"; available tasks: obuch-1, obuch-2, pprof-1, pprof-2, pprof-audit-1, pprof-audit-2, task-1; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["article" "37"]
-  error: unknown task "article"; available tasks: obuch-1, obuch-2, pprof-1, pprof-2, pprof-audit-1, pprof-audit-2, task-1; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown task "article"; available tasks: obuch-1, obuch-2, pprof-1, pprof-2, pprof-audit-1, pprof-audit-2, task-1; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["--dry-run"]
-  error: usage: seo-pipeline <obuch-1|obuch-2|pprof-1|pprof-2|pprof-audit-1|pprof-audit-2|task-1|login> <operation> [arguments]; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: usage: seo-pipeline <obuch-1|obuch-2|pprof-1|pprof-2|pprof-audit-1|pprof-audit-2|task-1|login> <operation> [arguments]; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["login"]
   error: usage: seo-pipeline login <arsenkin|deepseek|google|keysso>
 ["login" "deepseek"]
@@ -21,27 +21,27 @@
 ["login" "deepseek" "extra"]
   error: usage: seo-pipeline login <arsenkin|deepseek|google|keysso>
 ["LOGIN"]
-  error: unknown task "LOGIN"; available tasks: obuch-1, obuch-2, pprof-1, pprof-2, pprof-audit-1, pprof-audit-2, task-1; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown task "LOGIN"; available tasks: obuch-1, obuch-2, pprof-1, pprof-2, pprof-audit-1, pprof-audit-2, task-1; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["LOGIN" "deepseek"]
-  error: unknown task "LOGIN"; available tasks: obuch-1, obuch-2, pprof-1, pprof-2, pprof-audit-1, pprof-audit-2, task-1; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown task "LOGIN"; available tasks: obuch-1, obuch-2, pprof-1, pprof-2, pprof-audit-1, pprof-audit-2, task-1; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["LOGIN" "google"]
-  error: unknown task "LOGIN"; available tasks: obuch-1, obuch-2, pprof-1, pprof-2, pprof-audit-1, pprof-audit-2, task-1; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown task "LOGIN"; available tasks: obuch-1, obuch-2, pprof-1, pprof-2, pprof-audit-1, pprof-audit-2, task-1; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["LOGIN" "keysso"]
-  error: unknown task "LOGIN"; available tasks: obuch-1, obuch-2, pprof-1, pprof-2, pprof-audit-1, pprof-audit-2, task-1; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown task "LOGIN"; available tasks: obuch-1, obuch-2, pprof-1, pprof-2, pprof-audit-1, pprof-audit-2, task-1; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["LOGIN" "arsenkin"]
-  error: unknown task "LOGIN"; available tasks: obuch-1, obuch-2, pprof-1, pprof-2, pprof-audit-1, pprof-audit-2, task-1; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown task "LOGIN"; available tasks: obuch-1, obuch-2, pprof-1, pprof-2, pprof-audit-1, pprof-audit-2, task-1; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["LOGIN" "unknown"]
-  error: unknown task "LOGIN"; available tasks: obuch-1, obuch-2, pprof-1, pprof-2, pprof-audit-1, pprof-audit-2, task-1; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown task "LOGIN"; available tasks: obuch-1, obuch-2, pprof-1, pprof-2, pprof-audit-1, pprof-audit-2, task-1; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["LOGIN" "deepseek" "extra"]
-  error: unknown task "LOGIN"; available tasks: obuch-1, obuch-2, pprof-1, pprof-2, pprof-audit-1, pprof-audit-2, task-1; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown task "LOGIN"; available tasks: obuch-1, obuch-2, pprof-1, pprof-2, pprof-audit-1, pprof-audit-2, task-1; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["task-1"]
-  error: usage: seo-pipeline task-1 <operation> [arguments]; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: usage: seo-pipeline task-1 <operation> [arguments]; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["task-1" "unknown"]
-  error: unknown task-1 operation "unknown"; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown task-1 operation "unknown"; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["task_1"]
-  error: usage: seo-pipeline task-1 <operation> [arguments]; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: usage: seo-pipeline task-1 <operation> [arguments]; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["task_1" "unknown"]
-  error: unknown task-1 operation "unknown"; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown task-1 operation "unknown"; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["task-1" "import"]
   task=task-1 name=import external_id= import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=INPUT_FILE_PATH or a task input directory is required
 ["task-1" "import" "37"]
@@ -183,25 +183,25 @@
 ["task-1" "regenerate" "--dry-run"]
   error: usage: seo-pipeline task-1 regenerate <external_id>
 ["task-1" "dry-run"]
-  error: unknown task-1 operation "dry-run"; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown task-1 operation "dry-run"; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["task-1" "dry-run" "37"]
-  error: unknown task-1 operation "dry-run"; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown task-1 operation "dry-run"; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["task-1" "dry-run" " 37 "]
-  error: unknown task-1 operation "dry-run"; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown task-1 operation "dry-run"; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["task-1" "dry-run" "0"]
-  error: unknown task-1 operation "dry-run"; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown task-1 operation "dry-run"; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["task-1" "dry-run" "wrong"]
-  error: unknown task-1 operation "dry-run"; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown task-1 operation "dry-run"; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["task-1" "dry-run" "37" "38"]
-  error: unknown task-1 operation "dry-run"; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown task-1 operation "dry-run"; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["task-1" "dry-run" "37" "38" "39"]
-  error: unknown task-1 operation "dry-run"; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown task-1 operation "dry-run"; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["task-1" "dry-run" "--plan"]
-  error: unknown task-1 operation "dry-run"; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown task-1 operation "dry-run"; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["task-1" "dry-run" "--yes"]
-  error: unknown task-1 operation "dry-run"; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown task-1 operation "dry-run"; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["task-1" "dry-run" "--dry-run"]
-  error: unknown task-1 operation "dry-run"; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown task-1 operation "dry-run"; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["task-1" "prepare"]
   task=task-1 name=prepare external_id= import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=KEYS_SO_EMAIL is required
 ["task-1" "prepare" "37"]
@@ -602,6 +602,26 @@
   error: --yes is supported only for task-1 reset, task-1 clear and task-1 publish
 ["task-1" "catalog-sync" "--dry-run"]
   error: --dry-run is supported only for task-1 run without external_id
+["task-1" "catalog-refresh"]
+  task=task-1 name=catalog-refresh external_id= import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=WORDPRESS_URL is required
+["task-1" "catalog-refresh" "37"]
+  error: usage: seo-pipeline task-1 catalog-refresh
+["task-1" "catalog-refresh" " 37 "]
+  error: usage: seo-pipeline task-1 catalog-refresh
+["task-1" "catalog-refresh" "0"]
+  error: usage: seo-pipeline task-1 catalog-refresh
+["task-1" "catalog-refresh" "wrong"]
+  error: usage: seo-pipeline task-1 catalog-refresh
+["task-1" "catalog-refresh" "37" "38"]
+  error: usage: seo-pipeline task-1 catalog-refresh
+["task-1" "catalog-refresh" "37" "38" "39"]
+  error: usage: seo-pipeline task-1 catalog-refresh
+["task-1" "catalog-refresh" "--plan"]
+  error: --plan is supported only for task-1 run and task-1 publish
+["task-1" "catalog-refresh" "--yes"]
+  error: --yes is supported only for task-1 reset, task-1 clear and task-1 publish
+["task-1" "catalog-refresh" "--dry-run"]
+  error: --dry-run is supported only for task-1 run without external_id
 ["task-1" "catalog-show"]
   error: usage: seo-pipeline task-1 catalog-show <external_id>
 ["task-1" "catalog-show" "37"]
@@ -641,13 +661,13 @@
 ["task-1" "import" "-1"]
   error: import limit must be a positive integer: "-1"
 ["pprof-1"]
-  error: usage: seo-pipeline pprof-1 <operation> [arguments]; available pprof-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: usage: seo-pipeline pprof-1 <operation> [arguments]; available pprof-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["pprof-1" "unknown"]
-  error: unknown pprof-1 operation "unknown"; available pprof-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown pprof-1 operation "unknown"; available pprof-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["pprof_1"]
-  error: usage: seo-pipeline pprof-1 <operation> [arguments]; available pprof-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: usage: seo-pipeline pprof-1 <operation> [arguments]; available pprof-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["pprof_1" "unknown"]
-  error: unknown pprof-1 operation "unknown"; available pprof-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown pprof-1 operation "unknown"; available pprof-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["pprof-1" "import"]
   task=pprof-1 name=import external_id= import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=INPUT_FILE_PATH or a task input directory is required
 ["pprof-1" "import" "37"]
@@ -789,25 +809,25 @@
 ["pprof-1" "regenerate" "--dry-run"]
   error: usage: seo-pipeline pprof-1 regenerate <external_id>
 ["pprof-1" "dry-run"]
-  error: unknown pprof-1 operation "dry-run"; available pprof-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown pprof-1 operation "dry-run"; available pprof-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["pprof-1" "dry-run" "37"]
-  error: unknown pprof-1 operation "dry-run"; available pprof-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown pprof-1 operation "dry-run"; available pprof-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["pprof-1" "dry-run" " 37 "]
-  error: unknown pprof-1 operation "dry-run"; available pprof-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown pprof-1 operation "dry-run"; available pprof-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["pprof-1" "dry-run" "0"]
-  error: unknown pprof-1 operation "dry-run"; available pprof-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown pprof-1 operation "dry-run"; available pprof-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["pprof-1" "dry-run" "wrong"]
-  error: unknown pprof-1 operation "dry-run"; available pprof-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown pprof-1 operation "dry-run"; available pprof-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["pprof-1" "dry-run" "37" "38"]
-  error: unknown pprof-1 operation "dry-run"; available pprof-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown pprof-1 operation "dry-run"; available pprof-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["pprof-1" "dry-run" "37" "38" "39"]
-  error: unknown pprof-1 operation "dry-run"; available pprof-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown pprof-1 operation "dry-run"; available pprof-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["pprof-1" "dry-run" "--plan"]
-  error: unknown pprof-1 operation "dry-run"; available pprof-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown pprof-1 operation "dry-run"; available pprof-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["pprof-1" "dry-run" "--yes"]
-  error: unknown pprof-1 operation "dry-run"; available pprof-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown pprof-1 operation "dry-run"; available pprof-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["pprof-1" "dry-run" "--dry-run"]
-  error: unknown pprof-1 operation "dry-run"; available pprof-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown pprof-1 operation "dry-run"; available pprof-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["pprof-1" "prepare"]
   task=pprof-1 name=prepare external_id= import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=KEYS_SO_EMAIL is required
 ["pprof-1" "prepare" "37"]
@@ -1208,6 +1228,26 @@
   error: --yes is supported only for pprof-1 reset, pprof-1 clear and pprof-1 publish
 ["pprof-1" "catalog-sync" "--dry-run"]
   error: --dry-run is supported only for pprof-1 run without external_id
+["pprof-1" "catalog-refresh"]
+  task=pprof-1 name=catalog-refresh external_id= import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=WORDPRESS_URL is required
+["pprof-1" "catalog-refresh" "37"]
+  error: usage: seo-pipeline pprof-1 catalog-refresh
+["pprof-1" "catalog-refresh" " 37 "]
+  error: usage: seo-pipeline pprof-1 catalog-refresh
+["pprof-1" "catalog-refresh" "0"]
+  error: usage: seo-pipeline pprof-1 catalog-refresh
+["pprof-1" "catalog-refresh" "wrong"]
+  error: usage: seo-pipeline pprof-1 catalog-refresh
+["pprof-1" "catalog-refresh" "37" "38"]
+  error: usage: seo-pipeline pprof-1 catalog-refresh
+["pprof-1" "catalog-refresh" "37" "38" "39"]
+  error: usage: seo-pipeline pprof-1 catalog-refresh
+["pprof-1" "catalog-refresh" "--plan"]
+  error: --plan is supported only for pprof-1 run and pprof-1 publish
+["pprof-1" "catalog-refresh" "--yes"]
+  error: --yes is supported only for pprof-1 reset, pprof-1 clear and pprof-1 publish
+["pprof-1" "catalog-refresh" "--dry-run"]
+  error: --dry-run is supported only for pprof-1 run without external_id
 ["pprof-1" "catalog-show"]
   error: usage: seo-pipeline pprof-1 catalog-show <external_id>
 ["pprof-1" "catalog-show" "37"]
@@ -1247,13 +1287,13 @@
 ["pprof-1" "import" "-1"]
   error: import limit must be a positive integer: "-1"
 ["pprof-2"]
-  error: usage: seo-pipeline pprof-2 <operation> [arguments]; available pprof-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: usage: seo-pipeline pprof-2 <operation> [arguments]; available pprof-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["pprof-2" "unknown"]
-  error: unknown pprof-2 operation "unknown"; available pprof-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown pprof-2 operation "unknown"; available pprof-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["pprof_2"]
-  error: usage: seo-pipeline pprof-2 <operation> [arguments]; available pprof-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: usage: seo-pipeline pprof-2 <operation> [arguments]; available pprof-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["pprof_2" "unknown"]
-  error: unknown pprof-2 operation "unknown"; available pprof-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown pprof-2 operation "unknown"; available pprof-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["pprof-2" "import"]
   task=pprof-2 name=import external_id= import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=INPUT_FILE_PATH or a task input directory is required
 ["pprof-2" "import" "37"]
@@ -1395,25 +1435,25 @@
 ["pprof-2" "regenerate" "--dry-run"]
   error: usage: seo-pipeline pprof-2 regenerate <external_id>
 ["pprof-2" "dry-run"]
-  error: unknown pprof-2 operation "dry-run"; available pprof-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown pprof-2 operation "dry-run"; available pprof-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["pprof-2" "dry-run" "37"]
-  error: unknown pprof-2 operation "dry-run"; available pprof-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown pprof-2 operation "dry-run"; available pprof-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["pprof-2" "dry-run" " 37 "]
-  error: unknown pprof-2 operation "dry-run"; available pprof-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown pprof-2 operation "dry-run"; available pprof-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["pprof-2" "dry-run" "0"]
-  error: unknown pprof-2 operation "dry-run"; available pprof-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown pprof-2 operation "dry-run"; available pprof-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["pprof-2" "dry-run" "wrong"]
-  error: unknown pprof-2 operation "dry-run"; available pprof-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown pprof-2 operation "dry-run"; available pprof-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["pprof-2" "dry-run" "37" "38"]
-  error: unknown pprof-2 operation "dry-run"; available pprof-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown pprof-2 operation "dry-run"; available pprof-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["pprof-2" "dry-run" "37" "38" "39"]
-  error: unknown pprof-2 operation "dry-run"; available pprof-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown pprof-2 operation "dry-run"; available pprof-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["pprof-2" "dry-run" "--plan"]
-  error: unknown pprof-2 operation "dry-run"; available pprof-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown pprof-2 operation "dry-run"; available pprof-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["pprof-2" "dry-run" "--yes"]
-  error: unknown pprof-2 operation "dry-run"; available pprof-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown pprof-2 operation "dry-run"; available pprof-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["pprof-2" "dry-run" "--dry-run"]
-  error: unknown pprof-2 operation "dry-run"; available pprof-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown pprof-2 operation "dry-run"; available pprof-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["pprof-2" "prepare"]
   task=pprof-2 name=prepare external_id= import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=KEYS_SO_EMAIL is required
 ["pprof-2" "prepare" "37"]
@@ -1814,6 +1854,26 @@
   error: --yes is supported only for pprof-2 reset, pprof-2 clear and pprof-2 publish
 ["pprof-2" "catalog-sync" "--dry-run"]
   error: --dry-run is supported only for pprof-2 run without external_id
+["pprof-2" "catalog-refresh"]
+  task=pprof-2 name=catalog-refresh external_id= import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=WORDPRESS_URL is required
+["pprof-2" "catalog-refresh" "37"]
+  error: usage: seo-pipeline pprof-2 catalog-refresh
+["pprof-2" "catalog-refresh" " 37 "]
+  error: usage: seo-pipeline pprof-2 catalog-refresh
+["pprof-2" "catalog-refresh" "0"]
+  error: usage: seo-pipeline pprof-2 catalog-refresh
+["pprof-2" "catalog-refresh" "wrong"]
+  error: usage: seo-pipeline pprof-2 catalog-refresh
+["pprof-2" "catalog-refresh" "37" "38"]
+  error: usage: seo-pipeline pprof-2 catalog-refresh
+["pprof-2" "catalog-refresh" "37" "38" "39"]
+  error: usage: seo-pipeline pprof-2 catalog-refresh
+["pprof-2" "catalog-refresh" "--plan"]
+  error: --plan is supported only for pprof-2 run and pprof-2 publish
+["pprof-2" "catalog-refresh" "--yes"]
+  error: --yes is supported only for pprof-2 reset, pprof-2 clear and pprof-2 publish
+["pprof-2" "catalog-refresh" "--dry-run"]
+  error: --dry-run is supported only for pprof-2 run without external_id
 ["pprof-2" "catalog-show"]
   error: usage: seo-pipeline pprof-2 catalog-show <external_id>
 ["pprof-2" "catalog-show" "37"]
@@ -1853,13 +1913,13 @@
 ["pprof-2" "import" "-1"]
   error: import limit must be a positive integer: "-1"
 ["obuch-1"]
-  error: usage: seo-pipeline obuch-1 <operation> [arguments]; available obuch-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: usage: seo-pipeline obuch-1 <operation> [arguments]; available obuch-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["obuch-1" "unknown"]
-  error: unknown obuch-1 operation "unknown"; available obuch-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown obuch-1 operation "unknown"; available obuch-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["obuch_1"]
-  error: usage: seo-pipeline obuch-1 <operation> [arguments]; available obuch-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: usage: seo-pipeline obuch-1 <operation> [arguments]; available obuch-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["obuch_1" "unknown"]
-  error: unknown obuch-1 operation "unknown"; available obuch-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown obuch-1 operation "unknown"; available obuch-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["obuch-1" "import"]
   task=obuch-1 name=import external_id= import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=INPUT_FILE_PATH or a task input directory is required
 ["obuch-1" "import" "37"]
@@ -2001,25 +2061,25 @@
 ["obuch-1" "regenerate" "--dry-run"]
   error: usage: seo-pipeline obuch-1 regenerate <external_id>
 ["obuch-1" "dry-run"]
-  error: unknown obuch-1 operation "dry-run"; available obuch-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown obuch-1 operation "dry-run"; available obuch-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["obuch-1" "dry-run" "37"]
-  error: unknown obuch-1 operation "dry-run"; available obuch-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown obuch-1 operation "dry-run"; available obuch-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["obuch-1" "dry-run" " 37 "]
-  error: unknown obuch-1 operation "dry-run"; available obuch-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown obuch-1 operation "dry-run"; available obuch-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["obuch-1" "dry-run" "0"]
-  error: unknown obuch-1 operation "dry-run"; available obuch-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown obuch-1 operation "dry-run"; available obuch-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["obuch-1" "dry-run" "wrong"]
-  error: unknown obuch-1 operation "dry-run"; available obuch-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown obuch-1 operation "dry-run"; available obuch-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["obuch-1" "dry-run" "37" "38"]
-  error: unknown obuch-1 operation "dry-run"; available obuch-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown obuch-1 operation "dry-run"; available obuch-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["obuch-1" "dry-run" "37" "38" "39"]
-  error: unknown obuch-1 operation "dry-run"; available obuch-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown obuch-1 operation "dry-run"; available obuch-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["obuch-1" "dry-run" "--plan"]
-  error: unknown obuch-1 operation "dry-run"; available obuch-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown obuch-1 operation "dry-run"; available obuch-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["obuch-1" "dry-run" "--yes"]
-  error: unknown obuch-1 operation "dry-run"; available obuch-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown obuch-1 operation "dry-run"; available obuch-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["obuch-1" "dry-run" "--dry-run"]
-  error: unknown obuch-1 operation "dry-run"; available obuch-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown obuch-1 operation "dry-run"; available obuch-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["obuch-1" "prepare"]
   task=obuch-1 name=prepare external_id= import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=KEYS_SO_EMAIL is required
 ["obuch-1" "prepare" "37"]
@@ -2420,6 +2480,26 @@
   error: --yes is supported only for obuch-1 reset, obuch-1 clear and obuch-1 publish
 ["obuch-1" "catalog-sync" "--dry-run"]
   error: --dry-run is supported only for obuch-1 run without external_id
+["obuch-1" "catalog-refresh"]
+  task=obuch-1 name=catalog-refresh external_id= import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=WORDPRESS_URL is required
+["obuch-1" "catalog-refresh" "37"]
+  error: usage: seo-pipeline obuch-1 catalog-refresh
+["obuch-1" "catalog-refresh" " 37 "]
+  error: usage: seo-pipeline obuch-1 catalog-refresh
+["obuch-1" "catalog-refresh" "0"]
+  error: usage: seo-pipeline obuch-1 catalog-refresh
+["obuch-1" "catalog-refresh" "wrong"]
+  error: usage: seo-pipeline obuch-1 catalog-refresh
+["obuch-1" "catalog-refresh" "37" "38"]
+  error: usage: seo-pipeline obuch-1 catalog-refresh
+["obuch-1" "catalog-refresh" "37" "38" "39"]
+  error: usage: seo-pipeline obuch-1 catalog-refresh
+["obuch-1" "catalog-refresh" "--plan"]
+  error: --plan is supported only for obuch-1 run and obuch-1 publish
+["obuch-1" "catalog-refresh" "--yes"]
+  error: --yes is supported only for obuch-1 reset, obuch-1 clear and obuch-1 publish
+["obuch-1" "catalog-refresh" "--dry-run"]
+  error: --dry-run is supported only for obuch-1 run without external_id
 ["obuch-1" "catalog-show"]
   error: usage: seo-pipeline obuch-1 catalog-show <external_id>
 ["obuch-1" "catalog-show" "37"]
@@ -2459,13 +2539,13 @@
 ["obuch-1" "import" "-1"]
   error: import limit must be a positive integer: "-1"
 ["obuch-2"]
-  error: usage: seo-pipeline obuch-2 <operation> [arguments]; available obuch-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: usage: seo-pipeline obuch-2 <operation> [arguments]; available obuch-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["obuch-2" "unknown"]
-  error: unknown obuch-2 operation "unknown"; available obuch-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown obuch-2 operation "unknown"; available obuch-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["obuch_2"]
-  error: usage: seo-pipeline obuch-2 <operation> [arguments]; available obuch-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: usage: seo-pipeline obuch-2 <operation> [arguments]; available obuch-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["obuch_2" "unknown"]
-  error: unknown obuch-2 operation "unknown"; available obuch-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown obuch-2 operation "unknown"; available obuch-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["obuch-2" "import"]
   task=obuch-2 name=import external_id= import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=INPUT_FILE_PATH or a task input directory is required
 ["obuch-2" "import" "37"]
@@ -2607,25 +2687,25 @@
 ["obuch-2" "regenerate" "--dry-run"]
   error: usage: seo-pipeline obuch-2 regenerate <external_id>
 ["obuch-2" "dry-run"]
-  error: unknown obuch-2 operation "dry-run"; available obuch-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown obuch-2 operation "dry-run"; available obuch-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["obuch-2" "dry-run" "37"]
-  error: unknown obuch-2 operation "dry-run"; available obuch-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown obuch-2 operation "dry-run"; available obuch-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["obuch-2" "dry-run" " 37 "]
-  error: unknown obuch-2 operation "dry-run"; available obuch-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown obuch-2 operation "dry-run"; available obuch-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["obuch-2" "dry-run" "0"]
-  error: unknown obuch-2 operation "dry-run"; available obuch-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown obuch-2 operation "dry-run"; available obuch-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["obuch-2" "dry-run" "wrong"]
-  error: unknown obuch-2 operation "dry-run"; available obuch-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown obuch-2 operation "dry-run"; available obuch-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["obuch-2" "dry-run" "37" "38"]
-  error: unknown obuch-2 operation "dry-run"; available obuch-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown obuch-2 operation "dry-run"; available obuch-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["obuch-2" "dry-run" "37" "38" "39"]
-  error: unknown obuch-2 operation "dry-run"; available obuch-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown obuch-2 operation "dry-run"; available obuch-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["obuch-2" "dry-run" "--plan"]
-  error: unknown obuch-2 operation "dry-run"; available obuch-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown obuch-2 operation "dry-run"; available obuch-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["obuch-2" "dry-run" "--yes"]
-  error: unknown obuch-2 operation "dry-run"; available obuch-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown obuch-2 operation "dry-run"; available obuch-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["obuch-2" "dry-run" "--dry-run"]
-  error: unknown obuch-2 operation "dry-run"; available obuch-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown obuch-2 operation "dry-run"; available obuch-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["obuch-2" "prepare"]
   task=obuch-2 name=prepare external_id= import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=KEYS_SO_EMAIL is required
 ["obuch-2" "prepare" "37"]
@@ -3026,6 +3106,26 @@
   error: --yes is supported only for obuch-2 reset, obuch-2 clear and obuch-2 publish
 ["obuch-2" "catalog-sync" "--dry-run"]
   error: --dry-run is supported only for obuch-2 run without external_id
+["obuch-2" "catalog-refresh"]
+  task=obuch-2 name=catalog-refresh external_id= import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=WORDPRESS_URL is required
+["obuch-2" "catalog-refresh" "37"]
+  error: usage: seo-pipeline obuch-2 catalog-refresh
+["obuch-2" "catalog-refresh" " 37 "]
+  error: usage: seo-pipeline obuch-2 catalog-refresh
+["obuch-2" "catalog-refresh" "0"]
+  error: usage: seo-pipeline obuch-2 catalog-refresh
+["obuch-2" "catalog-refresh" "wrong"]
+  error: usage: seo-pipeline obuch-2 catalog-refresh
+["obuch-2" "catalog-refresh" "37" "38"]
+  error: usage: seo-pipeline obuch-2 catalog-refresh
+["obuch-2" "catalog-refresh" "37" "38" "39"]
+  error: usage: seo-pipeline obuch-2 catalog-refresh
+["obuch-2" "catalog-refresh" "--plan"]
+  error: --plan is supported only for obuch-2 run and obuch-2 publish
+["obuch-2" "catalog-refresh" "--yes"]
+  error: --yes is supported only for obuch-2 reset, obuch-2 clear and obuch-2 publish
+["obuch-2" "catalog-refresh" "--dry-run"]
+  error: --dry-run is supported only for obuch-2 run without external_id
 ["obuch-2" "catalog-show"]
   error: usage: seo-pipeline obuch-2 catalog-show <external_id>
 ["obuch-2" "catalog-show" "37"]
@@ -3065,13 +3165,13 @@
 ["obuch-2" "import" "-1"]
   error: import limit must be a positive integer: "-1"
 ["pprof-audit-1"]
-  error: usage: seo-pipeline pprof-audit-1 <operation> [arguments]; available pprof-audit-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: usage: seo-pipeline pprof-audit-1 <operation> [arguments]; available pprof-audit-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["pprof-audit-1" "unknown"]
-  error: unknown pprof-audit-1 operation "unknown"; available pprof-audit-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown pprof-audit-1 operation "unknown"; available pprof-audit-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["pprof_audit_1"]
-  error: usage: seo-pipeline pprof-audit-1 <operation> [arguments]; available pprof-audit-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: usage: seo-pipeline pprof-audit-1 <operation> [arguments]; available pprof-audit-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["pprof_audit_1" "unknown"]
-  error: unknown pprof-audit-1 operation "unknown"; available pprof-audit-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown pprof-audit-1 operation "unknown"; available pprof-audit-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["pprof-audit-1" "import"]
   task=pprof-audit-1 name=import external_id= import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=INPUT_FILE_PATH or a task input directory is required
 ["pprof-audit-1" "import" "37"]
@@ -3213,25 +3313,25 @@
 ["pprof-audit-1" "regenerate" "--dry-run"]
   error: usage: seo-pipeline pprof-audit-1 regenerate <external_id>
 ["pprof-audit-1" "dry-run"]
-  error: unknown pprof-audit-1 operation "dry-run"; available pprof-audit-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown pprof-audit-1 operation "dry-run"; available pprof-audit-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["pprof-audit-1" "dry-run" "37"]
-  error: unknown pprof-audit-1 operation "dry-run"; available pprof-audit-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown pprof-audit-1 operation "dry-run"; available pprof-audit-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["pprof-audit-1" "dry-run" " 37 "]
-  error: unknown pprof-audit-1 operation "dry-run"; available pprof-audit-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown pprof-audit-1 operation "dry-run"; available pprof-audit-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["pprof-audit-1" "dry-run" "0"]
-  error: unknown pprof-audit-1 operation "dry-run"; available pprof-audit-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown pprof-audit-1 operation "dry-run"; available pprof-audit-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["pprof-audit-1" "dry-run" "wrong"]
-  error: unknown pprof-audit-1 operation "dry-run"; available pprof-audit-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown pprof-audit-1 operation "dry-run"; available pprof-audit-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["pprof-audit-1" "dry-run" "37" "38"]
-  error: unknown pprof-audit-1 operation "dry-run"; available pprof-audit-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown pprof-audit-1 operation "dry-run"; available pprof-audit-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["pprof-audit-1" "dry-run" "37" "38" "39"]
-  error: unknown pprof-audit-1 operation "dry-run"; available pprof-audit-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown pprof-audit-1 operation "dry-run"; available pprof-audit-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["pprof-audit-1" "dry-run" "--plan"]
-  error: unknown pprof-audit-1 operation "dry-run"; available pprof-audit-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown pprof-audit-1 operation "dry-run"; available pprof-audit-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["pprof-audit-1" "dry-run" "--yes"]
-  error: unknown pprof-audit-1 operation "dry-run"; available pprof-audit-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown pprof-audit-1 operation "dry-run"; available pprof-audit-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["pprof-audit-1" "dry-run" "--dry-run"]
-  error: unknown pprof-audit-1 operation "dry-run"; available pprof-audit-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown pprof-audit-1 operation "dry-run"; available pprof-audit-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["pprof-audit-1" "prepare"]
   task=pprof-audit-1 name=prepare external_id= import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=KEYS_SO_EMAIL is required
 ["pprof-audit-1" "prepare" "37"]
@@ -3632,6 +3732,26 @@
   error: --yes is supported only for pprof-audit-1 reset, pprof-audit-1 clear and pprof-audit-1 publish
 ["pprof-audit-1" "catalog-sync" "--dry-run"]
   error: --dry-run is supported only for pprof-audit-1 run without external_id
+["pprof-audit-1" "catalog-refresh"]
+  task=pprof-audit-1 name=catalog-refresh external_id= import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=WORDPRESS_URL is required
+["pprof-audit-1" "catalog-refresh" "37"]
+  error: usage: seo-pipeline pprof-audit-1 catalog-refresh
+["pprof-audit-1" "catalog-refresh" " 37 "]
+  error: usage: seo-pipeline pprof-audit-1 catalog-refresh
+["pprof-audit-1" "catalog-refresh" "0"]
+  error: usage: seo-pipeline pprof-audit-1 catalog-refresh
+["pprof-audit-1" "catalog-refresh" "wrong"]
+  error: usage: seo-pipeline pprof-audit-1 catalog-refresh
+["pprof-audit-1" "catalog-refresh" "37" "38"]
+  error: usage: seo-pipeline pprof-audit-1 catalog-refresh
+["pprof-audit-1" "catalog-refresh" "37" "38" "39"]
+  error: usage: seo-pipeline pprof-audit-1 catalog-refresh
+["pprof-audit-1" "catalog-refresh" "--plan"]
+  error: --plan is supported only for pprof-audit-1 run and pprof-audit-1 publish
+["pprof-audit-1" "catalog-refresh" "--yes"]
+  error: --yes is supported only for pprof-audit-1 reset, pprof-audit-1 clear and pprof-audit-1 publish
+["pprof-audit-1" "catalog-refresh" "--dry-run"]
+  error: --dry-run is supported only for pprof-audit-1 run without external_id
 ["pprof-audit-1" "catalog-show"]
   error: usage: seo-pipeline pprof-audit-1 catalog-show <external_id>
 ["pprof-audit-1" "catalog-show" "37"]
@@ -3671,13 +3791,13 @@
 ["pprof-audit-1" "import" "-1"]
   error: import limit must be a positive integer: "-1"
 ["pprof-audit-2"]
-  error: usage: seo-pipeline pprof-audit-2 <operation> [arguments]; available pprof-audit-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: usage: seo-pipeline pprof-audit-2 <operation> [arguments]; available pprof-audit-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["pprof-audit-2" "unknown"]
-  error: unknown pprof-audit-2 operation "unknown"; available pprof-audit-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown pprof-audit-2 operation "unknown"; available pprof-audit-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["pprof_audit_2"]
-  error: usage: seo-pipeline pprof-audit-2 <operation> [arguments]; available pprof-audit-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: usage: seo-pipeline pprof-audit-2 <operation> [arguments]; available pprof-audit-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["pprof_audit_2" "unknown"]
-  error: unknown pprof-audit-2 operation "unknown"; available pprof-audit-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown pprof-audit-2 operation "unknown"; available pprof-audit-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["pprof-audit-2" "import"]
   task=pprof-audit-2 name=import external_id= import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=INPUT_FILE_PATH or a task input directory is required
 ["pprof-audit-2" "import" "37"]
@@ -3819,25 +3939,25 @@
 ["pprof-audit-2" "regenerate" "--dry-run"]
   error: usage: seo-pipeline pprof-audit-2 regenerate <external_id>
 ["pprof-audit-2" "dry-run"]
-  error: unknown pprof-audit-2 operation "dry-run"; available pprof-audit-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown pprof-audit-2 operation "dry-run"; available pprof-audit-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["pprof-audit-2" "dry-run" "37"]
-  error: unknown pprof-audit-2 operation "dry-run"; available pprof-audit-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown pprof-audit-2 operation "dry-run"; available pprof-audit-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["pprof-audit-2" "dry-run" " 37 "]
-  error: unknown pprof-audit-2 operation "dry-run"; available pprof-audit-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown pprof-audit-2 operation "dry-run"; available pprof-audit-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["pprof-audit-2" "dry-run" "0"]
-  error: unknown pprof-audit-2 operation "dry-run"; available pprof-audit-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown pprof-audit-2 operation "dry-run"; available pprof-audit-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["pprof-audit-2" "dry-run" "wrong"]
-  error: unknown pprof-audit-2 operation "dry-run"; available pprof-audit-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown pprof-audit-2 operation "dry-run"; available pprof-audit-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["pprof-audit-2" "dry-run" "37" "38"]
-  error: unknown pprof-audit-2 operation "dry-run"; available pprof-audit-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown pprof-audit-2 operation "dry-run"; available pprof-audit-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["pprof-audit-2" "dry-run" "37" "38" "39"]
-  error: unknown pprof-audit-2 operation "dry-run"; available pprof-audit-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown pprof-audit-2 operation "dry-run"; available pprof-audit-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["pprof-audit-2" "dry-run" "--plan"]
-  error: unknown pprof-audit-2 operation "dry-run"; available pprof-audit-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown pprof-audit-2 operation "dry-run"; available pprof-audit-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["pprof-audit-2" "dry-run" "--yes"]
-  error: unknown pprof-audit-2 operation "dry-run"; available pprof-audit-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown pprof-audit-2 operation "dry-run"; available pprof-audit-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["pprof-audit-2" "dry-run" "--dry-run"]
-  error: unknown pprof-audit-2 operation "dry-run"; available pprof-audit-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-show
+  error: unknown pprof-audit-2 operation "dry-run"; available pprof-audit-2 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["pprof-audit-2" "prepare"]
   task=pprof-audit-2 name=prepare external_id= import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=KEYS_SO_EMAIL is required
 ["pprof-audit-2" "prepare" "37"]
@@ -4237,6 +4357,26 @@
 ["pprof-audit-2" "catalog-sync" "--yes"]
   error: --yes is supported only for pprof-audit-2 reset, pprof-audit-2 clear and pprof-audit-2 publish
 ["pprof-audit-2" "catalog-sync" "--dry-run"]
+  error: --dry-run is supported only for pprof-audit-2 run without external_id
+["pprof-audit-2" "catalog-refresh"]
+  task=pprof-audit-2 name=catalog-refresh external_id= import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=WORDPRESS_URL is required
+["pprof-audit-2" "catalog-refresh" "37"]
+  error: usage: seo-pipeline pprof-audit-2 catalog-refresh
+["pprof-audit-2" "catalog-refresh" " 37 "]
+  error: usage: seo-pipeline pprof-audit-2 catalog-refresh
+["pprof-audit-2" "catalog-refresh" "0"]
+  error: usage: seo-pipeline pprof-audit-2 catalog-refresh
+["pprof-audit-2" "catalog-refresh" "wrong"]
+  error: usage: seo-pipeline pprof-audit-2 catalog-refresh
+["pprof-audit-2" "catalog-refresh" "37" "38"]
+  error: usage: seo-pipeline pprof-audit-2 catalog-refresh
+["pprof-audit-2" "catalog-refresh" "37" "38" "39"]
+  error: usage: seo-pipeline pprof-audit-2 catalog-refresh
+["pprof-audit-2" "catalog-refresh" "--plan"]
+  error: --plan is supported only for pprof-audit-2 run and pprof-audit-2 publish
+["pprof-audit-2" "catalog-refresh" "--yes"]
+  error: --yes is supported only for pprof-audit-2 reset, pprof-audit-2 clear and pprof-audit-2 publish
+["pprof-audit-2" "catalog-refresh" "--dry-run"]
   error: --dry-run is supported only for pprof-audit-2 run without external_id
 ["pprof-audit-2" "catalog-show"]
   error: usage: seo-pipeline pprof-audit-2 catalog-show <external_id>

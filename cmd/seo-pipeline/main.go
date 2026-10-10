@@ -22,6 +22,7 @@ import (
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/article"
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/demo"
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/diagnostics"
+	"github.com/foxylis237/seo-pipeline/internal/pipeline/duplicates"
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/generation"
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/importer"
 	articleoutput "github.com/foxylis237/seo-pipeline/internal/pipeline/output"
@@ -304,6 +305,9 @@ func main() {
 	// Каталог услуг: сбор с площадки и просмотр подбора. Ни LLM, ни Keys.so, ни Arsenkin;
 	// в блог не пишется ничего — сбор только читает записи, а результат ложится в схему
 	// каталога своей площадки, не в схему задачи.
+	case catalogRefreshOperation:
+		err = refreshRunCatalog(ctx, profile, pool, cfg.WordPress, taskLogger)
+
 	case catalogSyncOperation:
 		var catalogSite catalog.Site
 		var catalogStore *catalog.PostgresStore
@@ -615,6 +619,18 @@ func main() {
 				break
 			}
 			runAndPublish := publisher.wrap(runOne)
+			if profile.DuplicateCheck {
+				if refreshErr := refreshRunCatalog(ctx, profile, pool, cfg.WordPress, taskLogger); refreshErr != nil {
+					taskLogger.Warn("каталог услуг не обновлён, проверка дублей идёт по прежнему", "error", refreshErr)
+					fmt.Fprintf(os.Stdout, "ВНИМАНИЕ: каталог услуг не обновлён: %v\n", refreshErr)
+				}
+				var table duplicates.Table
+				if table, err = duplicates.Load(duplicates.Path(profile.InputDir)); err != nil {
+					err = fmt.Errorf("%w — сначала проверка дублей (/dup-check)", err)
+					break
+				}
+				runAndPublish = gateDuplicates(table, articleRepository, runAndPublish)
+			}
 			if command.ExternalID == "" {
 				var pending []article.Article
 				if pending, err = incompleteArticles(ctx, articleRepository); err != nil {
@@ -890,7 +906,7 @@ func availableOperations(task string) string {
 	return "available " + task + " operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, " +
 		wordPressCheckOperation + ", " + wordPressPublishOperation + ", " + wordPressRepublishOperation + ", " +
 		wordPressMarkPublishedOperation + ", " +
-		catalogSyncOperation + ", " + catalogShowOperation
+		catalogSyncOperation + ", " + catalogRefreshOperation + ", " + catalogShowOperation
 }
 
 func parseTaskCommand(args []string) (taskCommand, error) {
@@ -918,7 +934,7 @@ func parseTaskCommand(args []string) (taskCommand, error) {
 	// wordpress-check проверяет площадку задачи целиком, а не доступ к одной статье.
 	// Каталог услуг общий для задач: сбор не принимает ни статьи, ни ограничений — он
 	// заменяет каталог целиком.
-	case "deepseek-login", "google-login", wordPressCheckOperation, catalogSyncOperation, "report":
+	case "deepseek-login", "google-login", wordPressCheckOperation, catalogSyncOperation, catalogRefreshOperation, "report":
 		if len(args) != 3 {
 			return taskCommand{}, fmt.Errorf("usage: seo-pipeline %s %s", profile.Command, task)
 		}
@@ -1030,7 +1046,7 @@ func validateConfig(command string, cfg config.Config) error {
 		return cfg.ValidateWordPress()
 	// Сбору каталога нужны и площадка, и база: услуги читаются в блоге, а ложатся в схему
 	// site. Просмотр подбора площадку не трогает вовсе — ему хватает базы.
-	case catalogSyncOperation:
+	case catalogSyncOperation, catalogRefreshOperation:
 		if err := cfg.ValidateReset(); err != nil {
 			return err
 		}

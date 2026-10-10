@@ -64,6 +64,9 @@ type Profile struct {
 	// CatalogSite — площадка, чей каталог услуг читает задача; пустое — dpoprof.
 	// Названа площадка, а не схема: схему выбирает composition root, и пару «сайт одной, схема другой» не выразить.
 	CatalogSite string
+	// DuplicateCheck — run refreshes the catalog and generates only articles marked as
+	// not duplicating a site page in <InputDir>/duplicates.xlsx.
+	DuplicateCheck bool
 	// ArticleAudit — настройки задачи аудита опубликованных страниц; nil — задача не аудит.
 	// Непустое снимает проверку схемы движка: таблиц article_inputs у аудита нет.
 	ArticleAudit *ArticleAudit

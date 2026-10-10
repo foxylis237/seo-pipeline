@@ -23,6 +23,7 @@ make help
   |   make pprof-1 google-publish [ID]  промпты в Google Docs
   |   make pprof-1 wordpress-check      проверка доступа к WordPress, без записи
   |   make pprof-1 catalog-sync         собрать каталог услуг сайта, без записи в блог
+  |   make pprof-1 catalog-refresh      то же, если каталогу больше суток
   |   make pprof-1 catalog-show ID      какие курсы подберутся статье, без записи
   |   make pprof-1 publish [ID]         опубликовать в WordPress; без ID — все готовые
   |   make pprof-1 publish plan [ID]    что именно уйдёт в WordPress, без записи
@@ -418,6 +419,12 @@ make task-1 catalog-sync
 make task-1 catalog-sync 37
   | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 catalog-sync 37
   exit 0
+make task-1 catalog-refresh
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 catalog-refresh
+  exit 0
+make task-1 catalog-refresh 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 catalog-refresh 37
+  exit 0
 make task-1 catalog-show
   | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline task-1 catalog-show
   exit 0
@@ -684,6 +691,12 @@ make pprof-1 catalog-sync
   exit 0
 make pprof-1 catalog-sync 37
   | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 catalog-sync 37
+  exit 0
+make pprof-1 catalog-refresh
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 catalog-refresh
+  exit 0
+make pprof-1 catalog-refresh 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 catalog-refresh 37
   exit 0
 make pprof-1 catalog-show
   | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-1 catalog-show
@@ -952,6 +965,12 @@ make pprof-2 catalog-sync
 make pprof-2 catalog-sync 37
   | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 catalog-sync 37
   exit 0
+make pprof-2 catalog-refresh
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 catalog-refresh
+  exit 0
+make pprof-2 catalog-refresh 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 catalog-refresh 37
+  exit 0
 make pprof-2 catalog-show
   | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-2 catalog-show
   exit 0
@@ -1218,6 +1237,12 @@ make obuch-1 catalog-sync
   exit 0
 make obuch-1 catalog-sync 37
   | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 catalog-sync 37
+  exit 0
+make obuch-1 catalog-refresh
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 catalog-refresh
+  exit 0
+make obuch-1 catalog-refresh 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 catalog-refresh 37
   exit 0
 make obuch-1 catalog-show
   | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-1 catalog-show
@@ -1486,6 +1511,12 @@ make obuch-2 catalog-sync
 make obuch-2 catalog-sync 37
   | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 catalog-sync 37
   exit 0
+make obuch-2 catalog-refresh
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 catalog-refresh
+  exit 0
+make obuch-2 catalog-refresh 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 catalog-refresh 37
+  exit 0
 make obuch-2 catalog-show
   | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline obuch-2 catalog-show
   exit 0
@@ -1753,6 +1784,12 @@ make pprof-audit-1 catalog-sync
 make pprof-audit-1 catalog-sync 37
   | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 catalog-sync 37
   exit 0
+make pprof-audit-1 catalog-refresh
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 catalog-refresh
+  exit 0
+make pprof-audit-1 catalog-refresh 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 catalog-refresh 37
+  exit 0
 make pprof-audit-1 catalog-show
   | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-1 catalog-show
   exit 0
@@ -2019,6 +2056,12 @@ make pprof-audit-2 catalog-sync
   exit 0
 make pprof-audit-2 catalog-sync 37
   | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 catalog-sync 37
+  exit 0
+make pprof-audit-2 catalog-refresh
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 catalog-refresh
+  exit 0
+make pprof-audit-2 catalog-refresh 37
+  | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 catalog-refresh 37
   exit 0
 make pprof-audit-2 catalog-show
   | run -ldflags -X main.version=snapshot ./cmd/seo-pipeline pprof-audit-2 catalog-show

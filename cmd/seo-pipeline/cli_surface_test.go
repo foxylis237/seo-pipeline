@@ -17,7 +17,7 @@ var cliSurfaceOperations = []string{
 	"import", "import-check", "errors", "keywords", "retry", "run", "regenerate", "dry-run",
 	"prepare", "generate", "demo-generate", "article", "info", "review", "fix", "html", "result",
 	"report", "clear", "reset", "google-login", "google-publish", "deepseek-login",
-	"wordpress-check", "publish", "republish", "mark-published", "catalog-sync", "catalog-show",
+	"wordpress-check", "publish", "republish", "mark-published", "catalog-sync", "catalog-refresh", "catalog-show",
 }
 
 func TestCLISurfaceSnapshot(t *testing.T) {

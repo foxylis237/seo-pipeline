@@ -114,6 +114,8 @@ func Profile() tasks.Profile {
 		WithoutMetadataStage: true,
 		MetadataFAQOnly:      true,
 		CommercialPages:      true,
-		LLMStages:            Stages,
+		// Service pages are checked against the catalog before generation.
+		DuplicateCheck: true,
+		LLMStages:      Stages,
 	}
 }

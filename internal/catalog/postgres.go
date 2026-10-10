@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -59,6 +60,19 @@ func (s *PostgresStore) Replace(ctx context.Context, programs []Program) error {
 		}
 		return nil
 	})
+}
+
+// SyncedAt returns when the catalog was last collected; zero time means it was never collected.
+// Replace rewrites every program, so the newest updated_at is the sync time.
+func (s *PostgresStore) SyncedAt(ctx context.Context) (time.Time, error) {
+	var syncedAt *time.Time
+	if err := s.pool.QueryRow(ctx, `SELECT MAX(updated_at) FROM `+s.table("programs")).Scan(&syncedAt); err != nil {
+		return time.Time{}, fmt.Errorf("прочитать время сбора каталога: %w", err)
+	}
+	if syncedAt == nil {
+		return time.Time{}, nil
+	}
+	return *syncedAt, nil
 }
 
 // List читает каталог целиком.

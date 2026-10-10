@@ -119,7 +119,9 @@ func Profile() tasks.Profile {
 		// услуг схемы: с пустым признаком он стёр бы каталог соседней площадки и залил бы в
 		// её схему чужие услуги. Отсюда же раскладка публикации берёт список типов записей и
 		// правило имени таксономии — cat_<тип>, зеркально соседу.
-		CatalogSite:      catalog.SiteObuchim,
+		CatalogSite: catalog.SiteObuchim,
+		// Service pages are checked against the catalog before generation.
+		DuplicateCheck:   true,
 		LLMConfigPath:    "config/obuch_2.yaml",
 		LLMOverlayPath:   "",
 		ImportReportsDir: "output/obuch_2/import-reports",
