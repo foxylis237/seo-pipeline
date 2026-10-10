@@ -302,11 +302,11 @@ func (f *Flow) answer(ctx context.Context, article Article, current Post, logger
 	if article.AuditPath != "" {
 		saved, err := f.artifacts.Read(article.AuditPath)
 		if err == nil && strings.TrimSpace(saved) != "" {
-			logger.Info("ответ модели взят из прошлого прогона", "stage", StageAudit, "file", article.AuditPath)
+			logger.Info("ответ модели взят из прошлого прогона", "stage", StageAudit, "path", article.AuditPath)
 			return Paths{PromptPath: article.PromptPath, AuditPath: article.AuditPath}, saved, nil
 		}
 		logger.Warn("сохранённый ответ модели не прочитан, спрашиваем заново",
-			"stage", StageAudit, "file", article.AuditPath, "error", err)
+			"stage", StageAudit, "path", article.AuditPath, "error", err)
 	}
 	prompt, answer, err := f.audit(ctx, article, current, logger)
 	if err != nil {

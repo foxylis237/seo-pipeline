@@ -61,7 +61,6 @@ var retiredKeys = map[string]string{
 	"structure_path":   "path",
 	"prompt_path":      "path",
 	"demo_path":        "path",
-	"file":             "path",
 	"document_url":     "url",
 	"folder_url":       "url",
 	"old_status":       "status_before",

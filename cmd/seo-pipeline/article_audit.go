@@ -80,7 +80,7 @@ func runArticleAuditImport(ctx context.Context, repository *articleaudit.Reposit
 	// Каким разбором прочитан файл — обязательная часть отчёта: у книги с колонками и у
 	// списка строк правила разные, и молча прочитать идентификатор записи как индекс статьи
 	// нельзя.
-	deps.logger.Info("вход задачи импортирован", "file", path, "input_parse", string(kind),
+	deps.logger.Info("вход задачи импортирован", "path", path, "input_parse", string(kind),
 		"articles", len(sources), "inserted", inserted, "updated", updated)
 	fmt.Fprintf(deps.output, "Импортировано из %s (%s): %d страниц (новых %d, обновлено %d)\n",
 		path, parseKindText(kind), len(sources), inserted, updated)
@@ -158,7 +158,7 @@ func runArticleAuditReport(ctx context.Context, repository *articleaudit.Reposit
 		return fmt.Errorf("записать сводку %q: %w", path, err)
 	}
 	deps.logger.Info("сводка собрана", "pages", len(summary.Pages), "failed", len(summary.Failed),
-		"field_gaps", len(summary.MissingFields), "common_issues", len(summary.CommonIssues), "file", path)
+		"field_gaps", len(summary.MissingFields), "common_issues", len(summary.CommonIssues), "path", path)
 	fmt.Fprint(deps.output, text)
 	fmt.Fprintf(deps.output, "\nСводка сохранена: %s\n", path)
 
@@ -168,7 +168,7 @@ func runArticleAuditReport(ctx context.Context, repository *articleaudit.Reposit
 	if err := summary.WriteFixes(fixes); err != nil {
 		return err
 	}
-	deps.logger.Info("таблица правок собрана", "pages", len(summary.Pages), "file", fixes)
+	deps.logger.Info("таблица правок собрана", "pages", len(summary.Pages), "path", fixes)
 	fmt.Fprintf(deps.output, "Таблица правок сохранена: %s\n", fixes)
 	return nil
 }
