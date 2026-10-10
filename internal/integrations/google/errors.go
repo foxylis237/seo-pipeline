@@ -117,7 +117,7 @@ func (o SlogObserver) Succeeded(job Job, result Result, attempt int, elapsed tim
 	o.Logger.Info("промпт опубликован в Google Docs",
 		"article_id", job.ArticleID, "external_id", job.ExternalID, "stage", "google_publish",
 		"attempt", attempt, "duration_ms", elapsed.Milliseconds(),
-		"action", action, "document_url", result.DocumentURL)
+		"action", action, "url", result.DocumentURL)
 }
 
 func (o SlogObserver) Failed(job Job, attempt int, elapsed time.Duration, retryable bool, err error) {
@@ -125,13 +125,12 @@ func (o SlogObserver) Failed(job Job, attempt int, elapsed time.Duration, retrya
 	if !retryable {
 		level = slog.LevelError
 	}
-	stage := "google_publish"
+	attrs := []any{"article_id", job.ArticleID, "external_id", job.ExternalID, "stage", "google_publish"}
 	var stageErr *StageError
 	if errors.As(err, &stageErr) && stageErr.Stage != "" {
-		stage = "google_" + stageErr.Stage
+		attrs = append(attrs, "step", stageErr.Stage)
 	}
-	o.Logger.Log(context.Background(), level, "публикация промпта в Google Docs не удалась",
-		"article_id", job.ArticleID, "external_id", job.ExternalID, "stage", stage,
-		"attempt", attempt, "duration_ms", elapsed.Milliseconds(),
+	attrs = append(attrs, "attempt", attempt, "duration_ms", elapsed.Milliseconds(),
 		"retryable", retryable, "needs_manual_login", NeedsManualLogin(err), "error", err)
+	o.Logger.Log(context.Background(), level, "публикация промпта в Google Docs не удалась", attrs...)
 }

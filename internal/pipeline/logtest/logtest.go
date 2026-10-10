@@ -55,8 +55,21 @@ func (h handler) WithAttrs(attrs []slog.Attr) slog.Handler {
 
 func (h handler) WithGroup(string) slog.Handler { return h }
 
+// retiredKeys maps a key the vocabulary replaced to its replacement.
+var retiredKeys = map[string]string{
+	"result_path":      "path",
+	"structure_path":   "path",
+	"prompt_path":      "path",
+	"demo_path":        "path",
+	"file":             "path",
+	"document_url":     "url",
+	"folder_url":       "url",
+	"old_status":       "status_before",
+	"old_current_step": "current_step_before",
+}
+
 // AssertVocabulary fails the test when a record names a non-stage in stage, uses a retired
-// path key or carries an English message.
+// key or carries an English message.
 func AssertVocabulary(t testing.TB, records []Record, stages ...string) {
 	t.Helper()
 	if len(records) == 0 {
@@ -70,9 +83,9 @@ func AssertVocabulary(t testing.TB, records []Record, stages ...string) {
 		if stage, ok := record.Attr["stage"]; ok && !allowed[stage] {
 			t.Errorf("record %q: stage=%q is not a stage name", record.Msg, stage)
 		}
-		for _, key := range []string{"result_path", "structure_path"} {
+		for key, want := range retiredKeys {
 			if _, ok := record.Attr[key]; ok {
-				t.Errorf("record %q: key %q, want path", record.Msg, key)
+				t.Errorf("record %q: key %q, want %s", record.Msg, key, want)
 			}
 		}
 		if first, _ := utf8.DecodeRuneInString(record.Msg); first < utf8.RuneSelf && unicode.IsLetter(first) {

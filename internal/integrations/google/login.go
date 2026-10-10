@@ -46,7 +46,7 @@ func Login(ctx context.Context, cfg Config, logger *slog.Logger) error {
 		return fmt.Errorf("открыть Google Drive: %w", err)
 	}
 	logger.Info("войдите в Google вручную в открывшемся Chromium; CAPTCHA и 2FA не автоматизируются",
-		"timeout", defaultLoginTimeout, "folder_url", cfg.FolderURL)
+		"timeout", defaultLoginTimeout, "url", cfg.FolderURL)
 
 	// Успех — открылась папка публикации, а не просто состоялся вход.
 	if err := waitForDriveFolder(loginCtx, session.page); err != nil {

@@ -68,7 +68,7 @@ func (s *playwrightSession) saveDiagnostics(ctx context.Context, stage string) {
 	}
 
 	s.logger.Warn("диагностика страницы Google сохранена",
-		"path", base, "stage", stage, "article_id", s.articleID, "url", s.session.page.URL())
+		"debug_path", base, "step", stage, "article_id", s.articleID, "url", s.session.page.URL())
 }
 
 func redactDiagnosticHTML(content string) string {

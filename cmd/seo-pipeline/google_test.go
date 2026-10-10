@@ -14,6 +14,7 @@ import (
 	"github.com/foxylis237/seo-pipeline/internal/integrations/google"
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/article"
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/generation"
+	"github.com/foxylis237/seo-pipeline/internal/pipeline/logtest"
 )
 
 func discardGoogleLogger() *slog.Logger { return slog.New(slog.DiscardHandler) }
@@ -697,4 +698,24 @@ func TestGooglePublishPrefersProductionPromptOverDemo(t *testing.T) {
 	if received != "промпт один" {
 		t.Fatalf("опубликован %q, ожидался боевой промпт", received)
 	}
+}
+
+func TestGooglePublishLogsFollowVocabulary(t *testing.T) {
+	var recorder logtest.Recorder
+	repository, prompts := newPublishFixtures()
+	var out bytes.Buffer
+
+	err := runGooglePublish(context.Background(), repository, prompts,
+		func(context.Context, google.Job, google.Observer) (google.Result, error) {
+			return google.Result{Created: true, DocumentURL: "https://docs.google.com/document/d/new/edit"}, nil
+		}, recorder.Logger(), &out, "task-1", "45")
+	if err != nil {
+		t.Fatalf("runGooglePublish: %v", err)
+	}
+	demoRepository := &fakePublishRepository{selected: article.Article{ID: 9, ExternalID: "45", Title: "Как выбрать фрезу"}}
+	demoPrompts := &fakeDemoPromptReader{byExternalID: map[string]string{"45": "промпт DEMO"}}
+	publishDemoArticlePrompt(context.Background(), demoRepository, demoPrompts,
+		&recordingPromptPublisher{}, recorder.Logger(), "45")
+
+	logtest.AssertVocabulary(t, recorder.Records(), "google_publish")
 }

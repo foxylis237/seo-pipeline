@@ -125,7 +125,7 @@ func (p *googlePublisher) rememberURL(job generation.ArticlePromptJob, documentU
 	if err := p.saveURL(p.ctx, job.ArticleID, documentURL); err != nil {
 		p.logger.Warn("адрес документа Google не сохранён, ссылки в result.md не будет",
 			"article_id", job.ArticleID, "external_id", job.ExternalID,
-			"stage", "google_publish", "document_url", documentURL, "error", err)
+			"stage", "google_publish", "url", documentURL, "error", err)
 	}
 }
 
@@ -217,7 +217,7 @@ func publishArticlePrompt(
 	}
 	logger.Info("публикация сохранённого промпта начата",
 		"article_id", selected.ID, "external_id", selected.ExternalID,
-		"stage", "google_publish", "prompt_path", promptPath)
+		"stage", "google_publish", "path", promptPath)
 
 	result, err := publish(ctx, google.Job{
 		ArticleID:    selected.ID,
@@ -237,7 +237,7 @@ func publishArticlePrompt(
 	if saveErr := repository.SaveGoogleDocURL(ctx, selected.ID, result.DocumentURL); saveErr != nil {
 		logger.Warn("адрес документа Google не сохранён, ссылки в result.md не будет",
 			"article_id", selected.ID, "external_id", selected.ExternalID,
-			"stage", "google_publish", "document_url", result.DocumentURL, "error", saveErr)
+			"stage", "google_publish", "url", result.DocumentURL, "error", saveErr)
 	}
 
 	action := "обновлён"
@@ -339,7 +339,7 @@ func runGooglePublishAll(
 		if saveErr := repository.SaveGoogleDocURL(ctx, target.article.ID, result.DocumentURL); saveErr != nil {
 			logger.Warn("адрес документа Google не сохранён, ссылки в result.md не будет",
 				"article_id", target.article.ID, "external_id", target.article.ExternalID,
-				"stage", "google_publish", "document_url", result.DocumentURL, "error", saveErr)
+				"stage", "google_publish", "url", result.DocumentURL, "error", saveErr)
 		}
 		fmt.Fprintf(out, "[%d/%d] %s external_id=%s: %s\n",
 			index+1, len(targets), action, target.article.ExternalID, result.DocumentURL)
@@ -396,12 +396,12 @@ func publishDemoArticlePrompt(
 	if err != nil || strings.TrimSpace(prompt) == "" {
 		logger.Info("промпт DEMO не опубликован: файл не сохранён",
 			"article_id", selected.ID, "external_id", externalID, "stage", "google_publish",
-			"prompt_path", promptPath, "error", err)
+			"path", promptPath, "error", err)
 		return
 	}
 	logger.Info("промпт DEMO поставлен в очередь публикации",
 		"article_id", selected.ID, "external_id", externalID,
-		"stage", "google_publish", "prompt_path", promptPath)
+		"stage", "google_publish", "path", promptPath)
 	publisher.PublishArticlePrompt(generation.ArticlePromptJob{
 		ArticleID:  selected.ID,
 		ExternalID: selected.ExternalID,
