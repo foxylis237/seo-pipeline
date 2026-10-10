@@ -89,7 +89,7 @@ func runWordPressCheck(
 	ctx, cancel := context.WithTimeout(ctx, wordPressCheckDeadline)
 	defer cancel()
 
-	logger.Info("проверка подключения к WordPress начата", "stage", "wordpress_check")
+	logger.Info("проверка подключения к WordPress начата")
 	connection, err := client.CheckConnection(ctx)
 	if err != nil {
 		if wordpress.NeedsCredentialsCheck(err) {
@@ -101,7 +101,6 @@ func runWordPressCheck(
 
 	// Ни пароль, ни заголовок авторизации в лог не попадают — здесь только то, чем ответил сайт.
 	logger.Info("WordPress: подключение установлено",
-		"stage", "wordpress_check",
 		"http_status", connection.StatusCode,
 		"user_id", connection.User.ID,
 		"user_login", connection.User.Login,

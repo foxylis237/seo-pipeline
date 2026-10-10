@@ -678,7 +678,7 @@ func runWordPressPublishAll(
 	}
 	if !confirmed {
 		fmt.Fprintln(deps.out, "Публикация отменена.")
-		deps.logger.Info("массовая публикация отменена", "stage", "confirm")
+		deps.logger.Info("массовая публикация отменена", "step", "confirm")
 		return nil
 	}
 
@@ -738,7 +738,7 @@ func runWordPressMarkPublished(
 	}
 
 	deps.logger.Info("статья привязана к существующей записи WordPress",
-		"external_id", externalID, "stage", "wordpress_mark_published",
+		"external_id", externalID,
 		"post_id", postID, "url", url, "result", "ok")
 	if postID > 0 {
 		fmt.Fprintf(deps.out, "Статья %s привязана к записи %d: %s\n", externalID, postID, url)
@@ -995,7 +995,7 @@ func runWordPressPublishPlan(ctx context.Context, deps wordPressPublishDeps, ext
 	}
 	fmt.Fprintln(out, "Статья готова к публикации.")
 	deps.logger.Info("сухой прогон публикации", "external_id", externalID,
-		"stage", "wordpress_publish_plan", "fields", len(payload.Fields), "result", "ok")
+		"fields", len(payload.Fields), "result", "ok")
 	return nil
 }
 

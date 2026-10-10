@@ -839,7 +839,7 @@ func programFields(deps wordPressPublishDeps, input article.PublicationInput) ([
 		// незаполненный аккордеон дозаполняет человек, и его модули разойдутся с телом
 		// страницы. Ровно так разошлась первая страница задачи.
 		deps.logger.Warn("программа не разобралась из текста: аккордеон останется пустым",
-			"external_id", input.Article.ExternalID)
+			"external_id", input.Article.ExternalID, "stage", "wordpress_publish")
 		fmt.Fprintf(deps.out, "ВНИМАНИЕ: у страницы %s программа не разобралась из текста — "+
 			"поля модулей не уйдут, аккордеон останется пустым\n", input.Article.ExternalID)
 		return fields, nil
