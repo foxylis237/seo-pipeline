@@ -180,8 +180,9 @@ func checkHours(text, bookHours string, modules []Module) []string {
 	return issues
 }
 
-// checkPrice: цена на странице одна — та, что уходит в поле записи. Доход по разрядам в
-// сверку не идёт, его таблица снята выше.
+// checkPrice: course price belongs to the novaya_czena field only, so any course price in the
+// text is an issue, including the book's own. Earnings are not prices; their table is dropped
+// above. An empty book column disables the check.
 func checkPrice(text, bookPrice string) []string {
 	want := factNumber(bookPrice)
 	if want == 0 {
@@ -195,12 +196,12 @@ func checkPrice(text, bookPrice string) []string {
 		// службы предлагают от 65 000 до 120 000 рублей в месяц» 29.09.2026 остановило
 		// публикацию страницы 32 — слов о зарплате в предложении нет.
 		perPeriod := factPaceRE.MatchString(text[found[1]:])
-		if value == 0 || value == want || seen[value] || perPeriod || aboutEarnings(text, found[0]) {
+		if value == 0 || seen[value] || perPeriod || aboutEarnings(text, found[0]) {
 			continue
 		}
 		seen[value] = true
-		issues = append(issues, fmt.Sprintf("в тексте цена %d, а в книге — %d (%s)",
-			value, want, factQuote(text, found[0])))
+		issues = append(issues, fmt.Sprintf("в тексте цена %d, а цена обучения стоит только в поле записи (%s)",
+			value, factQuote(text, found[0])))
 	}
 	return issues
 }

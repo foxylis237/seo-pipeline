@@ -94,7 +94,7 @@ func TestServiceFactsOrderIsStable(t *testing.T) {
 // поля записи руками, и пересчитанное моделью число разошлось бы с админкой молча.
 //
 // Проверяется настоящий файл промпта: расхождение набора полей с набором плейсхолдеров даёт
-// не ошибку, а «<no value>» — страницу, написанную без объёма, срока и цены, уже после
+// не ошибку, а «<no value>» — страницу, написанную без объёма и срока, уже после
 // оплаченной стадии structure.
 func TestArticlePromptGetsProgramNumbersVerbatim(t *testing.T) {
 	rendered := renderArticlePrompt(t, article.GenerationInput{
@@ -104,11 +104,15 @@ func TestArticlePromptGetsProgramNumbersVerbatim(t *testing.T) {
 		Document:    "Удостоверение о повышении квалификации",
 		Attestation: "Квалификационный экзамен",
 	})
-	for _, want := range []string{"144 часа", "от 1 недели", "от 5 000 ₽",
+	for _, want := range []string{"144 часа", "от 1 недели",
 		"Удостоверение о повышении квалификации", "Квалификационный экзамен"} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("значение %q не попало в промпт:\n%s", want, rendered)
 		}
+	}
+	// Price lives in the site's price block only.
+	if strings.Contains(rendered, "от 5 000 ₽") {
+		t.Fatalf("цена попала в промпт:\n%s", rendered)
 	}
 }
 

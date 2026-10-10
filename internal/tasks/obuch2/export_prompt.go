@@ -59,7 +59,6 @@ func exportFacts(input article.GenerationInput) string {
 		{"Профессия", input.Profession},
 		{"Объём программы", input.Hours},
 		{"Срок обучения", input.Duration},
-		{"Стоимость", input.Price},
 		{"Документ по итогам", input.Document},
 		{"Итоговая аттестация", input.Attestation},
 	} {

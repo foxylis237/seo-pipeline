@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-// Страница, написанная по книге: объём, срок и цена названы теми же числами, что уйдут в поля
-// записи, а в таблице заработка стоят совсем другие суммы — доход по разрядам.
-const factsMarkup = `<p>Срок: 150 часов, от 2 недель. Цена: от 5 000 ₽.</p>` +
+// Страница, написанная по книге: объём и срок названы теми же числами, что уйдут в поля
+// записи, цены нет вовсе, а в таблице заработка стоят совсем другие суммы — доход по разрядам.
+const factsMarkup = `<p>Срок: 150 часов, от 2 недель.</p>` +
 	`<h2 class="wp-block-heading">Детальная программа обучения</h2>` +
 	`<ol class="wp-block-list">` +
 	`<li><strong>Модуль 1. Устройство крана — 100 часов.</strong> Механизмы подъёма и поворота.</li>` +
@@ -78,6 +78,17 @@ func TestCheckProgramFactsIgnoresAgeRequirement(t *testing.T) {
 	}
 }
 
+// The book's own price is an issue too: price lives in the record field only.
+func TestCheckProgramFactsFindsBookPriceInText(t *testing.T) {
+	markup := factsMarkup + `<p>Стоимость обучения — от 5 000 ₽.</p>`
+
+	issues := CheckProgramFacts(markup, factsBook, ParseModules(markup))
+
+	if len(issues) != 1 || !strings.Contains(issues[0], "5000") {
+		t.Fatalf("цена из книги в тексте не найдена: %v", issues)
+	}
+}
+
 func TestCheckProgramFactsFindsForeignPrice(t *testing.T) {
 	markup := factsMarkup + `<p>Стоимость обучения — от 7 900 ₽ при оплате одним платежом.</p>`
 
@@ -110,8 +121,7 @@ func TestCheckProgramFactsFindsCapitalizedForeignTerm(t *testing.T) {
 
 // Earnings wording far from the amount, but in the same sentence, is still earnings.
 func TestCheckProgramFactsSkipsDistantEarningsWording(t *testing.T) {
-	markup := `<p>Зарплата опытного специалиста на крупных строительных объектах Москвы и области начинается от 90 000 рублей.</p>` +
-		`<p>Стоимость обучения — от 5 000 ₽.</p>`
+	markup := `<p>Зарплата опытного специалиста на крупных строительных объектах Москвы и области начинается от 90 000 рублей.</p>`
 	if issues := CheckProgramFacts(markup, factsBook, nil); len(issues) > 0 {
 		t.Fatalf("earnings in a long sentence were checked as price: %v", issues)
 	}
@@ -185,11 +195,11 @@ func TestCheckProgramPresetSkipsUnknownPostType(t *testing.T) {
 }
 
 // Оформление блоков пересобирает шапку таблицы заработка обычной строкой, без <thead>.
-// Доход в ней — не цена курса, а одноколоночная плашка параметров сверяется по-прежнему.
+// Доход в ней — не цена курса, а цена в одноколоночной плашке параметров ловится.
 func TestCheckProgramFactsSkipsDecoratedSalaryTable(t *testing.T) {
 	markup := `<table><tbody><tr><td><strong>Разряд</strong></td><td><strong>Доход</strong></td></tr>` +
 		`<tr><td>4 разряд</td><td>от 70 000 до 100 000 ₽</td></tr></tbody></table>` +
-		`<table><tbody><tr><td><strong>Цена:</strong> от 5 000 ₽.</td></tr></tbody></table>`
+		`<table><tbody><tr><td><strong>Срок:</strong> 150 часов.</td></tr></tbody></table>`
 	if issues := CheckProgramFacts(markup, factsBook, nil); len(issues) > 0 {
 		t.Fatalf("salary table without thead was checked as price: %v", issues)
 	}
@@ -199,9 +209,9 @@ func TestCheckProgramFactsSkipsDecoratedSalaryTable(t *testing.T) {
 	}
 }
 
-// Доход в прозе — не цена курса; цена мимо книги в той же странице по-прежнему ловится.
+// Доход в прозе — не цена курса; цена курса в той же странице ловится.
 func TestCheckProgramFactsSkipsEarningsInProse(t *testing.T) {
-	markup := `<p>Спрос высокий, а работодатели предлагают зарплату от 200 000 рублей и выше.</p><p>Стоимость обучения — от 5 000 ₽.</p>`
+	markup := `<p>Спрос высокий, а работодатели предлагают зарплату от 200 000 рублей и выше.</p>`
 	if issues := CheckProgramFacts(markup, factsBook, nil); len(issues) > 0 {
 		t.Fatalf("earnings in prose were checked as price: %v", issues)
 	}
@@ -216,7 +226,7 @@ func TestCheckProgramFactsSkipsEarningsInProse(t *testing.T) {
 func TestCheckProgramFactsSkipsMonthlyAmountAndTimeSpan(t *testing.T) {
 	markup := `<p>Коммунальные службы предлагают от 65 000 до 120 000 рублей в месяц.</p>` +
 		`<p>Скан удостоверения придёт на почту в течение 24 часов после экзамена.</p>` +
-		`<p>Стоимость обучения — от 5 000 ₽, объём — 150 часов.</p>`
+		`<p>Объём — 150 часов.</p>`
 	if issues := CheckProgramFacts(markup, factsBook, nil); len(issues) > 0 {
 		t.Fatalf("monthly amount or time span was checked as program fact: %v", issues)
 	}

@@ -38,7 +38,6 @@ func articleData(input article.GenerationInput, structure string) any {
 		GeneratedStructure string
 		Hours              string
 		Duration           string
-		Price              string
 		Document           string
 		Attestation        string
 	}{
@@ -49,7 +48,6 @@ func articleData(input article.GenerationInput, structure string) any {
 		GeneratedStructure: structure,
 		Hours:              programFact(input.Hours, missingNumber("объём программы в академических часах")),
 		Duration:           programFact(input.Duration, missingNumber("срок обучения")),
-		Price:              programFact(input.Price, missingNumber("стоимость")),
 		Document:           programFact(input.Document, missingNumber("документ по итогам обучения")),
 		Attestation:        programFact(input.Attestation, missingNumber("форма итоговой аттестации")),
 	}

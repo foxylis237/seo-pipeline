@@ -24,12 +24,12 @@ func TestRenderExportPromptFillsOwnerTemplate(t *testing.T) {
 	}
 	for _, want := range []string{"Тема страницы:\nСварщик 3 разряда\n", "электрод\nшов",
 		"Структура от человека:\nH1 - Сварщик 3 разряда\nH2 - Кому подойдёт\nФакты",
-		"Объём программы: 72 часа\nСтоимость: от 5 000 ₽\n"} {
+		"Объём программы: 72 часа\n"} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("prompt lacks %q:\n%s", want, prompt)
 		}
 	}
-	for _, unwanted := range []string{"ЛИД:", "СТРОКА:", "Срок обучения:", "[ТЕМА]", "<no value>"} {
+	for _, unwanted := range []string{"ЛИД:", "СТРОКА:", "Срок обучения:", "Стоимость", "5 000", "[ТЕМА]", "<no value>"} {
 		if strings.Contains(prompt, unwanted) {
 			t.Fatalf("prompt contains %q", unwanted)
 		}
