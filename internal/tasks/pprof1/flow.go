@@ -64,7 +64,7 @@ type Flow struct {
 	*taskflow.Base
 	repository Repository
 	writer     Writer
-	names      LinkNames
+	names      taskflow.LinkNames
 	// ctaCardPath — шаблон карточки призыва. Поле, а не константа по месту: тест подставляет
 	// свой путь, а прогон — CTACardPath.
 	ctaCardPath string
@@ -76,7 +76,7 @@ type Flow struct {
 // структуры и запись ошибки, а слоты артефактов — дело самого потока.
 func NewFlow(repository Repository, writer Writer, chats taskflow.ChatFactory,
 	prompts taskflow.PromptRenderer, logger *slog.Logger, publisher taskflow.PromptPublisher,
-	names LinkNames) *Flow {
+	names taskflow.LinkNames) *Flow {
 	return &Flow{
 		Base:        taskflow.NewBase(repository, writer, chats, prompts, logger, publisher),
 		repository:  repository,
@@ -84,39 +84,6 @@ func NewFlow(repository Repository, writer Writer, chats taskflow.ChatFactory,
 		names:       names,
 		ctaCardPath: CTACardPath,
 	}
-}
-
-// LinkNames отдаёт название программы по адресу её страницы.
-//
-// Интерфейс объявлен здесь, у потребителя: потоку нужно ровно название, а откуда оно взято —
-// со страницы сайта или из подмены в тесте — его не касается. nil означает прежнее поведение:
-// в промпт уходят одни адреса.
-type LinkNames interface {
-	Name(ctx context.Context, url string) (string, error)
-}
-
-// namedLinks дополняет список перелинковки названиями программ с сайта.
-//
-// Отказ страницы стадию не роняет: за генерацию уже заплачено, а без названия модель всё ещё
-// может восстановить его из адреса — хуже, но не фатально. Поэтому ошибка идёт в лог, а ссылка
-// уходит в промпт голой.
-func (f *Flow) namedLinks(ctx context.Context, logger *slog.Logger, links string) string {
-	urls := generation.LinkURLs(links)
-	if f.names == nil || len(urls) == 0 {
-		return links
-	}
-	lines := make([]string, 0, len(urls))
-	for _, url := range urls {
-		name, err := f.names.Name(ctx, url)
-		if err != nil || strings.TrimSpace(name) == "" {
-			logger.Warn("название программы не получено, ссылка уходит без него",
-				"stage", StageHTML, "url", url, "error", err)
-			lines = append(lines, url)
-			continue
-		}
-		lines = append(lines, strings.TrimSpace(name)+" — "+url)
-	}
-	return strings.Join(lines, "\n")
 }
 
 // RunStructure выполняет чат 1. Отдельный чат нужен потому, что структура — вход для всей
@@ -377,7 +344,7 @@ func (f *Flow) RunHTML(ctx context.Context, externalID string) error {
 
 	// Названия программ снимаются со страниц сайта один раз: их видит и промпт, и код,
 	// дописывающий недостающие ссылки, — анкором становится ровно название программы.
-	named := f.namedLinks(ctx, logger, input.Links)
+	named := taskflow.NamedLinks(ctx, logger, f.names, StageHTML, input.Links)
 	prompt, err := f.Render(StageHTML, htmlData(finalText, named))
 	if err != nil {
 		return f.Fail(ctx, logger, input.Article, "html_generation", err)
@@ -413,7 +380,7 @@ func (f *Flow) RunHTML(ctx context.Context, externalID string) error {
 	if err != nil {
 		return f.Fail(ctx, logger, input.Article, "html_generation", err)
 	}
-	html = f.completeLinks(ctx, logger, chat, named, f.completeHTMLPage(logger, finalText, html))
+	html = f.CompleteLinks(ctx, logger, chat, StageHTML, named, f.completeHTMLPage(logger, finalText, html))
 	html = f.appendCTA(ctx, logger, chat, card, input.Article.Title, buttonURL, html)
 	pending, err := f.writer.StageHTML(input.Article.ExternalID, input.Article.Slug, prompt, html)
 	if err != nil {
@@ -439,7 +406,7 @@ func (f *Flow) RunHTML(ctx context.Context, externalID string) error {
 // Лид и ряд плашек возвращаются кодом, без запроса к модели: у длинной статьи разметка не
 // помещается в один ответ, и просьба «верни страницу заново» обрывалась бы ровно так же, как
 // первый ответ. Оба блока известны целиком и место их известно, придумывать нечего.
-// Перелинковкой занимается completeLinks.
+// Перелинковкой занимается CompleteLinks.
 func (f *Flow) completeHTMLPage(logger *slog.Logger, page, markup string) string {
 	markup = generation.LinkSources(generation.RestoreStats(page, generation.CleanBlogMarkup(generation.DropHeading1(markup))))
 	markup = taskflow.KeepLead(logger, StageHTML, page, markup)
@@ -452,65 +419,6 @@ func (f *Flow) completeHTMLPage(logger *slog.Logger, page, markup string) string
 	}
 	taskflow.WarnLeftoverMarkers(logger, StageHTML, markup)
 	return markup
-}
-
-// enoughInternalLinks — столько ссылок перелинковки в тексте достаточно: недостающие к ним уже
-// не доспрашиваются. Доспрос нужен статье, где перелинковки почти нет, а не той, где модель
-// уронила одну ссылку из пяти.
-const enoughInternalLinks = 3
-
-// completeLinks доводит перелинковку.
-//
-// Своих предложений код не пишет: шаблонная строка «Подробнее о программе — …» заказчику не
-// нужна, а осмысленную фразу без контекста раздела код не составит. Если ссылок в тексте меньше
-// enoughInternalLinks, недостающие просит у модели одно короткое сообщение в том же чате —
-// по строке на ссылку, не страницу заново, — а вставляет их код. Сгрудившиеся ссылки код
-// по-прежнему разводит по разделам: это перенос уже написанных моделью предложений.
-func (f *Flow) completeLinks(ctx context.Context, logger *slog.Logger, chat taskflow.Chat, links, markup string) string {
-	if missing := generation.MissingInternalLinks(markup, links); len(missing) > 0 {
-		if placed := generation.PlacedInternalLinks(markup, links); placed >= enoughInternalLinks {
-			logger.Info("ссылок перелинковки в тексте достаточно, недостающие не доспрашиваются",
-				"stage", StageHTML, "placed_links", placed, "missing_links", len(missing))
-		} else {
-			markup = f.repairLinks(ctx, logger, chat, links, markup, missing)
-		}
-	}
-	spread, moved := generation.SpreadCrowdedLinks(markup, links)
-	if moved > 0 {
-		logger.Info("перелинковка расставлена кодом",
-			"stage", StageHTML, "links_moved", moved)
-		markup = spread
-	}
-	if left := generation.MissingInternalLinks(markup, links); len(left) > 0 {
-		logger.Warn("часть ссылок перелинковки в разметку так и не попала",
-			"stage", StageHTML, "missing_links", len(left))
-	}
-	if crowded := generation.CrowdedLinks(markup, links); len(crowded) > 0 {
-		logger.Warn("часть ссылок осталась в одном разделе: свободных разделов не хватило",
-			"stage", StageHTML, "crowded_links", len(crowded))
-	}
-	return markup
-}
-
-// repairLinks доспрашивает недостающие ссылки у модели. Отказ стадию не роняет: за разметку
-// уже заплачено, и страница без части ссылок полезнее, чем её отсутствие.
-func (f *Flow) repairLinks(ctx context.Context, logger *slog.Logger, chat taskflow.Chat, links, markup string, missing []string) string {
-	logger.Info("ссылок перелинковки в тексте мало, недостающие доспрашиваются у модели",
-		"stage", StageHTML, "missing_links", len(missing))
-	answer, err := f.Answer(ctx, chat.Continue, generation.RepairLinksPrompt(markup, links, missing), StageHTML)
-	if err != nil {
-		logger.Warn("доспрос перелинковки не удался", "stage", StageHTML, "error", err)
-		return markup
-	}
-	inserts := generation.ParseLinkInserts(answer, links, missing)
-	repaired, skipped := generation.InsertLinkSentences(markup, inserts)
-	for _, insert := range skipped {
-		logger.Warn("раздел, названный моделью для ссылки, в разметке не найден",
-			"stage", StageHTML, "url", insert.URL, "heading", insert.Heading)
-	}
-	logger.Info("перелинковка дописана моделью", "stage", StageHTML,
-		"asked_links", len(missing), "inserted_links", len(inserts)-len(skipped))
-	return repaired
 }
 
 // appendCTA дописывает карточку призыва в конец разметки.
