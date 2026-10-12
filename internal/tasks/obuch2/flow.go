@@ -160,143 +160,37 @@ func (f *Flow) RunStructure(ctx context.Context, externalID string) error {
 // артефакта публикуются одним Commit: страница либо прошла чат 2 целиком, либо не начинала
 // его, и промежуточных состояний, из которых нельзя продолжить, не возникает.
 func (f *Flow) RunArticle(ctx context.Context, externalID string) error {
-	input, err := f.repository.GetGenerationInput(ctx, externalID)
-	if err != nil {
-		return taskflow.StageFailure(externalID, "load_generation_data", err)
-	}
-	logger := f.ArticleLogger(input.Article)
-	structure, err := f.SavedStructure(ctx, externalID)
-	if err != nil {
-		return f.Fail(ctx, logger, input.Article, "load_structure_data", err)
-	}
-	if err := f.repository.BeginGenerationStage(ctx, input.Article.ID, stepArticle); err != nil {
-		return f.Fail(ctx, logger, input.Article, "article_generation", err)
-	}
-
-	started := time.Now()
-	chat, err := f.runArticleChat(ctx, logger, input, structure)
-	if err != nil {
-		return err
-	}
-	if err := f.saveArticleChat(ctx, logger, input, externalID, chat); err != nil {
-		return err
-	}
-	logger.Info("чат статьи завершён", "stage", StageArticle, "chat", 2,
-		"duration_ms", time.Since(started).Milliseconds())
-	return nil
+	return f.RunArticleChat(ctx, externalID, taskflow.ArticleChat{
+		Repository:   f.repository,
+		Writer:       f.writer,
+		Step:         stepArticle,
+		ArticleStage: StageArticle,
+		ReviewStage:  StageReview,
+		ArticleData:  articleData,
+		ReviewData:   func(_ article.GenerationInput, page string) any { return reviewData(page) },
+		ExportPrompt: func(input article.GenerationInput, structure string) (string, error) {
+			return RenderExportPrompt(f.exportPromptPath, input, structure)
+		},
+		// Стадия html расставляет теги по записи заголовков, а модель смешивает «H2 - », «H2:» и Markdown.
+		Normalize: generation.NormalizeHeadings,
+		Extras:    f.modelPrompt,
+	})
 }
 
 // ModelPromptFile — промпт стадии article, ушедший в модель, в каталоге prompts статьи.
 const ModelPromptFile = "article_model_prompt.txt"
 
-// articleChatOutput — то, что произвёл чат 2. Результаты названы по смыслу, а не по слотам
-// хранения: соответствие описано в saveArticleChat.
-type articleChatOutput struct {
-	articlePrompt string
-	// exportPrompt — выгружаемый промпт (ExportPromptPath): он ложится в
-	// prompts/article_prompt.txt и уходит в Google Docs. Модель получает articlePrompt.
-	exportPrompt string
-	articleText  string
-	reviewPrompt string
-	reviewedPage string
-}
-
-// runArticleChat проводит два сообщения чата 2. Чат открывается и закрывается здесь же:
-// продолжать его снаружи нечем и незачем.
-func (f *Flow) runArticleChat(ctx context.Context, logger *slog.Logger, input article.GenerationInput, structure string) (articleChatOutput, error) {
-	var out articleChatOutput
-	chat, err := f.NewChat(ctx, input.Article.ID, StageArticle, StageReview)
-	if err != nil {
-		return out, f.Fail(ctx, logger, input.Article, "article_generation", err)
-	}
-	defer f.CloseChat(chat, logger, StageArticle)
-	logger.Info("чат статьи начат", "stage", StageArticle, "chat", 2)
-
-	// Выгружаемый промпт собирается до первого сообщения: отказ шаблона обязан стоить нисколько.
-	if out.exportPrompt, err = RenderExportPrompt(f.exportPromptPath, input, structure); err != nil {
-		return out, f.Fail(ctx, logger, input.Article, "article_generation", err)
-	}
-	if out.articlePrompt, out.articleText, err = f.Message(ctx, chat.Send,
-		StageArticle, articleData(input, structure)); err != nil {
-		return out, f.Fail(ctx, logger, input.Article, "article_generation", err)
-	}
-	// Запись заголовков приводится к одному виду до сохранения: стадия html расставляет теги
-	// по ней, а модель за один прогон свободно переходит с «H2 - » на «H2:» и на Markdown.
-	out.articleText = generation.NormalizeHeadings(out.articleText)
-	logger.Info("статья получена от модели", "stage", StageArticle, "prompt_size", len([]rune(out.articlePrompt)))
-
-	if out.reviewPrompt, out.reviewedPage, err = f.Message(ctx, chat.Continue,
-		StageReview, reviewData(out.articleText)); err != nil {
-		return out, f.Fail(ctx, logger, input.Article, "article_review", err)
-	}
-	out.reviewedPage = generation.NormalizeHeadings(out.reviewedPage)
-	logger.Info("редактура завершена", "stage", StageReview)
-	return out, nil
-}
-
-// saveArticleChat публикует артефакты чата 2 одним Commit и отдаёт основной промпт в очередь
-// публикации.
-//
-// Текстов у страницы два, и лежат они в существующих слотах движка:
-//
-//	articleText  → article.txt        (черновик основного промпта)
-//	reviewedPage → fixed_article.txt  (страница после редактуры — финальный текст)
-//
-// Слот review_path указывает на тот же fixed_article.txt: списка замечаний ревью не отдаёт,
-// отдельного текста у него нет, а пустым слот оставлять нельзя — раннер полного прогона
-// считает этап невыполненным по пустому пути и возвращался бы на него вечно.
-func (f *Flow) saveArticleChat(ctx context.Context, logger *slog.Logger, input article.GenerationInput, externalID string, chat articleChatOutput) error {
-	selected := input.Article
-	articlePending, err := f.writer.StageArticle(selected.ExternalID, selected.Slug, chat.exportPrompt, chat.articleText, "")
-	if err != nil {
-		return f.Fail(ctx, logger, selected, "save_article", err)
-	}
-	defer articlePending.Abort()
-	finalPending, err := f.writer.StageFixedArticle(selected.ExternalID, selected.Slug, chat.reviewPrompt, chat.reviewedPage)
-	if err != nil {
-		return f.Fail(ctx, logger, selected, "save_reviewed_article", err)
-	}
-	defer finalPending.Abort()
-	// В article_prompt.txt лежит выгружаемый промпт, а тот, что ушёл в модель, — своим файлом.
-	modelPromptPending, err := f.writer.StageFiles(articleoutput.File{
+// modelPrompt готовит промпт, ушедший в модель: в article_prompt.txt лежит выгружаемый.
+func (f *Flow) modelPrompt(ctx context.Context, logger *slog.Logger, selected article.Article,
+	out taskflow.ArticleChatOutput) (taskflow.ArticleChatExtras, error) {
+	pending, err := f.writer.StageFiles(articleoutput.File{
 		Path:    path.Join(articleoutput.DirectoryName(selected.ExternalID, selected.Slug), articleoutput.PromptsFolder, ModelPromptFile),
-		Content: []byte(chat.articlePrompt),
+		Content: []byte(out.ArticlePrompt),
 	})
 	if err != nil {
-		return f.Fail(ctx, logger, selected, "save_model_prompt", err)
+		return taskflow.ArticleChatExtras{}, f.Fail(ctx, logger, selected, "save_model_prompt", err)
 	}
-	defer modelPromptPending.Abort()
-
-	structurePath, err := f.SavedStructurePath(ctx, externalID)
-	if err != nil {
-		return f.Fail(ctx, logger, selected, "load_structure_data", err)
-	}
-	pagePath := finalPending.Paths.FixedArticlePath
-	commitErr := articleoutput.Commit(func() error {
-		if err := f.repository.SaveGenerationPaths(ctx, selected.ID, structurePath, articlePending.Paths.ArticlePath); err != nil {
-			return err
-		}
-		if err := f.repository.SaveReviewPath(ctx, selected.ID, pagePath); err != nil {
-			return err
-		}
-		return f.repository.SaveFixedArticlePath(ctx, selected.ID, pagePath)
-	}, articlePending, finalPending, modelPromptPending)
-	if commitErr != nil {
-		return f.Fail(ctx, logger, selected, "save_article_state", commitErr)
-	}
-
-	// Публикация идёт после того, как промпт опубликован на диске и путь записан в состояние.
-	// Ошибка публикации сюда не возвращается: за генерацию уже заплачено.
-	f.PublishPrompt(generation.ArticlePromptJob{
-		ArticleID:  selected.ID,
-		ExternalID: selected.ExternalID,
-		Title:      selected.Title,
-		Prompt:     chat.exportPrompt,
-		PromptPath: articlePending.Paths.ArticlePromptPath,
-	})
-	logger.Info("артефакты чата статьи сохранены", "stage", StageArticle,
-		"draft_path", articlePending.Paths.ArticlePath, "path", pagePath)
-	return nil
+	return taskflow.ArticleChatExtras{Pending: []*articleoutput.PendingArtifact{pending}}, nil
 }
 
 // RunHTML выполняет чат 3: разметку и надпись кнопки заявки.
