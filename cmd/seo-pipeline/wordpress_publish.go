@@ -373,7 +373,7 @@ func plainBodyImageBlock(media wordpress.UploadedMedia, alt, sourceURL string) s
 func buildWordPressPayload(
 	ctx context.Context, deps wordPressPublishDeps, externalID string, createMissingTags bool,
 ) (wordpress.PostPayload, wordPressPayloadContext, error) {
-	return buildWordPressPayloadFor(ctx, deps, externalID, createMissingTags, repository.ValidatePublicationInput)
+	return buildWordPressPayloadFor(ctx, deps, externalID, createMissingTags, true, repository.ValidatePublicationInput)
 }
 
 // buildWordPressPayloadFor собирает нагрузку под конкретную команду. Отличается у команд ровно
@@ -381,7 +381,7 @@ func buildWordPressPayload(
 // тела — чтобы она уже была. Всё остальное, от чтения артефактов до раскладки полей, общее, и
 // расходиться этим двум сборкам нельзя.
 func buildWordPressPayloadFor(
-	ctx context.Context, deps wordPressPublishDeps, externalID string, createMissingTags bool,
+	ctx context.Context, deps wordPressPublishDeps, externalID string, createMissingTags, needImage bool,
 	validate func(article.PublicationInput) error,
 ) (wordpress.PostPayload, wordPressPayloadContext, error) {
 	var plan wordPressPayloadContext
@@ -436,9 +436,12 @@ func buildWordPressPayloadFor(
 	}
 	// Обложка ищется на диске, но не читается: годность статьи выясняется до единого запроса
 	// в WordPress, а мегабайты картинки на этом шаге не нужны.
-	image, err := deps.images.Locate(externalID, input.Article.Slug)
-	if err != nil {
-		return wordpress.PostPayload{}, plan, err
+	var image wordPressImage
+	if needImage {
+		image, err = deps.images.Locate(externalID, input.Article.Slug)
+		if err != nil {
+			return wordpress.PostPayload{}, plan, err
+		}
 	}
 
 	// Дальше данные раскладывает задача: рубрика с её таксономией, метки (если они у неё

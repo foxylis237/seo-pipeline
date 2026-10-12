@@ -195,3 +195,17 @@ func TestRepublishReturnsWriteError(t *testing.T) {
 		t.Fatal("отказ площадки принят за успех")
 	}
 }
+
+func TestRepublishDoesNotNeedLocalCover(t *testing.T) {
+	deps, client, _ := newWPRepublishDeps(map[string]string{})
+	images := newWPImages()
+	images.locateErr = errors.New("нет обложки")
+	deps.images = images
+
+	if err := runWordPressRepublish(context.Background(), deps, client, "16"); err != nil {
+		t.Fatalf("перезапись без обложки: %v", err)
+	}
+	if len(images.located) != 0 || len(client.edited) != 1 {
+		t.Fatalf("обложку искали %v, правок %d", images.located, len(client.edited))
+	}
+}

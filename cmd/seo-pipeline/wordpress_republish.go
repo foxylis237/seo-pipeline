@@ -95,7 +95,8 @@ func runWordPressRepublish(
 
 	// Нагрузка собирается тем же сборщиком, что и у публикации, но метки не заводятся: правка
 	// их не отправляет, и создавать термины ради неотправленного поля незачем.
-	payload, plan, err := buildWordPressPayloadFor(ctx, deps, externalID, false, repository.ValidateRepublishInput)
+	// The cover is not sent by a rewrite, so a page linked to an existing post needs no local file.
+	payload, plan, err := buildWordPressPayloadFor(ctx, deps, externalID, false, false, repository.ValidateRepublishInput)
 	if err != nil {
 		return err
 	}
