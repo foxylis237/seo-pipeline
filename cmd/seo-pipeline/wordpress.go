@@ -60,6 +60,9 @@ func newWordPressClient(cfg config.WordPressConfig) (*wordpress.Client, error) {
 	})
 }
 
+// linkNameTimeout — сколько ждать страницу сайта, с которой снимается название программы.
+const linkNameTimeout = 15 * time.Second
+
 // newSitePageClient собирает клиент чтения названий программ с сайта площадки. Транспорт у
 // него тот же, что у WordPress-клиента, и по той же причине: он ходит на ту же площадку.
 func newSitePageClient() *sitepage.Client {

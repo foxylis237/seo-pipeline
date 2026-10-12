@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/foxylis237/seo-pipeline/internal/tasks/obuch1"
+	"github.com/foxylis237/seo-pipeline/internal/tasks/obuch2"
 	"github.com/foxylis237/seo-pipeline/internal/tasks/pprof1"
 	"github.com/foxylis237/seo-pipeline/internal/tasks/pprof2"
 	"github.com/foxylis237/seo-pipeline/internal/tasks/task1"
@@ -163,7 +165,7 @@ func TestNewTaskFlowHasNoFlowForTask1(t *testing.T) {
 		t.Fatal("у task_1 появился собственный поток")
 	}
 	// У задач со своим потоком без роутера собрать его нечем — это ошибка, а не тихий nil.
-	for _, profile := range []string{pprof1.Name, pprof2.Name} {
+	for _, profile := range []string{pprof1.Name, pprof2.Name, obuch1.Name, obuch2.Name, obuch2.Name22} {
 		resolved, lookupErr := lookupTask(profile)
 		if lookupErr != nil {
 			t.Fatal(lookupErr)

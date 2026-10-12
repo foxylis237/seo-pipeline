@@ -9,6 +9,7 @@ import (
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/demo"
 	articleoutput "github.com/foxylis237/seo-pipeline/internal/pipeline/output"
 	"github.com/foxylis237/seo-pipeline/internal/pipeline/repository"
+	"github.com/foxylis237/seo-pipeline/internal/pipeline/taskflow"
 	"github.com/foxylis237/seo-pipeline/internal/tasks"
 	"github.com/foxylis237/seo-pipeline/internal/tasks/obuch1"
 	"github.com/foxylis237/seo-pipeline/internal/tasks/obuch2"
@@ -48,27 +49,49 @@ type linkNames interface {
 	Name(ctx context.Context, url string) (string, error)
 }
 
+// taskFlows — конструкторы потоков задач. Новая задача добавляется строкой здесь, без
+// своего файла в cmd. Публикатор промптов поток принимает напрямую: googlePublisher уже
+// отвечает контракту его очереди.
+var taskFlows = map[string]func(taskFlowDeps) taskFlow{
+	pprof1.Name: func(deps taskFlowDeps) taskFlow {
+		return pprof1.NewFlow(deps.repository, deps.writer, taskflow.NewRouterChats(deps.router),
+			deps.router, deps.logger, deps.publisher, deps.linkNames)
+	},
+	pprof2.Name: func(deps taskFlowDeps) taskFlow {
+		return pprof2.NewFlow(deps.repository, deps.writer, taskflow.NewRouterChats(deps.router),
+			deps.router, deps.logger, deps.publisher)
+	},
+	obuch1.Name: func(deps taskFlowDeps) taskFlow {
+		flow := obuch1.NewFlow(deps.repository, deps.writer, taskflow.NewRouterChats(deps.router),
+			deps.router, deps.logger, deps.publisher, deps.linkNames)
+		// The catalog checks the CTA button URL against the site's programs.
+		if deps.programs != nil {
+			flow.UseProgramCatalog(deps.programs)
+		}
+		return flow
+	},
+	obuch2.Name:   obuch2Flow(obuch2.ExportPromptPath),
+	obuch2.Name22: obuch2Flow(obuch2.ExportPrompt22Path),
+}
+
+func obuch2Flow(exportPromptPath string) func(taskFlowDeps) taskFlow {
+	return func(deps taskFlowDeps) taskFlow {
+		return obuch2.NewFlow(deps.repository, deps.writer, taskflow.NewRouterChats(deps.router),
+			deps.router, deps.logger, deps.publisher).WithExportPromptPath(exportPromptPath)
+	}
+}
+
 // newTaskFlow собирает поток задачи. nil без ошибки означает «у задачи своего потока нет» —
 // так работает task_1.
-//
-// Единственный switch по задаче во всём приложении, и он здесь намеренно: composition root —
-// то место, где список задач уже известен. Четвёртая задача добавляется одним case плюс своим
-// пакетом; ни движок, ни соседние задачи при этом не меняются.
 func newTaskFlow(profile tasks.Profile, deps taskFlowDeps) (taskFlow, error) {
-	switch profile.Name {
-	case pprof1.Name:
-		return newPProf1Flow(deps)
-	case pprof2.Name:
-		return newPProf2Flow(deps)
-	case obuch1.Name:
-		return newObuch1Flow(deps)
-	case obuch2.Name:
-		return newObuch2Flow(deps, obuch2.ExportPromptPath)
-	case obuch2.Name22:
-		return newObuch2Flow(deps, obuch2.ExportPrompt22Path)
-	default:
+	build, found := taskFlows[profile.Name]
+	if !found {
 		return nil, nil
 	}
+	if deps.router == nil {
+		return nil, fmt.Errorf("схема стадий %s не загружена", profile.Name)
+	}
+	return build(deps), nil
 }
 
 // demoPromptDataOf отдаёт сборщику DEMO данные промптов задачи, если её промпты просят свой
