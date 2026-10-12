@@ -28,6 +28,8 @@ type Config struct {
 	GeminiModel  string
 	// KeysSODisabled — Keys.so выключен (pipeline.keysso: false); нулевое значение — сбор идёт.
 	KeysSODisabled bool
+	// ArsenkinDisabled — Arsenkin выключен (pipeline.arsenkin: false); нулевое значение — сбор идёт.
+	ArsenkinDisabled bool
 
 	KeysSOEmail      string
 	KeysSOPassword   string

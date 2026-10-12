@@ -15,7 +15,7 @@ DRY_RUN_DATABASE_URL ?= postgres://seo:seo@localhost:5433/seo_dry_run?sslmode=di
 #
 # Задачи различаются только именем: набор операций, разбор аргументов и рецепт у них общие,
 # а пути, схему стадий и схему PostgreSQL выбирает профиль внутри CLI.
-TASK_NAMES := task-1 pprof-1 pprof-2 obuch-1 obuch-2 pprof-audit-1 pprof-audit-2
+TASK_NAMES := task-1 pprof-1 pprof-2 obuch-1 obuch-2 obuch-22 pprof-audit-1 pprof-audit-2
 TASK_NAME := $(firstword $(MAKECMDGOALS))
 CLI = $(GO) run $(LDFLAGS) ./cmd/seo-pipeline $(TASK_NAME)
 
@@ -28,7 +28,7 @@ TASK_EXTRA_ARGS := $(wordlist 4,$(words $(MAKECMDGOALS)),$(MAKECMDGOALS))
 TASK_OPERATIONS := import import-check errors keywords retry run regenerate dry-run prepare generate demo-generate article info review fix html result report clear reset google-login google-publish deepseek-login wordpress-check publish republish mark-published catalog-sync catalog-refresh catalog-show
 OPTIONAL_ARGUMENT_OPERATIONS := import-check errors keywords retry run regenerate clear reset google-publish prepare generate demo-generate article info review fix html result publish mark-published
 
-.PHONY: help task-1 pprof-1 pprof-2 obuch-1 obuch-2 pprof-audit-1 pprof-audit-2 login docker-up docker-start docker-stop docker-down docker-restart docker-logs docker-ps
+.PHONY: help task-1 pprof-1 pprof-2 obuch-1 obuch-2 obuch-22 pprof-audit-1 pprof-audit-2 login docker-up docker-start docker-stop docker-down docker-restart docker-logs docker-ps
 .PHONY: test test-race fmt vet lint lint-fix build snapshot-save snapshot-check
 
 # ----------------------------------------------------
@@ -236,6 +236,9 @@ obuch-1: ## Run an obuch_1 operation
 	$(run_task_operation)
 
 obuch-2: ## Run an obuch_2 operation
+	$(run_task_operation)
+
+obuch-22: ## Run an obuch_22 operation (obuch_2 without Arsenkin)
 	$(run_task_operation)
 
 pprof-audit-1: ## Run a pprof_audit_1 operation

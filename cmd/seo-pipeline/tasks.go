@@ -22,7 +22,7 @@ import (
 // одной строкой здесь плюс своим пакетом конфигурации и каталогами на диске.
 func taskRegistry() []tasks.Profile {
 	return []tasks.Profile{
-		task1.Profile(), pprof1.Profile(), pprof2.Profile(), obuch1.Profile(), obuch2.Profile(),
+		task1.Profile(), pprof1.Profile(), pprof2.Profile(), obuch1.Profile(), obuch2.Profile(), obuch2.Profile22(),
 		pprofaudit1.Profile(), pprofaudit2.Profile(),
 	}
 }

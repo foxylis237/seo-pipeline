@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -42,9 +43,29 @@ func Transport(name string) (http.RoundTripper, error) {
 		}
 		bound := *dialer
 		bound.LocalAddr = &net.TCPAddr{IP: local}
+		bound.Resolver = publicResolver(local)
 		return bound.DialContext(ctx, network, addr)
 	}
 	return transport, nil
+}
+
+// publicDNS is queried from the bound interface: the tunnel's DNS answers with 198.18.x
+// addresses that are unreachable outside it.
+const publicDNS = "8.8.8.8:53"
+
+func publicResolver(local net.IP) *net.Resolver {
+	return &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			var dialer net.Dialer
+			if strings.HasPrefix(network, "tcp") {
+				dialer.LocalAddr = &net.TCPAddr{IP: local}
+			} else {
+				dialer.LocalAddr = &net.UDPAddr{IP: local}
+			}
+			return dialer.DialContext(ctx, network, publicDNS)
+		},
+	}
 }
 
 // address возвращает IPv4-адрес интерфейса: привязка к IPv6 соединение мимо туннеля не уводит.

@@ -43,7 +43,7 @@ func articleData(input article.GenerationInput, structure string) any {
 	}{
 		Title:              input.Article.Title,
 		Profession:         programFact(input.Profession, "Профессия в книге не указана — бери её из названия страницы."),
-		Keywords:           article.FormatKeywords(input.WordstatKeywords),
+		Keywords:           formatKeywords(input.WordstatKeywords),
 		LSIWords:           strings.Join(input.LSIWords, "\n"),
 		GeneratedStructure: structure,
 		Hours:              programFact(input.Hours, missingNumber("объём программы в академических часах")),
@@ -95,4 +95,18 @@ func htmlData(finalText string) any {
 	return struct {
 		Article string
 	}{finalText}
+}
+
+// formatKeywords prints queries without frequencies when none were collected (Arsenkin off).
+func formatKeywords(keywords []article.KeywordFrequency) string {
+	for _, keyword := range keywords {
+		if keyword.Frequency > 0 {
+			return article.FormatKeywords(keywords)
+		}
+	}
+	queries := make([]string, len(keywords))
+	for index, keyword := range keywords {
+		queries[index] = keyword.Query
+	}
+	return strings.Join(queries, "\n")
 }

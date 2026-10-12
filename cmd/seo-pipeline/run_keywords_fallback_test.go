@@ -440,3 +440,25 @@ func TestPrepareUsesFallbackWhenKeysSOReturnedTooFewQueries(t *testing.T) {
 		t.Fatalf("резервный источник вызван %d раз, ожидался один", fallback.calls)
 	}
 }
+
+func TestPrepareWithoutArsenkinSavesQueriesOnly(t *testing.T) {
+	repository := oldPrepareRepositoryState()
+	err := prepareArticleWithCollectors(
+		context.Background(), repository, config.Config{}, testPrepareLogger(), newFakePrepareArtifacts(), testPreparedArticle(),
+		fakeKeysSOCollector{result: keysso.CollectResult{CollectedCount: 3, CleanedKeywords: []string{
+			"собранный запрос", "второй запрос", "третий запрос",
+		}}},
+		withoutArsenkin{},
+		&fakeKeywordsFallback{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []article.KeywordFrequency{{Query: "собранный запрос"}, {Query: "второй запрос"}, {Query: "третий запрос"}}
+	if !reflect.DeepEqual(repository.research.wordstat, want) || len(repository.research.lsi) != 0 {
+		t.Fatalf("research %+v", repository.research)
+	}
+	if repository.research.structure != arsenkinSkippedStructure {
+		t.Fatalf("structure %q", repository.research.structure)
+	}
+}

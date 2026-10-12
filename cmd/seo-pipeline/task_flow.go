@@ -63,7 +63,9 @@ func newTaskFlow(profile tasks.Profile, deps taskFlowDeps) (taskFlow, error) {
 	case obuch1.Name:
 		return newObuch1Flow(deps)
 	case obuch2.Name:
-		return newObuch2Flow(deps)
+		return newObuch2Flow(deps, obuch2.ExportPromptPath)
+	case obuch2.Name22:
+		return newObuch2Flow(deps, obuch2.ExportPrompt22Path)
 	default:
 		return nil, nil
 	}

@@ -95,6 +95,12 @@ func NewFlow(repository Repository, writer Writer, chats taskflow.ChatFactory,
 	}
 }
 
+// WithExportPromptPath sets the export prompt template; obuch_22 has its own.
+func (f *Flow) WithExportPromptPath(path string) *Flow {
+	f.exportPromptPath = path
+	return f
+}
+
 // RunStructure выполняет чат 1. Отдельный чат нужен потому, что структура — вход для всей
 // остальной работы, и историю её обсуждения тащить в текст страницы незачем.
 //

@@ -81,6 +81,7 @@ func main() {
 		os.Exit(1)
 	}
 	cfg.KeysSODisabled = !pipelineCfg.KeysSO
+	cfg.ArsenkinDisabled = !pipelineCfg.Arsenkin
 	logger, err = newLogger(cfg.LogLevel, cfg.LogFormat)
 	if err != nil {
 		logger = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))

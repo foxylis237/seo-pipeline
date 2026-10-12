@@ -1,11 +1,11 @@
 []
-  error: usage: seo-pipeline <obuch-1|obuch-2|pprof-1|pprof-2|pprof-audit-1|pprof-audit-2|task-1|login> <operation> [arguments]; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
+  error: usage: seo-pipeline <obuch-1|obuch-2|obuch-22|pprof-1|pprof-2|pprof-audit-1|pprof-audit-2|task-1|login> <operation> [arguments]; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["unknown"]
-  error: unknown task "unknown"; available tasks: obuch-1, obuch-2, pprof-1, pprof-2, pprof-audit-1, pprof-audit-2, task-1; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
+  error: unknown task "unknown"; available tasks: obuch-1, obuch-2, obuch-22, pprof-1, pprof-2, pprof-audit-1, pprof-audit-2, task-1; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["article" "37"]
-  error: unknown task "article"; available tasks: obuch-1, obuch-2, pprof-1, pprof-2, pprof-audit-1, pprof-audit-2, task-1; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
+  error: unknown task "article"; available tasks: obuch-1, obuch-2, obuch-22, pprof-1, pprof-2, pprof-audit-1, pprof-audit-2, task-1; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["--dry-run"]
-  error: usage: seo-pipeline <obuch-1|obuch-2|pprof-1|pprof-2|pprof-audit-1|pprof-audit-2|task-1|login> <operation> [arguments]; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
+  error: usage: seo-pipeline <obuch-1|obuch-2|obuch-22|pprof-1|pprof-2|pprof-audit-1|pprof-audit-2|task-1|login> <operation> [arguments]; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["login"]
   error: usage: seo-pipeline login <arsenkin|deepseek|google|keysso>
 ["login" "deepseek"]
@@ -21,19 +21,19 @@
 ["login" "deepseek" "extra"]
   error: usage: seo-pipeline login <arsenkin|deepseek|google|keysso>
 ["LOGIN"]
-  error: unknown task "LOGIN"; available tasks: obuch-1, obuch-2, pprof-1, pprof-2, pprof-audit-1, pprof-audit-2, task-1; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
+  error: unknown task "LOGIN"; available tasks: obuch-1, obuch-2, obuch-22, pprof-1, pprof-2, pprof-audit-1, pprof-audit-2, task-1; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["LOGIN" "deepseek"]
-  error: unknown task "LOGIN"; available tasks: obuch-1, obuch-2, pprof-1, pprof-2, pprof-audit-1, pprof-audit-2, task-1; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
+  error: unknown task "LOGIN"; available tasks: obuch-1, obuch-2, obuch-22, pprof-1, pprof-2, pprof-audit-1, pprof-audit-2, task-1; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["LOGIN" "google"]
-  error: unknown task "LOGIN"; available tasks: obuch-1, obuch-2, pprof-1, pprof-2, pprof-audit-1, pprof-audit-2, task-1; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
+  error: unknown task "LOGIN"; available tasks: obuch-1, obuch-2, obuch-22, pprof-1, pprof-2, pprof-audit-1, pprof-audit-2, task-1; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["LOGIN" "keysso"]
-  error: unknown task "LOGIN"; available tasks: obuch-1, obuch-2, pprof-1, pprof-2, pprof-audit-1, pprof-audit-2, task-1; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
+  error: unknown task "LOGIN"; available tasks: obuch-1, obuch-2, obuch-22, pprof-1, pprof-2, pprof-audit-1, pprof-audit-2, task-1; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["LOGIN" "arsenkin"]
-  error: unknown task "LOGIN"; available tasks: obuch-1, obuch-2, pprof-1, pprof-2, pprof-audit-1, pprof-audit-2, task-1; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
+  error: unknown task "LOGIN"; available tasks: obuch-1, obuch-2, obuch-22, pprof-1, pprof-2, pprof-audit-1, pprof-audit-2, task-1; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["LOGIN" "unknown"]
-  error: unknown task "LOGIN"; available tasks: obuch-1, obuch-2, pprof-1, pprof-2, pprof-audit-1, pprof-audit-2, task-1; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
+  error: unknown task "LOGIN"; available tasks: obuch-1, obuch-2, obuch-22, pprof-1, pprof-2, pprof-audit-1, pprof-audit-2, task-1; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["LOGIN" "deepseek" "extra"]
-  error: unknown task "LOGIN"; available tasks: obuch-1, obuch-2, pprof-1, pprof-2, pprof-audit-1, pprof-audit-2, task-1; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
+  error: unknown task "LOGIN"; available tasks: obuch-1, obuch-2, obuch-22, pprof-1, pprof-2, pprof-audit-1, pprof-audit-2, task-1; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["task-1"]
   error: usage: seo-pipeline task-1 <operation> [arguments]; available task-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
 ["task-1" "unknown"]
@@ -3163,6 +3163,632 @@
 ["obuch-2" "mark-published" "16" "wrong"]
   error: wordpress_post_id must be a positive integer: "wrong"
 ["obuch-2" "import" "-1"]
+  error: import limit must be a positive integer: "-1"
+["obuch-22"]
+  error: usage: seo-pipeline obuch-22 <operation> [arguments]; available obuch-22 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
+["obuch-22" "unknown"]
+  error: unknown obuch-22 operation "unknown"; available obuch-22 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
+["obuch_22"]
+  error: usage: seo-pipeline obuch-22 <operation> [arguments]; available obuch-22 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
+["obuch_22" "unknown"]
+  error: unknown obuch-22 operation "unknown"; available obuch-22 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
+["obuch-22" "import"]
+  task=obuch-22 name=import external_id= import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=INPUT_FILE_PATH or a task input directory is required
+["obuch-22" "import" "37"]
+  task=obuch-22 name=import external_id= import_limit=37 dry_run=false plan=false yes=false post_id=0 service= login= validate=INPUT_FILE_PATH or a task input directory is required
+["obuch-22" "import" " 37 "]
+  task=obuch-22 name=import external_id= import_limit=37 dry_run=false plan=false yes=false post_id=0 service= login= validate=INPUT_FILE_PATH or a task input directory is required
+["obuch-22" "import" "0"]
+  error: import limit must be a positive integer: "0"
+["obuch-22" "import" "wrong"]
+  error: import limit must be a positive integer: "wrong"
+["obuch-22" "import" "37" "38"]
+  error: usage: seo-pipeline obuch-22 import [limit]
+["obuch-22" "import" "37" "38" "39"]
+  error: usage: seo-pipeline obuch-22 import [limit]
+["obuch-22" "import" "--plan"]
+  error: --plan is supported only for obuch-22 run and obuch-22 publish
+["obuch-22" "import" "--yes"]
+  error: --yes is supported only for obuch-22 reset, obuch-22 clear and obuch-22 publish
+["obuch-22" "import" "--dry-run"]
+  error: --dry-run is supported only for obuch-22 run without external_id
+["obuch-22" "import-check"]
+  task=obuch-22 name=import-check external_id= import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=INPUT_FILE_PATH or a task input directory is required
+["obuch-22" "import-check" "37"]
+  task=obuch-22 name=import-check external_id=37 import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=INPUT_FILE_PATH or a task input directory is required
+["obuch-22" "import-check" " 37 "]
+  task=obuch-22 name=import-check external_id=37 import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=INPUT_FILE_PATH or a task input directory is required
+["obuch-22" "import-check" "0"]
+  error: external_id must be a positive integer: "0"
+["obuch-22" "import-check" "wrong"]
+  error: external_id must be a positive integer: "wrong"
+["obuch-22" "import-check" "37" "38"]
+  error: usage: seo-pipeline obuch-22 import-check [external_id]
+["obuch-22" "import-check" "37" "38" "39"]
+  error: usage: seo-pipeline obuch-22 import-check [external_id]
+["obuch-22" "import-check" "--plan"]
+  error: --plan is supported only for obuch-22 run and obuch-22 publish
+["obuch-22" "import-check" "--yes"]
+  error: --yes is supported only for obuch-22 reset, obuch-22 clear and obuch-22 publish
+["obuch-22" "import-check" "--dry-run"]
+  error: --dry-run is supported only for obuch-22 run without external_id
+["obuch-22" "errors"]
+  task=obuch-22 name=errors external_id= import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=ok
+["obuch-22" "errors" "37"]
+  task=obuch-22 name=errors external_id=37 import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=ok
+["obuch-22" "errors" " 37 "]
+  task=obuch-22 name=errors external_id=37 import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=ok
+["obuch-22" "errors" "0"]
+  error: external_id must be a positive integer: "0"
+["obuch-22" "errors" "wrong"]
+  error: external_id must be a positive integer: "wrong"
+["obuch-22" "errors" "37" "38"]
+  error: usage: seo-pipeline obuch-22 errors [external_id]
+["obuch-22" "errors" "37" "38" "39"]
+  error: usage: seo-pipeline obuch-22 errors [external_id]
+["obuch-22" "errors" "--plan"]
+  error: --plan is supported only for obuch-22 run and obuch-22 publish
+["obuch-22" "errors" "--yes"]
+  error: --yes is supported only for obuch-22 reset, obuch-22 clear and obuch-22 publish
+["obuch-22" "errors" "--dry-run"]
+  error: --dry-run is supported only for obuch-22 run without external_id
+["obuch-22" "keywords"]
+  error: usage: seo-pipeline obuch-22 keywords <external_id>
+["obuch-22" "keywords" "37"]
+  task=obuch-22 name=keywords external_id=37 import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=ok
+["obuch-22" "keywords" " 37 "]
+  task=obuch-22 name=keywords external_id=37 import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=ok
+["obuch-22" "keywords" "0"]
+  error: external_id must be a positive integer: "0"
+["obuch-22" "keywords" "wrong"]
+  error: external_id must be a positive integer: "wrong"
+["obuch-22" "keywords" "37" "38"]
+  error: usage: seo-pipeline obuch-22 keywords <external_id>
+["obuch-22" "keywords" "37" "38" "39"]
+  error: usage: seo-pipeline obuch-22 keywords <external_id>
+["obuch-22" "keywords" "--plan"]
+  error: usage: seo-pipeline obuch-22 keywords <external_id>
+["obuch-22" "keywords" "--yes"]
+  error: usage: seo-pipeline obuch-22 keywords <external_id>
+["obuch-22" "keywords" "--dry-run"]
+  error: usage: seo-pipeline obuch-22 keywords <external_id>
+["obuch-22" "retry"]
+  task=obuch-22 name=retry external_id= import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=ok
+["obuch-22" "retry" "37"]
+  task=obuch-22 name=retry external_id=37 import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=ok
+["obuch-22" "retry" " 37 "]
+  task=obuch-22 name=retry external_id=37 import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=ok
+["obuch-22" "retry" "0"]
+  error: external_id must be a positive integer: "0"
+["obuch-22" "retry" "wrong"]
+  error: external_id must be a positive integer: "wrong"
+["obuch-22" "retry" "37" "38"]
+  error: usage: seo-pipeline obuch-22 retry [external_id]
+["obuch-22" "retry" "37" "38" "39"]
+  error: usage: seo-pipeline obuch-22 retry [external_id]
+["obuch-22" "retry" "--plan"]
+  error: --plan is supported only for obuch-22 run and obuch-22 publish
+["obuch-22" "retry" "--yes"]
+  error: --yes is supported only for obuch-22 reset, obuch-22 clear and obuch-22 publish
+["obuch-22" "retry" "--dry-run"]
+  error: --dry-run is supported only for obuch-22 run without external_id
+["obuch-22" "run"]
+  task=obuch-22 name=run external_id= import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=ok
+["obuch-22" "run" "37"]
+  task=obuch-22 name=run external_id=37 import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=ok
+["obuch-22" "run" " 37 "]
+  task=obuch-22 name=run external_id=37 import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=ok
+["obuch-22" "run" "0"]
+  error: external_id must be a positive integer: "0"
+["obuch-22" "run" "wrong"]
+  error: external_id must be a positive integer: "wrong"
+["obuch-22" "run" "37" "38"]
+  error: usage: seo-pipeline obuch-22 run [external_id]
+["obuch-22" "run" "37" "38" "39"]
+  error: usage: seo-pipeline obuch-22 run [external_id]
+["obuch-22" "run" "--plan"]
+  task=obuch-22 name=run external_id= import_limit=0 dry_run=false plan=true yes=false post_id=0 service= login= validate=ok
+["obuch-22" "run" "--yes"]
+  error: --yes is supported only for obuch-22 reset, obuch-22 clear and obuch-22 publish
+["obuch-22" "run" "--dry-run"]
+  task=obuch-22 name=run external_id= import_limit=0 dry_run=true plan=false yes=false post_id=0 service= login= validate=ok
+["obuch-22" "regenerate"]
+  error: usage: seo-pipeline obuch-22 regenerate <external_id>
+["obuch-22" "regenerate" "37"]
+  task=obuch-22 name=regenerate external_id=37 import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=ok
+["obuch-22" "regenerate" " 37 "]
+  task=obuch-22 name=regenerate external_id=37 import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=ok
+["obuch-22" "regenerate" "0"]
+  error: external_id must be a positive integer: "0"
+["obuch-22" "regenerate" "wrong"]
+  error: external_id must be a positive integer: "wrong"
+["obuch-22" "regenerate" "37" "38"]
+  error: usage: seo-pipeline obuch-22 regenerate <external_id>
+["obuch-22" "regenerate" "37" "38" "39"]
+  error: usage: seo-pipeline obuch-22 regenerate <external_id>
+["obuch-22" "regenerate" "--plan"]
+  error: usage: seo-pipeline obuch-22 regenerate <external_id>
+["obuch-22" "regenerate" "--yes"]
+  error: usage: seo-pipeline obuch-22 regenerate <external_id>
+["obuch-22" "regenerate" "--dry-run"]
+  error: usage: seo-pipeline obuch-22 regenerate <external_id>
+["obuch-22" "dry-run"]
+  error: unknown obuch-22 operation "dry-run"; available obuch-22 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
+["obuch-22" "dry-run" "37"]
+  error: unknown obuch-22 operation "dry-run"; available obuch-22 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
+["obuch-22" "dry-run" " 37 "]
+  error: unknown obuch-22 operation "dry-run"; available obuch-22 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
+["obuch-22" "dry-run" "0"]
+  error: unknown obuch-22 operation "dry-run"; available obuch-22 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
+["obuch-22" "dry-run" "wrong"]
+  error: unknown obuch-22 operation "dry-run"; available obuch-22 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
+["obuch-22" "dry-run" "37" "38"]
+  error: unknown obuch-22 operation "dry-run"; available obuch-22 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
+["obuch-22" "dry-run" "37" "38" "39"]
+  error: unknown obuch-22 operation "dry-run"; available obuch-22 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
+["obuch-22" "dry-run" "--plan"]
+  error: unknown obuch-22 operation "dry-run"; available obuch-22 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
+["obuch-22" "dry-run" "--yes"]
+  error: unknown obuch-22 operation "dry-run"; available obuch-22 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
+["obuch-22" "dry-run" "--dry-run"]
+  error: unknown obuch-22 operation "dry-run"; available obuch-22 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show
+["obuch-22" "prepare"]
+  task=obuch-22 name=prepare external_id= import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=KEYS_SO_EMAIL is required
+["obuch-22" "prepare" "37"]
+  task=obuch-22 name=prepare external_id=37 import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=KEYS_SO_EMAIL is required
+["obuch-22" "prepare" " 37 "]
+  task=obuch-22 name=prepare external_id=37 import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=KEYS_SO_EMAIL is required
+["obuch-22" "prepare" "0"]
+  error: external_id must be a positive integer: "0"
+["obuch-22" "prepare" "wrong"]
+  error: external_id must be a positive integer: "wrong"
+["obuch-22" "prepare" "37" "38"]
+  error: usage: seo-pipeline obuch-22 prepare [external_id]
+["obuch-22" "prepare" "37" "38" "39"]
+  error: usage: seo-pipeline obuch-22 prepare [external_id]
+["obuch-22" "prepare" "--plan"]
+  error: --plan is supported only for obuch-22 run and obuch-22 publish
+["obuch-22" "prepare" "--yes"]
+  error: --yes is supported only for obuch-22 reset, obuch-22 clear and obuch-22 publish
+["obuch-22" "prepare" "--dry-run"]
+  error: --dry-run is supported only for obuch-22 run without external_id
+["obuch-22" "generate"]
+  task=obuch-22 name=generate external_id= import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=ok
+["obuch-22" "generate" "37"]
+  task=obuch-22 name=generate external_id=37 import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=ok
+["obuch-22" "generate" " 37 "]
+  task=obuch-22 name=generate external_id=37 import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=ok
+["obuch-22" "generate" "0"]
+  error: external_id must be a positive integer: "0"
+["obuch-22" "generate" "wrong"]
+  error: external_id must be a positive integer: "wrong"
+["obuch-22" "generate" "37" "38"]
+  error: usage: seo-pipeline obuch-22 generate [external_id]
+["obuch-22" "generate" "37" "38" "39"]
+  error: usage: seo-pipeline obuch-22 generate [external_id]
+["obuch-22" "generate" "--plan"]
+  error: --plan is supported only for obuch-22 run and obuch-22 publish
+["obuch-22" "generate" "--yes"]
+  error: --yes is supported only for obuch-22 reset, obuch-22 clear and obuch-22 publish
+["obuch-22" "generate" "--dry-run"]
+  error: --dry-run is supported only for obuch-22 run without external_id
+["obuch-22" "demo-generate"]
+  task=obuch-22 name=demo-generate external_id= import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=ok
+["obuch-22" "demo-generate" "37"]
+  task=obuch-22 name=demo-generate external_id=37 import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=ok
+["obuch-22" "demo-generate" " 37 "]
+  task=obuch-22 name=demo-generate external_id=37 import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=ok
+["obuch-22" "demo-generate" "0"]
+  error: external_id must be a positive integer: "0"
+["obuch-22" "demo-generate" "wrong"]
+  error: external_id must be a positive integer: "wrong"
+["obuch-22" "demo-generate" "37" "38"]
+  error: usage: seo-pipeline obuch-22 demo-generate [external_id]
+["obuch-22" "demo-generate" "37" "38" "39"]
+  error: usage: seo-pipeline obuch-22 demo-generate [external_id]
+["obuch-22" "demo-generate" "--plan"]
+  error: --plan is supported only for obuch-22 run and obuch-22 publish
+["obuch-22" "demo-generate" "--yes"]
+  error: --yes is supported only for obuch-22 reset, obuch-22 clear and obuch-22 publish
+["obuch-22" "demo-generate" "--dry-run"]
+  error: --dry-run is supported only for obuch-22 run without external_id
+["obuch-22" "article"]
+  task=obuch-22 name=article external_id= import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=ok
+["obuch-22" "article" "37"]
+  task=obuch-22 name=article external_id=37 import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=ok
+["obuch-22" "article" " 37 "]
+  task=obuch-22 name=article external_id=37 import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=ok
+["obuch-22" "article" "0"]
+  error: external_id must be a positive integer: "0"
+["obuch-22" "article" "wrong"]
+  error: external_id must be a positive integer: "wrong"
+["obuch-22" "article" "37" "38"]
+  error: usage: seo-pipeline obuch-22 article [external_id]
+["obuch-22" "article" "37" "38" "39"]
+  error: usage: seo-pipeline obuch-22 article [external_id]
+["obuch-22" "article" "--plan"]
+  error: --plan is supported only for obuch-22 run and obuch-22 publish
+["obuch-22" "article" "--yes"]
+  error: --yes is supported only for obuch-22 reset, obuch-22 clear and obuch-22 publish
+["obuch-22" "article" "--dry-run"]
+  error: --dry-run is supported only for obuch-22 run without external_id
+["obuch-22" "info"]
+  task=obuch-22 name=info external_id= import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=ok
+["obuch-22" "info" "37"]
+  task=obuch-22 name=info external_id=37 import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=ok
+["obuch-22" "info" " 37 "]
+  task=obuch-22 name=info external_id=37 import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=ok
+["obuch-22" "info" "0"]
+  error: external_id must be a positive integer: "0"
+["obuch-22" "info" "wrong"]
+  error: external_id must be a positive integer: "wrong"
+["obuch-22" "info" "37" "38"]
+  error: usage: seo-pipeline obuch-22 info [external_id]
+["obuch-22" "info" "37" "38" "39"]
+  error: usage: seo-pipeline obuch-22 info [external_id]
+["obuch-22" "info" "--plan"]
+  error: --plan is supported only for obuch-22 run and obuch-22 publish
+["obuch-22" "info" "--yes"]
+  error: --yes is supported only for obuch-22 reset, obuch-22 clear and obuch-22 publish
+["obuch-22" "info" "--dry-run"]
+  error: --dry-run is supported only for obuch-22 run without external_id
+["obuch-22" "review"]
+  task=obuch-22 name=review external_id= import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=ok
+["obuch-22" "review" "37"]
+  task=obuch-22 name=review external_id=37 import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=ok
+["obuch-22" "review" " 37 "]
+  task=obuch-22 name=review external_id=37 import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=ok
+["obuch-22" "review" "0"]
+  error: external_id must be a positive integer: "0"
+["obuch-22" "review" "wrong"]
+  error: external_id must be a positive integer: "wrong"
+["obuch-22" "review" "37" "38"]
+  error: usage: seo-pipeline obuch-22 review [external_id]
+["obuch-22" "review" "37" "38" "39"]
+  error: usage: seo-pipeline obuch-22 review [external_id]
+["obuch-22" "review" "--plan"]
+  error: --plan is supported only for obuch-22 run and obuch-22 publish
+["obuch-22" "review" "--yes"]
+  error: --yes is supported only for obuch-22 reset, obuch-22 clear and obuch-22 publish
+["obuch-22" "review" "--dry-run"]
+  error: --dry-run is supported only for obuch-22 run without external_id
+["obuch-22" "fix"]
+  task=obuch-22 name=fix external_id= import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=ok
+["obuch-22" "fix" "37"]
+  task=obuch-22 name=fix external_id=37 import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=ok
+["obuch-22" "fix" " 37 "]
+  task=obuch-22 name=fix external_id=37 import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=ok
+["obuch-22" "fix" "0"]
+  error: external_id must be a positive integer: "0"
+["obuch-22" "fix" "wrong"]
+  error: external_id must be a positive integer: "wrong"
+["obuch-22" "fix" "37" "38"]
+  error: usage: seo-pipeline obuch-22 fix [external_id]
+["obuch-22" "fix" "37" "38" "39"]
+  error: usage: seo-pipeline obuch-22 fix [external_id]
+["obuch-22" "fix" "--plan"]
+  error: --plan is supported only for obuch-22 run and obuch-22 publish
+["obuch-22" "fix" "--yes"]
+  error: --yes is supported only for obuch-22 reset, obuch-22 clear and obuch-22 publish
+["obuch-22" "fix" "--dry-run"]
+  error: --dry-run is supported only for obuch-22 run without external_id
+["obuch-22" "html"]
+  task=obuch-22 name=html external_id= import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=ok
+["obuch-22" "html" "37"]
+  task=obuch-22 name=html external_id=37 import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=ok
+["obuch-22" "html" " 37 "]
+  task=obuch-22 name=html external_id=37 import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=ok
+["obuch-22" "html" "0"]
+  error: external_id must be a positive integer: "0"
+["obuch-22" "html" "wrong"]
+  error: external_id must be a positive integer: "wrong"
+["obuch-22" "html" "37" "38"]
+  error: usage: seo-pipeline obuch-22 html [external_id]
+["obuch-22" "html" "37" "38" "39"]
+  error: usage: seo-pipeline obuch-22 html [external_id]
+["obuch-22" "html" "--plan"]
+  error: --plan is supported only for obuch-22 run and obuch-22 publish
+["obuch-22" "html" "--yes"]
+  error: --yes is supported only for obuch-22 reset, obuch-22 clear and obuch-22 publish
+["obuch-22" "html" "--dry-run"]
+  error: --dry-run is supported only for obuch-22 run without external_id
+["obuch-22" "result"]
+  task=obuch-22 name=result external_id= import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=ok
+["obuch-22" "result" "37"]
+  task=obuch-22 name=result external_id=37 import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=ok
+["obuch-22" "result" " 37 "]
+  task=obuch-22 name=result external_id=37 import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=ok
+["obuch-22" "result" "0"]
+  error: external_id must be a positive integer: "0"
+["obuch-22" "result" "wrong"]
+  error: external_id must be a positive integer: "wrong"
+["obuch-22" "result" "37" "38"]
+  error: usage: seo-pipeline obuch-22 result [external_id]
+["obuch-22" "result" "37" "38" "39"]
+  error: usage: seo-pipeline obuch-22 result [external_id]
+["obuch-22" "result" "--plan"]
+  error: --plan is supported only for obuch-22 run and obuch-22 publish
+["obuch-22" "result" "--yes"]
+  error: --yes is supported only for obuch-22 reset, obuch-22 clear and obuch-22 publish
+["obuch-22" "result" "--dry-run"]
+  error: --dry-run is supported only for obuch-22 run without external_id
+["obuch-22" "report"]
+  task=obuch-22 name=report external_id= import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=ok
+["obuch-22" "report" "37"]
+  error: usage: seo-pipeline obuch-22 report
+["obuch-22" "report" " 37 "]
+  error: usage: seo-pipeline obuch-22 report
+["obuch-22" "report" "0"]
+  error: usage: seo-pipeline obuch-22 report
+["obuch-22" "report" "wrong"]
+  error: usage: seo-pipeline obuch-22 report
+["obuch-22" "report" "37" "38"]
+  error: usage: seo-pipeline obuch-22 report
+["obuch-22" "report" "37" "38" "39"]
+  error: usage: seo-pipeline obuch-22 report
+["obuch-22" "report" "--plan"]
+  error: --plan is supported only for obuch-22 run and obuch-22 publish
+["obuch-22" "report" "--yes"]
+  error: --yes is supported only for obuch-22 reset, obuch-22 clear and obuch-22 publish
+["obuch-22" "report" "--dry-run"]
+  error: --dry-run is supported only for obuch-22 run without external_id
+["obuch-22" "clear"]
+  error: usage: seo-pipeline obuch-22 clear <external_id>
+["obuch-22" "clear" "37"]
+  task=obuch-22 name=clear external_id=37 import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=ok
+["obuch-22" "clear" " 37 "]
+  task=obuch-22 name=clear external_id=37 import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=ok
+["obuch-22" "clear" "0"]
+  error: external_id must be a positive integer: "0"
+["obuch-22" "clear" "wrong"]
+  error: external_id must be a positive integer: "wrong"
+["obuch-22" "clear" "37" "38"]
+  error: usage: seo-pipeline obuch-22 clear <external_id>
+["obuch-22" "clear" "37" "38" "39"]
+  error: usage: seo-pipeline obuch-22 clear <external_id>
+["obuch-22" "clear" "--plan"]
+  error: usage: seo-pipeline obuch-22 clear <external_id>
+["obuch-22" "clear" "--yes"]
+  error: usage: seo-pipeline obuch-22 clear <external_id>
+["obuch-22" "clear" "--dry-run"]
+  error: usage: seo-pipeline obuch-22 clear <external_id>
+["obuch-22" "reset"]
+  task=obuch-22 name=reset external_id= import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=ok
+["obuch-22" "reset" "37"]
+  task=obuch-22 name=reset external_id=37 import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=ok
+["obuch-22" "reset" " 37 "]
+  task=obuch-22 name=reset external_id=37 import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=ok
+["obuch-22" "reset" "0"]
+  error: external_id must be a positive integer: "0"
+["obuch-22" "reset" "wrong"]
+  error: external_id must be a positive integer: "wrong"
+["obuch-22" "reset" "37" "38"]
+  error: usage: seo-pipeline obuch-22 reset [external_id]
+["obuch-22" "reset" "37" "38" "39"]
+  error: usage: seo-pipeline obuch-22 reset [external_id]
+["obuch-22" "reset" "--plan"]
+  error: --plan is supported only for obuch-22 run and obuch-22 publish
+["obuch-22" "reset" "--yes"]
+  task=obuch-22 name=reset external_id= import_limit=0 dry_run=false plan=false yes=true post_id=0 service= login= validate=ok
+["obuch-22" "reset" "--dry-run"]
+  error: --dry-run is supported only for obuch-22 run without external_id
+["obuch-22" "google-login"]
+  task=obuch-22 name=google-login external_id= import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login=google validate=unknown task "google-login"
+["obuch-22" "google-login" "37"]
+  error: usage: seo-pipeline obuch-22 google-login
+["obuch-22" "google-login" " 37 "]
+  error: usage: seo-pipeline obuch-22 google-login
+["obuch-22" "google-login" "0"]
+  error: usage: seo-pipeline obuch-22 google-login
+["obuch-22" "google-login" "wrong"]
+  error: usage: seo-pipeline obuch-22 google-login
+["obuch-22" "google-login" "37" "38"]
+  error: usage: seo-pipeline obuch-22 google-login
+["obuch-22" "google-login" "37" "38" "39"]
+  error: usage: seo-pipeline obuch-22 google-login
+["obuch-22" "google-login" "--plan"]
+  error: --plan is supported only for obuch-22 run and obuch-22 publish
+["obuch-22" "google-login" "--yes"]
+  error: --yes is supported only for obuch-22 reset, obuch-22 clear and obuch-22 publish
+["obuch-22" "google-login" "--dry-run"]
+  error: --dry-run is supported only for obuch-22 run without external_id
+["obuch-22" "google-publish"]
+  task=obuch-22 name=google-publish external_id= import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=ok
+["obuch-22" "google-publish" "37"]
+  task=obuch-22 name=google-publish external_id=37 import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=ok
+["obuch-22" "google-publish" " 37 "]
+  task=obuch-22 name=google-publish external_id=37 import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=ok
+["obuch-22" "google-publish" "0"]
+  error: external_id must be a positive integer: "0"
+["obuch-22" "google-publish" "wrong"]
+  error: external_id must be a positive integer: "wrong"
+["obuch-22" "google-publish" "37" "38"]
+  error: usage: seo-pipeline obuch-22 google-publish [external_id]
+["obuch-22" "google-publish" "37" "38" "39"]
+  error: usage: seo-pipeline obuch-22 google-publish [external_id]
+["obuch-22" "google-publish" "--plan"]
+  error: --plan is supported only for obuch-22 run and obuch-22 publish
+["obuch-22" "google-publish" "--yes"]
+  error: --yes is supported only for obuch-22 reset, obuch-22 clear and obuch-22 publish
+["obuch-22" "google-publish" "--dry-run"]
+  error: --dry-run is supported only for obuch-22 run without external_id
+["obuch-22" "deepseek-login"]
+  task=obuch-22 name=deepseek-login external_id= import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login=deepseek validate=unknown task "deepseek-login"
+["obuch-22" "deepseek-login" "37"]
+  error: usage: seo-pipeline obuch-22 deepseek-login
+["obuch-22" "deepseek-login" " 37 "]
+  error: usage: seo-pipeline obuch-22 deepseek-login
+["obuch-22" "deepseek-login" "0"]
+  error: usage: seo-pipeline obuch-22 deepseek-login
+["obuch-22" "deepseek-login" "wrong"]
+  error: usage: seo-pipeline obuch-22 deepseek-login
+["obuch-22" "deepseek-login" "37" "38"]
+  error: usage: seo-pipeline obuch-22 deepseek-login
+["obuch-22" "deepseek-login" "37" "38" "39"]
+  error: usage: seo-pipeline obuch-22 deepseek-login
+["obuch-22" "deepseek-login" "--plan"]
+  error: --plan is supported only for obuch-22 run and obuch-22 publish
+["obuch-22" "deepseek-login" "--yes"]
+  error: --yes is supported only for obuch-22 reset, obuch-22 clear and obuch-22 publish
+["obuch-22" "deepseek-login" "--dry-run"]
+  error: --dry-run is supported only for obuch-22 run without external_id
+["obuch-22" "wordpress-check"]
+  task=obuch-22 name=wordpress-check external_id= import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=WORDPRESS_URL is required
+["obuch-22" "wordpress-check" "37"]
+  error: usage: seo-pipeline obuch-22 wordpress-check
+["obuch-22" "wordpress-check" " 37 "]
+  error: usage: seo-pipeline obuch-22 wordpress-check
+["obuch-22" "wordpress-check" "0"]
+  error: usage: seo-pipeline obuch-22 wordpress-check
+["obuch-22" "wordpress-check" "wrong"]
+  error: usage: seo-pipeline obuch-22 wordpress-check
+["obuch-22" "wordpress-check" "37" "38"]
+  error: usage: seo-pipeline obuch-22 wordpress-check
+["obuch-22" "wordpress-check" "37" "38" "39"]
+  error: usage: seo-pipeline obuch-22 wordpress-check
+["obuch-22" "wordpress-check" "--plan"]
+  error: --plan is supported only for obuch-22 run and obuch-22 publish
+["obuch-22" "wordpress-check" "--yes"]
+  error: --yes is supported only for obuch-22 reset, obuch-22 clear and obuch-22 publish
+["obuch-22" "wordpress-check" "--dry-run"]
+  error: --dry-run is supported only for obuch-22 run without external_id
+["obuch-22" "publish"]
+  task=obuch-22 name=publish external_id= import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=WORDPRESS_URL is required
+["obuch-22" "publish" "37"]
+  task=obuch-22 name=publish external_id=37 import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=WORDPRESS_URL is required
+["obuch-22" "publish" " 37 "]
+  task=obuch-22 name=publish external_id=37 import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=WORDPRESS_URL is required
+["obuch-22" "publish" "0"]
+  error: external_id must be a positive integer: "0"
+["obuch-22" "publish" "wrong"]
+  error: external_id must be a positive integer: "wrong"
+["obuch-22" "publish" "37" "38"]
+  error: usage: seo-pipeline obuch-22 publish [external_id]
+["obuch-22" "publish" "37" "38" "39"]
+  error: usage: seo-pipeline obuch-22 publish [external_id]
+["obuch-22" "publish" "--plan"]
+  task=obuch-22 name=publish external_id= import_limit=0 dry_run=false plan=true yes=false post_id=0 service= login= validate=WORDPRESS_URL is required
+["obuch-22" "publish" "--yes"]
+  task=obuch-22 name=publish external_id= import_limit=0 dry_run=false plan=false yes=true post_id=0 service= login= validate=WORDPRESS_URL is required
+["obuch-22" "publish" "--dry-run"]
+  error: --dry-run is supported only for obuch-22 run without external_id
+["obuch-22" "republish"]
+  error: usage: seo-pipeline obuch-22 republish <external_id>
+["obuch-22" "republish" "37"]
+  task=obuch-22 name=republish external_id=37 import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=WORDPRESS_URL is required
+["obuch-22" "republish" " 37 "]
+  task=obuch-22 name=republish external_id=37 import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=WORDPRESS_URL is required
+["obuch-22" "republish" "0"]
+  error: external_id must be a positive integer: "0"
+["obuch-22" "republish" "wrong"]
+  error: external_id must be a positive integer: "wrong"
+["obuch-22" "republish" "37" "38"]
+  error: usage: seo-pipeline obuch-22 republish <external_id>
+["obuch-22" "republish" "37" "38" "39"]
+  error: usage: seo-pipeline obuch-22 republish <external_id>
+["obuch-22" "republish" "--plan"]
+  error: usage: seo-pipeline obuch-22 republish <external_id>
+["obuch-22" "republish" "--yes"]
+  error: usage: seo-pipeline obuch-22 republish <external_id>
+["obuch-22" "republish" "--dry-run"]
+  error: usage: seo-pipeline obuch-22 republish <external_id>
+["obuch-22" "mark-published"]
+  error: usage: seo-pipeline obuch-22 mark-published <external_id> [wordpress_post_id]
+["obuch-22" "mark-published" "37"]
+  task=obuch-22 name=mark-published external_id=37 import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=ok
+["obuch-22" "mark-published" " 37 "]
+  task=obuch-22 name=mark-published external_id=37 import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=ok
+["obuch-22" "mark-published" "0"]
+  error: external_id must be a positive integer: "0"
+["obuch-22" "mark-published" "wrong"]
+  error: external_id must be a positive integer: "wrong"
+["obuch-22" "mark-published" "37" "38"]
+  task=obuch-22 name=mark-published external_id=37 import_limit=0 dry_run=false plan=false yes=false post_id=38 service= login= validate=ok
+["obuch-22" "mark-published" "37" "38" "39"]
+  error: usage: seo-pipeline obuch-22 mark-published <external_id> [wordpress_post_id]
+["obuch-22" "mark-published" "--plan"]
+  error: usage: seo-pipeline obuch-22 mark-published <external_id> [wordpress_post_id]
+["obuch-22" "mark-published" "--yes"]
+  error: usage: seo-pipeline obuch-22 mark-published <external_id> [wordpress_post_id]
+["obuch-22" "mark-published" "--dry-run"]
+  error: usage: seo-pipeline obuch-22 mark-published <external_id> [wordpress_post_id]
+["obuch-22" "catalog-sync"]
+  task=obuch-22 name=catalog-sync external_id= import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=WORDPRESS_URL is required
+["obuch-22" "catalog-sync" "37"]
+  error: usage: seo-pipeline obuch-22 catalog-sync
+["obuch-22" "catalog-sync" " 37 "]
+  error: usage: seo-pipeline obuch-22 catalog-sync
+["obuch-22" "catalog-sync" "0"]
+  error: usage: seo-pipeline obuch-22 catalog-sync
+["obuch-22" "catalog-sync" "wrong"]
+  error: usage: seo-pipeline obuch-22 catalog-sync
+["obuch-22" "catalog-sync" "37" "38"]
+  error: usage: seo-pipeline obuch-22 catalog-sync
+["obuch-22" "catalog-sync" "37" "38" "39"]
+  error: usage: seo-pipeline obuch-22 catalog-sync
+["obuch-22" "catalog-sync" "--plan"]
+  error: --plan is supported only for obuch-22 run and obuch-22 publish
+["obuch-22" "catalog-sync" "--yes"]
+  error: --yes is supported only for obuch-22 reset, obuch-22 clear and obuch-22 publish
+["obuch-22" "catalog-sync" "--dry-run"]
+  error: --dry-run is supported only for obuch-22 run without external_id
+["obuch-22" "catalog-refresh"]
+  task=obuch-22 name=catalog-refresh external_id= import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=WORDPRESS_URL is required
+["obuch-22" "catalog-refresh" "37"]
+  error: usage: seo-pipeline obuch-22 catalog-refresh
+["obuch-22" "catalog-refresh" " 37 "]
+  error: usage: seo-pipeline obuch-22 catalog-refresh
+["obuch-22" "catalog-refresh" "0"]
+  error: usage: seo-pipeline obuch-22 catalog-refresh
+["obuch-22" "catalog-refresh" "wrong"]
+  error: usage: seo-pipeline obuch-22 catalog-refresh
+["obuch-22" "catalog-refresh" "37" "38"]
+  error: usage: seo-pipeline obuch-22 catalog-refresh
+["obuch-22" "catalog-refresh" "37" "38" "39"]
+  error: usage: seo-pipeline obuch-22 catalog-refresh
+["obuch-22" "catalog-refresh" "--plan"]
+  error: --plan is supported only for obuch-22 run and obuch-22 publish
+["obuch-22" "catalog-refresh" "--yes"]
+  error: --yes is supported only for obuch-22 reset, obuch-22 clear and obuch-22 publish
+["obuch-22" "catalog-refresh" "--dry-run"]
+  error: --dry-run is supported only for obuch-22 run without external_id
+["obuch-22" "catalog-show"]
+  error: usage: seo-pipeline obuch-22 catalog-show <external_id>
+["obuch-22" "catalog-show" "37"]
+  task=obuch-22 name=catalog-show external_id=37 import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=ok
+["obuch-22" "catalog-show" " 37 "]
+  task=obuch-22 name=catalog-show external_id=37 import_limit=0 dry_run=false plan=false yes=false post_id=0 service= login= validate=ok
+["obuch-22" "catalog-show" "0"]
+  error: external_id must be a positive integer: "0"
+["obuch-22" "catalog-show" "wrong"]
+  error: external_id must be a positive integer: "wrong"
+["obuch-22" "catalog-show" "37" "38"]
+  error: usage: seo-pipeline obuch-22 catalog-show <external_id>
+["obuch-22" "catalog-show" "37" "38" "39"]
+  error: usage: seo-pipeline obuch-22 catalog-show <external_id>
+["obuch-22" "catalog-show" "--plan"]
+  error: usage: seo-pipeline obuch-22 catalog-show <external_id>
+["obuch-22" "catalog-show" "--yes"]
+  error: usage: seo-pipeline obuch-22 catalog-show <external_id>
+["obuch-22" "catalog-show" "--dry-run"]
+  error: usage: seo-pipeline obuch-22 catalog-show <external_id>
+["obuch-22" "run" "--plan" "37"]
+  task=obuch-22 name=run external_id=37 import_limit=0 dry_run=false plan=true yes=false post_id=0 service= login= validate=ok
+["obuch-22" "publish" "--plan" "37"]
+  task=obuch-22 name=publish external_id=37 import_limit=0 dry_run=false plan=true yes=false post_id=0 service= login= validate=WORDPRESS_URL is required
+["obuch-22" "run" "--plan" "--dry-run"]
+  error: --plan and --dry-run cannot be combined
+["obuch-22" "run" "--dry-run" "--dry-run"]
+  error: --dry-run may be specified only once
+["--dry-run" "obuch-22" "run"]
+  task=obuch-22 name=run external_id= import_limit=0 dry_run=true plan=false yes=false post_id=0 service= login= validate=ok
+["obuch-22" "reset" "--yes" "37"]
+  task=obuch-22 name=reset external_id=37 import_limit=0 dry_run=false plan=false yes=true post_id=0 service= login= validate=ok
+["obuch-22" "mark-published" "16" "0"]
+  error: wordpress_post_id must be a positive integer: "0"
+["obuch-22" "mark-published" "16" "wrong"]
+  error: wordpress_post_id must be a positive integer: "wrong"
+["obuch-22" "import" "-1"]
   error: import limit must be a positive integer: "-1"
 ["pprof-audit-1"]
   error: usage: seo-pipeline pprof-audit-1 <operation> [arguments]; available pprof-audit-1 operations: import, import-check, errors, keywords, retry, run, regenerate, demo-generate, prepare, generate, article, info, review, fix, html, result, report, clear, reset, google-login, google-publish, deepseek-login, wordpress-check, publish, republish, mark-published, catalog-sync, catalog-refresh, catalog-show

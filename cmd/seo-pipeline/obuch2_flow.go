@@ -16,10 +16,10 @@ import (
 // Каталога услуг и страниц сайта здесь нет, в отличие от obuch_1: перелинковки у страницы
 // услуги не бывает ни одной, а у кнопки заявки нет адреса — она открывает форму. Сверять
 // нечего и названий программ спрашивать не у кого.
-func newObuch2Flow(deps taskFlowDeps) (taskFlow, error) {
+func newObuch2Flow(deps taskFlowDeps, exportPromptPath string) (taskFlow, error) {
 	if deps.router == nil {
 		return nil, fmt.Errorf("схема стадий obuch_2 не загружена")
 	}
 	return obuch2.NewFlow(deps.repository, deps.writer, taskflow.NewRouterChats(deps.router),
-		deps.router, deps.logger, deps.publisher), nil
+		deps.router, deps.logger, deps.publisher).WithExportPromptPath(exportPromptPath), nil
 }

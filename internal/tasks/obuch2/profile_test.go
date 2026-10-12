@@ -282,7 +282,7 @@ func TestOwnMigrationDescribesWholeSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, name := range foreign {
-		if filepath.Base(filepath.Dir(name)) == Name {
+		if dir := filepath.Base(filepath.Dir(name)); dir == Name || dir == Name22 {
 			continue
 		}
 		text, readErr := os.ReadFile(name)

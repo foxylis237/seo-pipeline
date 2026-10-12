@@ -41,7 +41,7 @@ func RenderExportPrompt(templatePath string, input article.GenerationInput, stru
 	var out bytes.Buffer
 	if err := tmpl.Execute(&out, exportPromptData{
 		Title:     input.Article.Title,
-		Keywords:  article.FormatKeywords(input.WordstatKeywords),
+		Keywords:  formatKeywords(input.WordstatKeywords),
 		LSIWords:  strings.Join(input.LSIWords, "\n"),
 		Structure: generation.HeadingsOnly(structure),
 		Facts:     exportFacts(input),

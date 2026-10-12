@@ -155,6 +155,17 @@ func prepareArticle(
 			DebugDir:   debugDirs.keysso,
 		}, logger)
 	}
+	var arsenkinService arsenkinCollector = withoutArsenkin{}
+	if !cfg.ArsenkinDisabled {
+		arsenkinService = arsenkin.New(arsenkin.Config{
+			ArticleID:  selected.ID,
+			ExternalID: selected.ExternalID,
+			Email:      cfg.ArsenkinEmail,
+			Password:   cfg.ArsenkinPassword,
+			Headless:   cfg.ArsenkinHeadless,
+			DebugDir:   debugDirs.arsenkin,
+		}, logger)
+	}
 	return prepareArticleWithCollectors(
 		ctx,
 		articleRepository,
@@ -163,14 +174,7 @@ func prepareArticle(
 		writer,
 		selected,
 		keyssoService,
-		arsenkin.New(arsenkin.Config{
-			ArticleID:  selected.ID,
-			ExternalID: selected.ExternalID,
-			Email:      cfg.ArsenkinEmail,
-			Password:   cfg.ArsenkinPassword,
-			Headless:   cfg.ArsenkinHeadless,
-			DebugDir:   debugDirs.arsenkin,
-		}, logger),
+		arsenkinService,
 		fallback,
 	)
 }
@@ -577,6 +581,22 @@ func collectFallbackKeywords(
 
 	return cleanRawKeywords(ctx, articleRepository, logger, artifacts, selected, trace,
 		keyssoService, report, stageStarted, diagnostics.KeywordSourceFallback, rawKeywords)
+}
+
+// arsenkinSkippedStructure stands in for the competitor structure when Arsenkin is off:
+// a non-empty competitor_structure is what marks research as prepared.
+const arsenkinSkippedStructure = "Arsenkin выключен в конфиге задачи (pipeline.arsenkin: false): структуры конкурентов нет."
+
+// withoutArsenkin stands in for Arsenkin when it is off: the queries come back without
+// frequencies, with no LSI words and no competitor structure.
+type withoutArsenkin struct{}
+
+func (withoutArsenkin) CollectResearch(_ context.Context, queries []string) (arsenkin.Result, error) {
+	keywords := make([]arsenkin.KeywordFrequency, len(queries))
+	for index, query := range queries {
+		keywords[index] = arsenkin.KeywordFrequency{Query: query}
+	}
+	return arsenkin.Result{WordstatKeywords: keywords, CompetitorStructure: arsenkinSkippedStructure}, nil
 }
 
 // errKeysSODisabled — Keys.so выключен в конфиге задачи. Это не отказ сервиса, а решение

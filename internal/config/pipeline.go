@@ -16,11 +16,13 @@ type PipelineConfig struct {
 	GoogleDocs bool `yaml:"google_docs"`
 	// KeysSO — собирать ли запросы конкурента через Keys.so; без него запросы подбирает модель.
 	KeysSO bool `yaml:"keysso"`
+	// Arsenkin — собирать ли частотность, LSI и структуру конкурентов; без него идут одни запросы.
+	Arsenkin bool `yaml:"arsenkin"`
 }
 
 // DefaultPipelineConfig — поведение задачи, которая секцию не объявила.
 func DefaultPipelineConfig() PipelineConfig {
-	return PipelineConfig{PublishAfterRun: false, GoogleDocs: true, KeysSO: true}
+	return PipelineConfig{PublishAfterRun: false, GoogleDocs: true, KeysSO: true, Arsenkin: true}
 }
 
 // LoadPipelineConfig читает секцию pipeline из конфига задачи.
