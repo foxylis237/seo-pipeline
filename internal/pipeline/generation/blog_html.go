@@ -418,7 +418,7 @@ func LinkSources(markup string) string {
 			if index+len(domain) < len(tail) && isDomainChar(tail[index+len(domain)]) {
 				continue
 			}
-			link := `<a href="https://` + domain + `/" rel="nofollow noindex noopener" target="_blank">` +
+			link := `<a href="https://` + domain + `/" rel="nofollow noopener" target="_blank">` +
 				tail[index:index+len(domain)] + `</a>`
 			tail = tail[:index] + link + tail[index+len(domain):]
 		}

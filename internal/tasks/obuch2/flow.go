@@ -293,6 +293,7 @@ func (f *Flow) RunHTML(ctx context.Context, externalID string) error {
 func (f *Flow) completeHTMLPage(logger *slog.Logger, page, markup string) string {
 	markup = generation.RestoreStatsTable(page,
 		generation.CleanPlainBlogMarkup(generation.DropHeading1(markup)))
+	markup = generation.KeepExternalLinks(markup, siteHost, externalLinkDomains)
 	// Лид ищется в тексте без строк-маркеров. Строка «ПЛАШКИ: …» длиннее вводных абзацев и
 	// сходит за первый абзац страницы — а вернуть её в разметку значит отправить в блог саму
 	// инструкцию вёрстке, текстом. В разметке её к этому моменту нет по построению: она уже

@@ -488,6 +488,7 @@ func (f *Flow) RunHTML(ctx context.Context, externalID string) error {
 func (f *Flow) completeHTMLPage(logger *slog.Logger, page, markup string) string {
 	markup = generation.LinkSources(generation.RestoreStatsList(page,
 		generation.CleanPlainBlogMarkup(generation.DropHeading1(markup))))
+	markup = generation.KeepExternalLinks(markup, siteHost, externalLinkDomains)
 	markup = taskflow.KeepLead(logger, StageHTML, page, markup)
 	taskflow.WarnLeftoverMarkers(logger, StageHTML, markup)
 	return markup

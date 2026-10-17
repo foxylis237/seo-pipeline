@@ -232,7 +232,7 @@ func (f *Flow) RunHTML(ctx context.Context, externalID string) error {
 	if err != nil {
 		return f.Fail(ctx, logger, input.Article, "html_generation", err)
 	}
-	html, added := appendCTAButton(generation.ScrollTables(html), button)
+	html, added := appendCTAButton(generation.KeepExternalLinks(generation.ScrollTables(html), siteHost, externalLinkDomains), button)
 	if !added {
 		logger.Warn("в разметке уже есть кнопка — свою не дописываем",
 			"stage", StageHTML, "cta_button_path", f.ctaButtonPath)

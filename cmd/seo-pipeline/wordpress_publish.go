@@ -358,7 +358,7 @@ func plainBodyImageBlock(media wordpress.UploadedMedia, alt, sourceURL string) s
 	// конкретный кадр из книги, а не на главную страницу — выдуманной атрибуции здесь нет.
 	return block + "\n" + fmt.Sprintf(
 		`<p class="wp-block-paragraph">Источник изображения: `+
-			`<a href="%s" target="_blank" rel="nofollow noopener noreferrer">%s</a>.</p>`,
+			`<a href="%s" target="_blank" rel="nofollow noopener">%s</a>.</p>`,
 		html.EscapeString(sourceURL), bodyImageStockName)
 }
 

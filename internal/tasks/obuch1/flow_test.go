@@ -168,7 +168,7 @@ func (p *recordingPublisher) PublishArticlePrompt(job generation.ArticlePromptJo
 
 // htmlWithLink — разметка с обязательной ссылкой перелинковки из входных данных фикстуры.
 const htmlWithLink = `<h2 class="wp-block-heading">Заголовок</h2>` +
-	`<p class="wp-block-paragraph">текст со ссылкой на <a href="https://example.test/logoped">логопеда</a></p>`
+	`<p class="wp-block-paragraph">текст со ссылкой на <a href="https://obuchim-specialista.ru/logoped">логопеда</a></p>`
 
 // ctaAnswer — ответ модели на доспрос строк карточки, в том виде, в каком он приходит: с
 // вступлением и нумерацией, которые разбор обязан пережить.
@@ -204,10 +204,10 @@ func newFlowFixture(t *testing.T) (*Flow, *fakeChats, *fakeRepository, *recordin
 			CompetitorStructure: "структура конкурента",
 			WordstatKeywords:    []article.KeywordFrequency{{Query: "логопед", Frequency: 100}},
 			LSIWords:            []string{"дефектолог"},
-			Links:               "https://example.test/logoped",
+			Links:               "https://obuchim-specialista.ru/logoped",
 			// Адрес курса приходит книгой импорта: кнопку призыва ставит код по нему, а не
 			// по ответу модели.
-			CourseURL: "https://example.test/logoped",
+			CourseURL: "https://obuchim-specialista.ru/logoped",
 		},
 	}
 	chats := &fakeChats{
@@ -315,7 +315,7 @@ func TestHTMLEndsWithCTACard(t *testing.T) {
 			t.Fatalf("в карточке нет строки модели %q:\n%s", want, html)
 		}
 	}
-	for _, want := range []string{`href="https://example.test/logoped"`, "Выбрать программу"} {
+	for _, want := range []string{`href="https://obuchim-specialista.ru/logoped"`, "Выбрать программу"} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("в кнопке нет ответа модели %q:\n%s", want, html)
 		}
@@ -326,7 +326,7 @@ func TestHTMLEndsWithCTACard(t *testing.T) {
 func TestHTMLKeepsSingleCTAButton(t *testing.T) {
 	flow, chats, repository, _ := newFlowFixture(t)
 	chats.queue[StageHTML] = []string{
-		htmlWithLink + `<p class="wp-block-paragraph"><a class="sp-cta-button" href="https://example.test/a">своя кнопка модели</a></p>`,
+		htmlWithLink + `<p class="wp-block-paragraph"><a class="sp-cta-button" href="https://obuchim-specialista.ru/a">своя кнопка модели</a></p>`,
 		ctaAnswer,
 	}
 
@@ -351,7 +351,7 @@ func TestHTMLFallsBackToDefaultCTAButton(t *testing.T) {
 		t.Fatalf("кнопка не собралась на умолчаниях:\n%s", html)
 	}
 	// Адрес умолчанием не заменяется: он пришёл книгой и к ответу модели отношения не имеет.
-	if !strings.Contains(html, `href="https://example.test/logoped"`) {
+	if !strings.Contains(html, `href="https://obuchim-specialista.ru/logoped"`) {
 		t.Fatalf("кнопка потеряла адрес курса из книги:\n%s", html)
 	}
 }
@@ -532,11 +532,11 @@ func TestEmptyCourseURLFailsBeforeModel(t *testing.T) {
 func TestCTAURLFromCatalogIsKept(t *testing.T) {
 	flow, chats, repository, _ := newFlowFixture(t)
 	chats.queue[StageHTML] = []string{htmlWithLink, ctaAnswer}
-	flow.UseProgramCatalog(&stubPrograms{known: map[string]bool{"https://example.test/logoped": true}})
+	flow.UseProgramCatalog(&stubPrograms{known: map[string]bool{"https://obuchim-specialista.ru/logoped": true}})
 
 	runToHTML(t, flow, repository)
 
-	if button := buttonMarkup(t, readArtifact(t, flow, repository.htmlPath)); !strings.Contains(button, "https://example.test/logoped") {
+	if button := buttonMarkup(t, readArtifact(t, flow, repository.htmlPath)); !strings.Contains(button, "https://obuchim-specialista.ru/logoped") {
 		t.Fatalf("адрес из каталога заменён разделом:\n%s", button)
 	}
 }
@@ -573,7 +573,7 @@ func TestCTAURLKeptWhenCatalogUnavailable(t *testing.T) {
 
 			runToHTML(t, flow, repository)
 
-			if button := buttonMarkup(t, readArtifact(t, flow, repository.htmlPath)); !strings.Contains(button, "https://example.test/logoped") {
+			if button := buttonMarkup(t, readArtifact(t, flow, repository.htmlPath)); !strings.Contains(button, "https://obuchim-specialista.ru/logoped") {
 				t.Fatalf("адрес заменён без ответа каталога:\n%s", button)
 			}
 		})

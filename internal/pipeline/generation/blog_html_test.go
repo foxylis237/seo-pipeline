@@ -289,7 +289,7 @@ func TestLinkSourcesBuildsNofollowLinks(t *testing.T) {
 		`<p>Источник: <a href="https://rosstat.gov.ru/" rel="nofollow noopener">rosstat.gov.ru</a></p>`
 	linked := LinkSources(markup)
 
-	if !strings.Contains(linked, `<a href="https://hh.ru/" rel="nofollow noindex noopener" target="_blank">hh.ru</a>`) {
+	if !strings.Contains(linked, `<a href="https://hh.ru/" rel="nofollow noopener" target="_blank">hh.ru</a>`) {
 		t.Fatalf("домен в хвосте абзаца не стал ссылкой: %s", linked)
 	}
 	if strings.Count(linked, "rosstat.gov.ru</a>") != 1 {
@@ -489,7 +489,7 @@ func TestScrollTablesWrapsEveryTableOnce(t *testing.T) {
 }
 
 func TestKeepExternalLinksLeavesOnlyAllowedSites(t *testing.T) {
-	markup := `<p>Источник: <a href="https://hh.ru/" rel="nofollow noindex noopener" target="_blank">hh.ru</a></p>` +
+	markup := `<p>Источник: <a href="https://hh.ru/" rel="nofollow noopener" target="_blank">hh.ru</a></p>` +
 		`<p>Источник: <a href="https://rosstat.gov.ru/" rel="nofollow">rosstat.gov.ru</a></p>` +
 		`<p>Фото: <a href="https://www.pexels.com/ru-ru/">Pexels</a></p>` +
 		`<p><a href="https://www.dpoprof.ru/obuchenie/svarshchik/">Сварщик</a> и <a href="/blog/">блог</a></p>`

@@ -699,7 +699,7 @@ func TestPlainBodyImageBlockPrintsSourceOnlyWhenKnown(t *testing.T) {
 		`class="wp-image-14546"`,
 		`alt="Мастер по ремонту кофемашин"`,
 		`<p class="wp-block-paragraph">`,
-		`rel="nofollow noopener noreferrer"`,
+		`rel="nofollow noopener"`,
 		`Источник изображения: `,
 		`>Pexels</a>`,
 	} {
