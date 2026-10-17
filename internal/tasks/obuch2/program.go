@@ -106,30 +106,26 @@ func programSection(markup string) (start, end int, ok bool) {
 	return start, end, true
 }
 
-// moduleLeadRE — жирный зачин строки модуля вместе с тегами, чтобы править только его.
-var moduleLeadRE = regexp.MustCompile(`(?s)(<li[^>]*>\s*<strong[^>]*>)(.*?)(</strong>)`)
-
-// moduleLeadHoursRE — часы в зачине: «… — 18 часов.» Точка после часов остаётся концом зачина.
-var moduleLeadHoursRE = regexp.MustCompile(`\s*[—–-]\s*\d+\s*(?:ак\.?\s*)?час[а-яё]*(\.?)\s*$`)
-
-// StripModuleHours убирает часы из зачинов строк программы в теле страницы.
+// StripProgramSection removes the module section, heading included, from the post body.
 //
-// Часы модулей живут в полях записи (prog_moduli_N_chasy), и аккордеон площадки печатает их
-// сам; в тексте они стояли дважды. Решение владельца 28.09.2026: в теле — тема и краткое
-// описание, часы — только в полях. Модель пишет их по-прежнему — ParseModules берёт часы
-// отсюда, — поэтому снимаются они уже после разбора, в том теле, что уходит в блог.
-// Сохранённая разметка страницы остаётся с часами: по ней программа разбирается повторно.
-func StripModuleHours(markup string) string {
-	start, end, ok := programSection(markup)
-	if !ok {
-		return markup
+// The program lives only in the accordion (prog_moduli_* fields). The stored markup keeps the
+// section: ParseModules reads it from there. Only a section whose list starts with «Модуль» is
+// removed, so the audience section named «…программа» never goes.
+func StripProgramSection(markup string) string {
+	for _, heading := range programHeadingRE.FindAllStringIndex(markup, -1) {
+		from, to := heading[1], len(markup)
+		if next := programNextH2RE.FindStringIndex(markup[from:]); next != nil {
+			to = from + next[0]
+		}
+		list := programListRE.FindStringSubmatch(markup[from:to])
+		if len(list) < 2 {
+			continue
+		}
+		if item := programItemRE.FindStringSubmatch(list[1]); item != nil && moduleNumberRE.MatchString(plainText(item[1])) {
+			return markup[:heading[0]] + markup[to:]
+		}
 	}
-	section := moduleLeadRE.ReplaceAllStringFunc(markup[start:end], func(item string) string {
-		parts := moduleLeadRE.FindStringSubmatch(item)
-		lead := moduleLeadHoursRE.ReplaceAllString(parts[2], "$1")
-		return parts[1] + lead + parts[3]
-	})
-	return markup[:start] + section + markup[end:]
+	return markup
 }
 
 // TotalHours — сумма часов модулей. Ноль означает, что часов нет ни у одного: у страницы без

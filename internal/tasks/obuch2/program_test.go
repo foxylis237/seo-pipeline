@@ -105,18 +105,24 @@ func TestProgramPresetsMatchMeasuredPages(t *testing.T) {
 	}
 }
 
-func TestStripModuleHoursLeavesTopicAndDescription(t *testing.T) {
-	markup := `<h2>Программа обучения</h2><ol class="wp-block-list"><li><strong>Модуль 1. Устройство крана — 16 часов.</strong> Механизмы и тормоза.</li>` +
-		`<li><strong style="display:block">Модуль 2. Итоговая аттестация — 4 часа.</strong><span>Экзамен.</span></li></ol>` +
-		`<h2>Доход</h2><p><strong>Итог — 150 часов.</strong></p>`
-	got := StripModuleHours(markup)
-	for _, want := range []string{"<strong>Модуль 1. Устройство крана.</strong> Механизмы и тормоза.", `<strong style="display:block">Модуль 2. Итоговая аттестация.</strong>`, "<strong>Итог — 150 часов.</strong>"} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("StripModuleHours() lost %q in:\n%s", want, got)
-		}
+func TestStripProgramSectionRemovesModulesOnly(t *testing.T) {
+	markup := `<h2>Кому подойдёт эта программа</h2><h3>Водителям</h3><p>Допуск.</p>` +
+		`<h2 class="wp-block-heading">Программа обучения</h2><p>Вступление.</p><ol class="wp-block-list"><li><strong>Модуль 1. Устройство крана — 16 часов.</strong> Механизмы и тормоза.</li></ol>` +
+		`<h2>Доход</h2><p>Текст.</p>`
+	got := StripProgramSection(markup)
+	want := `<h2>Кому подойдёт эта программа</h2><h3>Водителям</h3><p>Допуск.</p><h2>Доход</h2><p>Текст.</p>`
+	if got != want {
+		t.Fatalf("StripProgramSection() =\n%s\nwant\n%s", got, want)
 	}
-	if modules := ParseModules(markup); len(modules) != 2 || modules[0].Hours != "16" {
-		t.Fatalf("ParseModules on the stored markup = %+v, hours must still be there", modules)
+	if modules := ParseModules(markup); len(modules) != 1 || modules[0].Hours != "16" {
+		t.Fatalf("ParseModules on the stored markup = %+v", modules)
+	}
+}
+
+func TestStripProgramSectionKeepsPageWithoutModules(t *testing.T) {
+	markup := `<h2>Кому подойдёт эта программа</h2><ul><li><strong>Новичкам.</strong> Без опыта.</li></ul><h2>Доход</h2>`
+	if got := StripProgramSection(markup); got != markup {
+		t.Fatalf("StripProgramSection() changed a page without modules: %s", got)
 	}
 }
 
@@ -130,7 +136,7 @@ func TestParseModulesSkipsAudienceSectionNamedProgram(t *testing.T) {
 	if len(modules) != 1 || modules[0].Topic != "Материаловедение" || modules[0].Hours != "6" {
 		t.Fatalf("modules parsed from the wrong section: %+v", modules)
 	}
-	if stripped := StripModuleHours(markup); !strings.Contains(stripped, "Материаловедение.</strong>") {
-		t.Fatalf("hours were not stripped from the module section: %s", stripped)
+	if stripped := StripProgramSection(markup); strings.Contains(stripped, "Материаловедение") || !strings.Contains(stripped, "Новичкам") {
+		t.Fatalf("wrong section stripped: %s", stripped)
 	}
 }

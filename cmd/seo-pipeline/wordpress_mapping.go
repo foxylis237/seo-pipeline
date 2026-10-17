@@ -742,8 +742,8 @@ func (m plainServiceWordPressMapping) Build(
 		// и плашкой параметров, а не в середине.
 		BodyImageBeforeFirstHeading: true,
 		BodyImageSourceURL:          strings.TrimSpace(input.ImageSourceURL),
-		// Часы модулей уходят полями программы выше, а в теле остаются тема и описание.
-		Body: obuch2.StripModuleHours,
+		// Программа уходит полями выше и в теле не повторяется.
+		Body: obuch2.StripProgramSection,
 	}, nil
 }
 

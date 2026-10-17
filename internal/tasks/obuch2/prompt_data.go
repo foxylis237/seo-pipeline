@@ -11,14 +11,14 @@ import (
 
 // structureData — поля structure.txt.
 //
-// Скелет страницы в полях не участвует: он зашит в сам промпт. Чат 1 заполняет в нём три
-// вещи — формулировки заголовков, список модулей и портреты аудитории, — и для этого ему
-// нужны только название страницы и структура конкурентов.
+// Скелет страницы зашит в сам промпт. Запросы нужны чату 1 для заголовка раздела о
+// профессии: он берётся из частых запросов, а не из скелета.
 func structureData(input article.GenerationInput) any {
 	return struct {
 		Title     string
 		Structure string
-	}{input.Article.Title, input.CompetitorStructure}
+		Keywords  string
+	}{input.Article.Title, input.CompetitorStructure, formatKeywords(input.WordstatKeywords)}
 }
 
 // articleData — поля основного промпта article.txt.
