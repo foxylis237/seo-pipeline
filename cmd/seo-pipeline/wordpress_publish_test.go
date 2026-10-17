@@ -414,7 +414,7 @@ func TestPublishSendsCompletePayload(t *testing.T) {
 		`<img class="alignnone size-full wp-image-21610"`,
 		`src="https://example.test/wp-content/uploads/2026/08/razryady-gazosvarshchikov.webp"`,
 		`alt="Разряды газосварщиков: какие бывают"`,
-		`Источник изображения: <a href="https://www.pexels.com/ru-ru/" target="_blank" rel="nofollow noindex noopener">Pexels</a>.`,
+		`Источник изображения: <a href="https://www.pexels.com/ru-ru/" target="_blank" rel="nofollow noopener">Pexels</a>.`,
 	} {
 		if !strings.Contains(payload.ContentHTML, want) {
 			t.Fatalf("в теле записи нет %q: %q", want, payload.ContentHTML)

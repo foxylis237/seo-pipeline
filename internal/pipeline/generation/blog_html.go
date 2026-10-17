@@ -3,6 +3,7 @@ package generation
 import (
 	"fmt"
 	"html"
+	"net/url"
 	"regexp"
 	"strings"
 )
@@ -423,6 +424,38 @@ func LinkSources(markup string) string {
 		}
 		return tail
 	})
+}
+
+// KeepExternalLinks keeps external links only to the allowed domains (subdomains included) and
+// gives them rel="nofollow noopener" target="_blank"; any other external link is unwrapped to its
+// text. Relative links and links to siteHost are internal and stay as they are.
+func KeepExternalLinks(markup, siteHost string, allowed []string) string {
+	return anchorRE.ReplaceAllStringFunc(markup, func(anchor string) string {
+		match := anchorRE.FindStringSubmatch(anchor)
+		if len(match) < 3 {
+			return anchor
+		}
+		parsed, err := url.Parse(html.UnescapeString(strings.TrimSpace(match[1])))
+		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+			return anchor
+		}
+		host := strings.ToLower(parsed.Hostname())
+		if hostWithin(host, siteHost) {
+			return anchor
+		}
+		for _, domain := range allowed {
+			if hostWithin(host, domain) {
+				return `<a href="` + match[1] + `" rel="nofollow noopener" target="_blank">` + match[2] + `</a>`
+			}
+		}
+		return match[2]
+	})
+}
+
+// hostWithin reports whether host is domain or its subdomain.
+func hostWithin(host, domain string) bool {
+	domain = strings.ToLower(domain)
+	return host == domain || strings.HasSuffix(host, "."+domain)
 }
 
 // isDomainChar сообщает, продолжается ли доменное имя этим байтом.

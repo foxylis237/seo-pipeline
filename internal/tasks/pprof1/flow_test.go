@@ -151,8 +151,8 @@ func newFlowFixture(t *testing.T) (*Flow, *fakeChats, *fakeRepository, *recordin
 			WordstatKeywords:    []article.KeywordFrequency{{Query: "логопед", Frequency: 100}},
 			LSIWords:            []string{"дефектолог"},
 			Professions:         "логопед, дефектолог, педагог",
-			Links:               "https://example.test/logoped",
-			CourseURL:           "https://example.test/course",
+			Links:               "https://dpoprof.ru/logoped",
+			CourseURL:           "https://dpoprof.ru/course",
 		},
 	}
 	chats := &fakeChats{answers: map[string]string{
@@ -169,7 +169,7 @@ func newFlowFixture(t *testing.T) (*Flow, *fakeChats, *fakeRepository, *recordin
 const testCTACardPath = "../../../tasks/pprof_1/templates/cta_card.html"
 
 // htmlWithLink — разметка с обязательной ссылкой перелинковки из входных данных фикстуры.
-const htmlWithLink = `<h2>Заголовок</h2><p>текст со ссылкой на <a href="https://example.test/logoped">логопеда</a></p>`
+const htmlWithLink = `<h2>Заголовок</h2><p>текст со ссылкой на <a href="https://dpoprof.ru/logoped">логопеда</a></p>`
 
 // Границы чатов — главный контракт потока: три чата, и сообщения распределены по ним так,
 // как описан порядок стадий pprof_1.
@@ -334,11 +334,11 @@ func TestFlowMovesArticleThroughKnownSteps(t *testing.T) {
 // строки код не пишет.
 func TestHTMLStageAsksModelForMissingLinks(t *testing.T) {
 	flow, chats, repository, _, writer := newFlowFixture(t)
-	repository.input.Links = "Обучение на логопеда — https://example.test/logoped"
-	sentence := `Этому учат на программе <a href="https://example.test/logoped">Обучение на логопеда</a>.`
+	repository.input.Links = "Обучение на логопеда — https://dpoprof.ru/logoped"
+	sentence := `Этому учат на программе <a href="https://dpoprof.ru/logoped">Обучение на логопеда</a>.`
 	chats.queue = map[string][]string{StageHTML: {
 		"<h2>Заголовок</h2>\n<p>текст без перелинковки</p>\n<h2>Второй раздел</h2>\n<p>ещё текст.</p>",
-		"https://example.test/logoped ;; Второй раздел ;; " + sentence,
+		"https://dpoprof.ru/logoped ;; Второй раздел ;; " + sentence,
 	}}
 	ctx := context.Background()
 
@@ -371,10 +371,10 @@ func TestHTMLStageAsksModelForMissingLinks(t *testing.T) {
 // От трёх ссылок в тексте недостающие не доспрашиваются и код их не дописывает.
 func TestHTMLStageSkipsLinkRepairWithThreeLinks(t *testing.T) {
 	flow, chats, repository, _, writer := newFlowFixture(t)
-	repository.input.Links = "https://example.test/a\nhttps://example.test/b\nhttps://example.test/c\nОбучение на логопеда — https://example.test/logoped"
-	chats.answers[StageHTML] = `<h2>Один</h2><p>про <a href="https://example.test/a">a</a></p>` +
-		`<h2>Два</h2><p>про <a href="https://example.test/b">b</a></p>` +
-		`<h2>Три</h2><p>про <a href="https://example.test/c">c</a></p>` +
+	repository.input.Links = "https://dpoprof.ru/a\nhttps://dpoprof.ru/b\nhttps://dpoprof.ru/c\nОбучение на логопеда — https://dpoprof.ru/logoped"
+	chats.answers[StageHTML] = `<h2>Один</h2><p>про <a href="https://dpoprof.ru/a">a</a></p>` +
+		`<h2>Два</h2><p>про <a href="https://dpoprof.ru/b">b</a></p>` +
+		`<h2>Три</h2><p>про <a href="https://dpoprof.ru/c">c</a></p>` +
 		`<h2>Четыре</h2><p>без ссылки</p>`
 	ctx := context.Background()
 
@@ -396,7 +396,7 @@ func TestHTMLStageSkipsLinkRepairWithThreeLinks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("разметка не читается: %v", err)
 	}
-	if strings.Contains(saved, "https://example.test/logoped") {
+	if strings.Contains(saved, "https://dpoprof.ru/logoped") {
 		t.Fatalf("недостающую ссылку дописал код: %q", saved)
 	}
 }
@@ -507,11 +507,11 @@ func TestHTMLPromptCarriesProgramNames(t *testing.T) {
 	writer := articleoutput.NewWriter(t.TempDir())
 	repository := &fakeRepository{input: article.GenerationInput{
 		Article:   article.Article{ID: 7, ExternalID: "7", Title: "Как стать логопедом", Slug: "kak-stat-logopedom"},
-		Links:     "https://example.test/logoped",
-		CourseURL: "https://example.test/course",
+		Links:     "https://dpoprof.ru/logoped",
+		CourseURL: "https://dpoprof.ru/course",
 	}}
 	renderer := &recordingRenderer{}
-	names := &fakeNames{names: map[string]string{"https://example.test/logoped": "Дистанционное обучение на логопеда"}}
+	names := &fakeNames{names: map[string]string{"https://dpoprof.ru/logoped": "Дистанционное обучение на логопеда"}}
 	flow := NewFlow(repository, writer, &fakeChats{answers: map[string]string{StageHTML: htmlWithLink}},
 		renderer, nil, nil, names)
 	flow.ctaCardPath = testCTACardPath
@@ -529,10 +529,10 @@ func TestHTMLPromptCarriesProgramNames(t *testing.T) {
 	if err := flow.RunHTML(context.Background(), "7"); err != nil {
 		t.Fatalf("html: %v", err)
 	}
-	if len(names.asked) != 1 || names.asked[0] != "https://example.test/logoped" {
+	if len(names.asked) != 1 || names.asked[0] != "https://dpoprof.ru/logoped" {
 		t.Fatalf("название спрошено не по тому адресу: %v", names.asked)
 	}
-	if !strings.Contains(renderer.data, "Дистанционное обучение на логопеда — https://example.test/logoped") {
+	if !strings.Contains(renderer.data, "Дистанционное обучение на логопеда — https://dpoprof.ru/logoped") {
 		t.Fatalf("в промпт не ушло название программы: %q", renderer.data)
 	}
 }
@@ -542,8 +542,8 @@ func TestHTMLPromptKeepsLinkWhenSiteFails(t *testing.T) {
 	writer := articleoutput.NewWriter(t.TempDir())
 	repository := &fakeRepository{input: article.GenerationInput{
 		Article:   article.Article{ID: 7, ExternalID: "7", Title: "Как стать логопедом", Slug: "kak-stat-logopedom"},
-		Links:     "https://example.test/logoped",
-		CourseURL: "https://example.test/course",
+		Links:     "https://dpoprof.ru/logoped",
+		CourseURL: "https://dpoprof.ru/course",
 	}}
 	renderer := &recordingRenderer{}
 	names := &fakeNames{err: fmt.Errorf("страница ответила 503")}
@@ -563,7 +563,7 @@ func TestHTMLPromptKeepsLinkWhenSiteFails(t *testing.T) {
 	if err := flow.RunHTML(context.Background(), "7"); err != nil {
 		t.Fatalf("отказ сайта уронил стадию: %v", err)
 	}
-	if !strings.Contains(renderer.data, "https://example.test/logoped") {
+	if !strings.Contains(renderer.data, "https://dpoprof.ru/logoped") {
 		t.Fatalf("ссылка не дошла до промпта: %q", renderer.data)
 	}
 }

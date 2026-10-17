@@ -397,6 +397,12 @@ func (f *Flow) RunHTML(ctx context.Context, externalID string) error {
 	return nil
 }
 
+const siteHost = "dpoprof.ru"
+
+// externalLinkDomains — the only sites an article may link to: the salary source and the stock
+// the cover comes from. Every other external link loses its tag and keeps its text.
+var externalLinkDomains = []string{"hh.ru", "pexels.com"}
+
 // completeHTMLPage доводит разметку до требований страницы блога.
 //
 // Правило здесь одно: чинить, но не отказывать. Ни одна из проверок не имеет права уронить
@@ -409,6 +415,7 @@ func (f *Flow) RunHTML(ctx context.Context, externalID string) error {
 // Перелинковкой занимается CompleteLinks.
 func (f *Flow) completeHTMLPage(logger *slog.Logger, page, markup string) string {
 	markup = generation.LinkSources(generation.RestoreStats(page, generation.CleanBlogMarkup(generation.DropHeading1(markup))))
+	markup = generation.KeepExternalLinks(markup, siteHost, externalLinkDomains)
 	markup = taskflow.KeepLead(logger, StageHTML, page, markup)
 	if cut, dropped := dropFAQSection(markup); dropped {
 		markup = cut

@@ -487,3 +487,23 @@ func TestScrollTablesWrapsEveryTableOnce(t *testing.T) {
 		t.Fatalf("second pass changed markup:\n%s", again)
 	}
 }
+
+func TestKeepExternalLinksLeavesOnlyAllowedSites(t *testing.T) {
+	markup := `<p>Источник: <a href="https://hh.ru/" rel="nofollow noindex noopener" target="_blank">hh.ru</a></p>` +
+		`<p>Источник: <a href="https://rosstat.gov.ru/" rel="nofollow">rosstat.gov.ru</a></p>` +
+		`<p>Фото: <a href="https://www.pexels.com/ru-ru/">Pexels</a></p>` +
+		`<p><a href="https://www.dpoprof.ru/obuchenie/svarshchik/">Сварщик</a> и <a href="/blog/">блог</a></p>`
+	kept := KeepExternalLinks(markup, "dpoprof.ru", []string{"hh.ru", "pexels.com"})
+
+	for _, want := range []string{
+		`<a href="https://hh.ru/" rel="nofollow noopener" target="_blank">hh.ru</a>`,
+		`<p>Источник: rosstat.gov.ru</p>`,
+		`<a href="https://www.pexels.com/ru-ru/" rel="nofollow noopener" target="_blank">Pexels</a>`,
+		`<a href="https://www.dpoprof.ru/obuchenie/svarshchik/">Сварщик</a>`,
+		`<a href="/blog/">блог</a>`,
+	} {
+		if !strings.Contains(kept, want) {
+			t.Fatalf("нет %q в %s", want, kept)
+		}
+	}
+}

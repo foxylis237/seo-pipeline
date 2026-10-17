@@ -65,7 +65,7 @@ func TestHTMLStageAppendsCTACard(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		`class="sp-cta-card"`, `href="https://example.test/course"`, "Профессиональное обучение",
+		`class="sp-cta-card"`, `href="https://dpoprof.ru/course"`, "Профессиональное обучение",
 		"Станьте логопедом &lt;за 3 месяца&gt;", "Документ установленного образца",
 		"Сведения вносятся в ФИС ФРДО", "Записаться на обучение",
 	} {
@@ -91,11 +91,11 @@ func TestAppendCTACardSkipsExistingButton(t *testing.T) {
 
 // Пустой ответ модели карточку не отменяет: она собирается на умолчаниях.
 func TestBuildCTACardFallsBackToDefaults(t *testing.T) {
-	card, missing := buildCTACard(parseCTASlots("не понял задачу"), "https://example.test/course")
+	card, missing := buildCTACard(parseCTASlots("не понял задачу"), "https://dpoprof.ru/course")
 	if len(missing) != 5 {
 		t.Fatalf("умолчаниями заменено %v, ожидалось пять слотов", missing)
 	}
-	if card.Heading == "" || card.ButtonURL != "https://example.test/course" {
+	if card.Heading == "" || card.ButtonURL != "https://dpoprof.ru/course" {
 		t.Fatalf("карточка на умолчаниях собрана неверно: %+v", card)
 	}
 }

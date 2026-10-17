@@ -303,7 +303,7 @@ func bodyImageBlock(media wordpress.UploadedMedia, alt string) string {
 	}
 	return fmt.Sprintf(
 		`<img class="alignnone size-full wp-image-%d" src="%s" alt="%s" />`+"\n"+
-			`<p>Источник изображения: <a href="%s" target="_blank" rel="nofollow noindex noopener">%s</a>.</p>`,
+			`<p>Источник изображения: <a href="%s" target="_blank" rel="nofollow noopener">%s</a>.</p>`,
 		media.AttachmentID, html.EscapeString(media.URL), html.EscapeString(alt),
 		bodyImageStockURL, bodyImageStockName)
 }
